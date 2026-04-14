@@ -1,4 +1,3 @@
-
 /* ===== VARIABLES - PALETA PROFESIONAL CELESTE, BLANCO Y NEGRO ===== */
 :root {
     /* Paleta principal - tonos teal */
@@ -795,6 +794,12 @@ img {
     -o-user-drag: none;
     user-drag: none;
     pointer-events: none;
+}
+
+/* Imágenes dentro de explicaciones: habilitamos clicks para el lightbox */
+.explicacion-contenedor img {
+    pointer-events: auto;
+    cursor: zoom-in;
 }
 
 /* ===== TEMPORIZADOR DEL SIMULACRO ===== */
