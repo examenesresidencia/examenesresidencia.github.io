@@ -1,4 +1,3 @@
-
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -27,46 +26,75 @@
           position: fixed;
           inset: 0;
           z-index: 999999;
-          background: rgba(5,10,20,0.92);
-          backdrop-filter: blur(8px);
+          background: rgba(5,10,20,0.94);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
           display: flex;
           align-items: center;
           justify-content: center;
-          animation: lbFadeIn 0.2s ease both;
+          animation: lbFadeIn 0.18s ease both;
           cursor: zoom-out;
+          user-select: none;
         }
         @keyframes lbFadeIn { from{opacity:0} to{opacity:1} }
+
         #lightbox-img-close {
           position: fixed;
-          top: 18px;
-          right: 22px;
-          width: 40px;
-          height: 40px;
+          top: 16px;
+          right: 18px;
+          width: 42px;
+          height: 42px;
           border-radius: 50%;
-          background: rgba(255,255,255,0.12);
-          border: 1.5px solid rgba(255,255,255,0.25);
+          background: rgba(255,255,255,0.15);
+          border: 1.5px solid rgba(255,255,255,0.3);
           color: #fff;
-          font-size: 1.3rem;
+          font-size: 1.2rem;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 1000000;
-          transition: background 0.15s;
+          transition: background 0.15s, transform 0.15s;
           line-height: 1;
+          backdrop-filter: blur(4px);
         }
-        #lightbox-img-close:hover { background: rgba(255,255,255,0.25); }
+        #lightbox-img-close:hover {
+          background: rgba(255,255,255,0.28);
+          transform: scale(1.1);
+        }
+
+        #lightbox-img-hint {
+          position: fixed;
+          bottom: 18px;
+          left: 50%;
+          transform: translateX(-50%);
+          color: rgba(255,255,255,0.45);
+          font-size: 0.75rem;
+          pointer-events: none;
+          z-index: 1000000;
+          letter-spacing: 0.02em;
+          white-space: nowrap;
+        }
+
         #lightbox-img-overlay img {
           max-width: 92vw;
           max-height: 88vh;
           object-fit: contain;
           border-radius: 10px;
-          box-shadow: 0 30px 80px rgba(0,0,0,0.7);
-          animation: lbImgIn 0.25s cubic-bezier(0.34,1.2,0.64,1) both;
+          box-shadow: 0 30px 90px rgba(0,0,0,0.8);
+          animation: lbImgIn 0.22s cubic-bezier(0.34,1.2,0.64,1) both;
           cursor: default;
           user-select: none;
+          transition: transform 0.15s ease;
         }
-        @keyframes lbImgIn { from{opacity:0;transform:scale(0.88)} to{opacity:1;transform:scale(1)} }
+        @keyframes lbImgIn {
+          from { opacity:0; transform:scale(0.86) }
+          to   { opacity:1; transform:scale(1) }
+        }
+
+        /* Cursor cuando la imagen puede hacer zoom */
+        #lightbox-img-overlay img.lb-zoom-in  { cursor: zoom-in;  }
+        #lightbox-img-overlay img.lb-zoom-out { cursor: zoom-out; }
       `;
       document.head.appendChild(st);
     }
@@ -82,22 +110,70 @@
     btnClose.innerHTML = '✕';
     btnClose.title = 'Cerrar (ESC)';
 
+    const hint = document.createElement('div');
+    hint.id = 'lightbox-img-hint';
+    hint.textContent = 'ESC o clic afuera para cerrar · Rueda para hacer zoom';
+
     const img = document.createElement('img');
     img.src = src;
     img.alt = 'Imagen ampliada';
+    img.className = 'lb-zoom-in';
 
-    function cerrar() { overlay.remove(); }
+    // ── Zoom con rueda del mouse ──
+    let scale = 1;
+    const SCALE_MIN = 1;
+    const SCALE_MAX = 4;
+    img.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const delta = e.deltaY < 0 ? 0.2 : -0.2;
+      scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, scale + delta));
+      img.style.transform = scale > 1 ? `scale(${scale})` : '';
+      img.className = scale >= SCALE_MAX ? 'lb-zoom-out' : 'lb-zoom-in';
+    }, { passive: false });
 
-    btnClose.addEventListener('click', cerrar);
-    overlay.addEventListener('click', e => { if (e.target === overlay) cerrar(); });
-    img.addEventListener('click', e => e.stopPropagation());
+    // Doble clic para zoom rápido
+    img.addEventListener('dblclick', function(e) {
+      e.stopPropagation();
+      if (scale > 1) {
+        scale = 1;
+        img.style.transform = '';
+        img.className = 'lb-zoom-in';
+      } else {
+        scale = 2;
+        img.style.transform = 'scale(2)';
+        img.className = 'lb-zoom-out';
+      }
+    });
 
-    document.addEventListener('keydown', function onKey(e) {
-      if (e.key === 'Escape') { cerrar(); document.removeEventListener('keydown', onKey); }
+    function cerrar() {
+      overlay.style.animation = 'lbFadeIn 0.15s ease reverse both';
+      setTimeout(() => overlay.remove(), 140);
+    }
+
+    btnClose.addEventListener('click', function(e) { e.stopPropagation(); cerrar(); });
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) cerrar();
+    });
+    img.addEventListener('click', function(e) { e.stopPropagation(); });
+
+    // Cerrar con ESC
+    function onKey(e) {
+      if (e.key === 'Escape') {
+        cerrar();
+        document.removeEventListener('keydown', onKey);
+      }
+    }
+    document.addEventListener('keydown', onKey);
+
+    // Limpiar listener al cerrar manualmente
+    overlay.addEventListener('remove', function() {
+      document.removeEventListener('keydown', onKey);
     });
 
     overlay.appendChild(btnClose);
     overlay.appendChild(img);
+    overlay.appendChild(hint);
     document.body.appendChild(overlay);
   }
   window.abrirLightboxImagen = abrirLightboxImagen;
@@ -105,12 +181,22 @@
   // Listener global en fase de CAPTURA para imágenes en explicaciones
   // useCapture=true garantiza que se ejecuta ANTES que cualquier otro handler
   document.addEventListener('click', function(e) {
-    const img = e.target.closest
-      ? e.target.closest('img')
-      : (e.target.tagName === 'IMG' ? e.target : null);
-    if (!img) return;
-    // Solo imágenes dentro de .explicacion-contenedor
-    if (!img.closest('.explicacion-contenedor')) return;
+    // Obtener la imagen clickeada (puede ser el target directo o un ancestro img)
+    let img = null;
+    if (e.target.tagName === 'IMG') {
+      img = e.target;
+    } else if (e.target.closest && e.target.closest('img')) {
+      img = e.target.closest('img');
+    }
+    if (!img || !img.src) return;
+
+    // Activar lightbox si la imagen está dentro de .explicacion-contenedor
+    // O si tiene el atributo title de ampliar (imágenes de explicación creadas dinámicamente)
+    const enExplicacion = img.closest('.explicacion-contenedor');
+    const esDeExplicacion = img.title === 'Clic para ampliar' || img.getAttribute('data-lightbox') === '1';
+
+    if (!enExplicacion && !esDeExplicacion) return;
+
     e.stopPropagation();
     e.preventDefault();
     abrirLightboxImagen(img.src);
@@ -2171,6 +2257,7 @@
               img.style.border     = '1px solid #bae6fd';
               img.style.cursor     = 'pointer';
               img.title            = 'Clic para ampliar';
+              img.setAttribute('data-lightbox', '1');
               img.removeAttribute('onclick');
               img.addEventListener('click', function(e) {
                 e.stopPropagation();
@@ -2233,6 +2320,7 @@
           imgExp.style.zIndex = "1";
           imgExp.style.borderRadius = "8px";
           imgExp.title = "Clic para ampliar";
+          imgExp.setAttribute('data-lightbox', '1');
           imgExp.addEventListener('click', function(e) {
             e.stopPropagation();
             if (window.abrirLightboxImagen) window.abrirLightboxImagen(this.src);
@@ -4168,12 +4256,14 @@
         border-radius: 8px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.12);
         margin: 12px 0;
-        cursor: pointer;
+        cursor: zoom-in;
         box-sizing: border-box;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
       }
       .explicacion-contenedor img:hover {
-        box-shadow: 0 4px 16px rgba(13,116,144,0.22);
-        opacity: 0.95;
+        box-shadow: 0 6px 22px rgba(13,116,144,0.35);
+        transform: scale(1.015);
+        opacity: 0.93;
       }
       /* Párrafos dentro de la explicación */
       .explicacion-contenedor p { margin: 0 0 0.6em 0; }
