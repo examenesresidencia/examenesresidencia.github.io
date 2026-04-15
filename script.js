@@ -1,4 +1,4 @@
-//PRUEB 42 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 43 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -290,11 +290,13 @@
   }
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    // Sincronizar con Firestore cuando cambia el progreso (debounce 2s)
+    // Sincronizar con Firestore cuando cambia el progreso (debounce 1.5s)
+    // No disparar si estamos procesando una sincronización entrante desde la nube
     if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
+      if (window._fbSyncInProgress) return; // evitar eco de sync entrante
       clearTimeout(window._fbSaveTimer);
       window._fbSaveTimer = setTimeout(() => {
-        window._fbSaveTimer = null; // limpiar ANTES de guardar para que el listener no lo ignore
+        window._fbSaveTimer = null;
         if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
       }, 1500);
     }
@@ -7019,9 +7021,15 @@
 
   async function fbLogout() {
     // Cancelar listener de progreso en tiempo real antes de cerrar sesión
-    if (_fbProgressUnsubscribe) {
+    // _fbProgressUnsubscribe es la variable del scope externo usada por fbSyncProgressFromCloud
+    if (typeof _fbProgressUnsubscribe !== 'undefined' && _fbProgressUnsubscribe) {
       _fbProgressUnsubscribe();
       _fbProgressUnsubscribe = null;
+    }
+    // También cancelar si hubiera una referencia local (compatibilidad)
+    if (_progressUnsubscribe) {
+      _progressUnsubscribe();
+      _progressUnsubscribe = null;
     }
     const { fbSignOut } = window.__fb;
     await fbSignOut(_fbAuth);
@@ -7245,7 +7253,9 @@ async function fbSyncProgressFromCloud() {
             attemptLog = data.attemptLog || [];
             localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
             localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-            window._fbCloudUpdatedAt = data.updatedAt?.toMillis?.() || 0;
+            // Sólo registrar timestamp si ya llegó del servidor (no null)
+            const ts = data.updatedAt?.toMillis?.() || 0;
+            window._fbCloudUpdatedAt = ts;
             fbToast('☁️ Progreso cargado desde la nube', 'success');
           } else {
             fbToast('☁️ Sin progreso guardado aún', 'info');
@@ -7265,17 +7275,22 @@ async function fbSyncProgressFromCloud() {
   // Listener permanente para tiempo real
   _fbProgressUnsubscribe = onSnapshot(
     doc(_fbDb, 'progress', uid),
-    { includeMetadataChanges: false },
+    { includeMetadataChanges: true },
     (snap) => {
+      // Ignorar escrituras pendientes locales (eco de nuestra propia escritura)
+      if (snap.metadata.hasPendingWrites) return;
+      // Ignorar si nosotros acabamos de guardar (bandera de 500ms)
       if (window._fbSyncInProgress) return;
       if (!snap.exists()) return;
       const data = snap.data();
       if (!data.state) return;
 
       const snapTs = data.updatedAt?.toMillis?.() || 0;
-      if (snapTs <= (window._fbCloudUpdatedAt || 0)) return;
+      // Aceptar actualizaciones del servidor aunque snapTs sea 0
+      // (puede ser 0 si el timestamp aún no llegó, pero fromCache=false garantiza que es del servidor)
+      if (!snap.metadata.fromCache && snapTs > 0 && snapTs <= (window._fbCloudUpdatedAt || 0)) return;
 
-      window._fbCloudUpdatedAt = snapTs;
+      if (snapTs > 0) window._fbCloudUpdatedAt = snapTs;
       state      = data.state;
       attemptLog = data.attemptLog || [];
       localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
@@ -7296,30 +7311,6 @@ async function fbSyncProgressFromCloud() {
     (e) => fbToast('⚠️ Error en listener: ' + e.code, 'error')
   );
 }
-
-function fbSaveProgressToCloud() {
-  if (!_currentUser || !_fbDb || !window.__fb) return;
-  if (window._fbSyncInProgress) return;
-
-  const { doc, setDoc, serverTimestamp } = window.__fb;
-
-  window._fbSyncInProgress = true;
-  setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
-    state,
-    attemptLog,
-    updatedAt: serverTimestamp()
-  })
-  .then(() => {
-    fbToast('💾 Guardado en la nube', 'success');
-    setTimeout(() => { window._fbSyncInProgress = false; }, 600);
-  })
-  .catch(e => {
-    window._fbSyncInProgress = false;
-    fbToast('❌ Error al guardar: ' + e.code, 'error');
-  });
-}
-
-window._fbSaveProgressToCloud = fbSaveProgressToCloud;
 
 function fbSaveProgressToCloud() {
   if (!_currentUser || !window.__fb) return;
