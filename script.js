@@ -289,11 +289,11 @@
   }
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    // Sincronizar con Firestore cuando cambia el progreso (debounce 1.5s)
+    // Sincronizar con Firestore cuando cambia el progreso (debounce 2s)
     if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
       clearTimeout(window._fbSaveTimer);
       window._fbSaveTimer = setTimeout(() => {
-        window._fbSaveTimer = null;
+        window._fbSaveTimer = null; // limpiar ANTES de guardar para que el listener no lo ignore
         if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
       }, 1500);
     }
@@ -1008,13 +1008,24 @@
 
     // Si hay preguntas extrapoladas nuevas que el estado guardado no conocía,
     // agregarlas al unansweredOrder para que aparezcan en el cuestionario.
-    const totalConocidas = (state[seccionId].answeredOrder || []).length +
-                           (state[seccionId].unansweredOrder || []).length;
+    // IMPORTANTE: usar graded como fuente de verdad (no unansweredOrder que puede llegar vacío
+    // desde la nube), para no corromper el state recién sincronizado ni disparar un saveJSON
+    // que pisaría Firestore con datos incorrectos.
+    const gradedKeys = Object.keys(state[seccionId].graded || {}).map(Number);
+    const maxGradedIdx = gradedKeys.length > 0 ? Math.max(...gradedKeys) + 1 : 0;
+    const answeredLen = (state[seccionId].answeredOrder || []).length;
+    const unansweredLen = (state[seccionId].unansweredOrder || []).length;
+    // totalConocidas = cuántos índices de pregunta ya están registrados en alguna lista
+    const totalConocidas = Math.max(answeredLen + unansweredLen, maxGradedIdx);
     if (preguntasLen > totalConocidas) {
       for (let i = totalConocidas; i < preguntasLen; i++) {
         state[seccionId].unansweredOrder.push(i);
       }
-      saveJSON(STORAGE_KEY, state);
+      // Solo guardar localmente si NO estamos en medio de una sincronización desde la nube,
+      // para evitar pisar el state correcto con datos incompletos.
+      if (!window._fbSyncInProgress) {
+        saveJSON(STORAGE_KEY, state);
+      }
     }
     
     if (!window.puntajesPorSeccion) window.puntajesPorSeccion = {};
@@ -7227,9 +7238,11 @@
     _fbProgressUnsubscribe = onSnapshot(
       doc(_fbDb, 'progress', uid),
       (snap) => {
-        // Si hay escrituras propias pendientes, ignorar el eco
+        // Ignorar el eco de nuestra propia escritura usando un contador.
+        // Un booleano falla cuando hay múltiples escrituras rápidas seguidas:
+        // el flag queda true y bloquea todos los snapshots del otro dispositivo.
         if (window._fbPendingWrites && window._fbPendingWrites > 0) {
-          window._fbPendingWrites = Math.max(0, window._fbPendingWrites - 1);
+          window._fbPendingWrites--;
           return;
         }
         if (!snap.exists()) return;
@@ -7247,13 +7260,19 @@
         localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
         console.log('☁️ Progreso recibido desde otro dispositivo — actualizando UI');
 
-        // Actualización en tiempo real: re-renderizar el cuestionario activo
-        // para mostrar las preguntas respondidas sin recargar la página
-        if (currentSection && preguntasPorSeccion[currentSection]) {
-          generarCuestionario(currentSection);
+        // Marcar que estamos en medio de una sincronización para que ensureSectionState
+        // no dispare un saveJSON que pisaría Firestore con datos incompletos.
+        window._fbSyncInProgress = true;
+        try {
+          // Si hay un cuestionario abierto, re-renderizarlo para mostrar las preguntas respondidas
+          if (currentSection && preguntasPorSeccion[currentSection]) {
+            generarCuestionario(currentSection);
+          }
+          // Actualizar el panel de progreso si está abierto
+          if (typeof actualizarPanelProgreso === 'function') actualizarPanelProgreso();
+        } finally {
+          window._fbSyncInProgress = false;
         }
-        // Actualizar el panel de progreso si está abierto
-        if (typeof actualizarPanelProgreso === 'function') actualizarPanelProgreso();
       },
       (e) => console.warn('⚠️ Error en listener de progreso:', e.message)
     );
@@ -7262,15 +7281,14 @@
   function fbSaveProgressToCloud() {
     if (!_currentUser || !window.__fb) return;
     const { doc, setDoc, serverTimestamp } = window.__fb;
-    // Usar un contador en lugar de un booleano: cada escritura pendiente incrementa,
-    // el listener decrementa. Así múltiples escrituras rápidas no bloquean la sincronización.
+    // Incrementar contador de escrituras pendientes para no ignorar snapshots reales del otro dispositivo
     window._fbPendingWrites = (window._fbPendingWrites || 0) + 1;
     setDoc(doc(_fbDb,'progress',_currentUser.uid), {
       state, attemptLog, updatedAt: serverTimestamp()
     }, { merge: true })
       .then(() => console.log('☁️ Progreso guardado en Firestore'))
       .catch(e => {
-        // En caso de error, decrementar para no bloquear futuros snapshots
+        // En caso de error revertir el contador para no bloquear snapshots futuros
         window._fbPendingWrites = Math.max(0, (window._fbPendingWrites || 1) - 1);
         console.warn('Firebase save error:', e);
       });
