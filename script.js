@@ -287,15 +287,14 @@
       return fallback;
     }
   }
-  let _fbSaveTimer = null;
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    // Sincronizar con Firestore cuando cambia el progreso
+    // Sincronizar con Firestore cuando cambia el progreso (debounce 3s)
     if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
-      clearTimeout(_fbSaveTimer);
-      _fbSaveTimer = setTimeout(() => {
-        if (typeof fbSaveProgressToCloud === 'function') fbSaveProgressToCloud();
-      }, 2000);
+      clearTimeout(window._fbSaveTimer);
+      window._fbSaveTimer = setTimeout(() => {
+        if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
+      }, 3000);
     }
   }
   function cap(str) {
@@ -7210,46 +7209,44 @@
     const { doc, getDoc, onSnapshot } = window.__fb;
     const uid = _currentUser.uid;
 
-    // 1) Carga inicial: traer el estado de la nube antes de mostrar el menú
+    // 1) Carga inicial al login: traer estado de la nube
     try {
       const snap = await getDoc(doc(_fbDb, 'progress', uid));
       if (snap.exists()) {
         const data = snap.data();
-        if (data.state) {
-          state = data.state;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        }
-        if (data.attemptLog) {
-          attemptLog = data.attemptLog;
-          localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-        }
-        console.log('☁️ Progreso cargado desde la nube (carga inicial)');
+        if (data.state)      { state      = data.state;      localStorage.setItem(STORAGE_KEY,   JSON.stringify(state)); }
+        if (data.attemptLog) { attemptLog = data.attemptLog; localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog)); }
+        console.log('☁️ Progreso cargado desde la nube');
       }
     } catch(e) {
-      console.warn('⚠️ No se pudo cargar progreso desde la nube:', e.message);
+      console.warn('⚠️ Error cargando progreso:', e.message);
     }
 
-    // 2) Listener en tiempo real: si otro dispositivo guarda, se refleja acá
-    if (_fbProgressUnsubscribe) _fbProgressUnsubscribe(); // limpiar listener anterior
+    // 2) Listener en tiempo real para sincronización entre dispositivos
+    if (_fbProgressUnsubscribe) _fbProgressUnsubscribe();
     _fbProgressUnsubscribe = onSnapshot(
       doc(_fbDb, 'progress', uid),
       (snap) => {
+        // Ignorar si acabamos de guardar nosotros mismos (timer activo)
+        if (window._fbSaveTimer) return;
         if (!snap.exists()) return;
         const data = snap.data();
-        // Ignorar actualizaciones que este mismo dispositivo acaba de escribir
-        // (el debounce de 2s garantiza que no pisamos nada en vuelo)
-        const newState = data.state || {};
-        const newLog   = data.attemptLog || [];
+        if (!data.state) return;
 
-        // Solo actualizar si los datos de la nube son distintos a lo local
+        const cloudState = JSON.stringify(data.state);
         const localState = JSON.stringify(state);
-        const cloudState = JSON.stringify(newState);
-        if (localState !== cloudState || JSON.stringify(attemptLog) !== JSON.stringify(newLog)) {
-          state = newState;
-          attemptLog = newLog;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-          console.log('☁️ Progreso sincronizado desde la nube (tiempo real)');
+        if (cloudState === localState) return; // sin cambios, no hacer nada
+
+        // Actualizar state en memoria y localStorage
+        state      = data.state;
+        attemptLog = data.attemptLog || [];
+        localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
+        localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
+        console.log('☁️ Progreso recibido desde otro dispositivo');
+
+        // Si hay un cuestionario abierto, re-renderizarlo para mostrar las preguntas respondidas
+        if (currentSection) {
+          generarCuestionario(currentSection);
         }
       },
       (e) => console.warn('⚠️ Error en listener de progreso:', e.message)
@@ -7261,8 +7258,12 @@
     const { doc, setDoc, serverTimestamp } = window.__fb;
     setDoc(doc(_fbDb,'progress',_currentUser.uid), {
       state, attemptLog, updatedAt: serverTimestamp()
-    }, { merge: true }).catch(e => console.warn('Firebase save error:', e));
+    }, { merge: true })
+      .then(() => console.log('☁️ Progreso guardado en Firestore'))
+      .catch(e => console.warn('Firebase save error:', e));
   }
+  // Exponer en window para que saveJSON pueda llamarla (definida más arriba en el closure)
+  window._fbSaveProgressToCloud = fbSaveProgressToCloud;
 
   // saveJSON ya incluye sincronización con Firestore (ver definición arriba)
 
