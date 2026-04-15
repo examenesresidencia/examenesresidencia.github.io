@@ -1,4 +1,4 @@
-//PRUEB 43 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 44 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -291,13 +291,19 @@
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
     // Sincronizar con Firestore cuando cambia el progreso (debounce 1.5s)
-    // No disparar si estamos procesando una sincronización entrante desde la nube
+    // No disparar si estamos procesando una sincronizacion entrante desde la nube
     if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
-      if (window._fbSyncInProgress) return; // evitar eco de sync entrante
+      console.log('[FB-SYNC] saveJSON(' + key + ') — _fbSyncInProgress=' + window._fbSyncInProgress + ', _currentUser=' + !!window._fbCurrentUser + ', _fbSaveProgressToCloud=' + !!window._fbSaveProgressToCloud);
+      if (window._fbSyncInProgress) {
+        console.warn('[FB-SYNC] BLOQUEADO por _fbSyncInProgress=true — NO se guardara en nube');
+        return;
+      }
       clearTimeout(window._fbSaveTimer);
-      window._fbSaveTimer = setTimeout(() => {
+      window._fbSaveTimer = setTimeout(function() {
         window._fbSaveTimer = null;
+        console.log('[FB-SYNC] Debounce disparado → llamando _fbSaveProgressToCloud');
         if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
+        else console.error('[FB-SYNC] ERROR: _fbSaveProgressToCloud no definido');
       }, 1500);
     }
   }
@@ -7276,19 +7282,25 @@ async function fbSyncProgressFromCloud() {
   _fbProgressUnsubscribe = onSnapshot(
     doc(_fbDb, 'progress', uid),
     { includeMetadataChanges: true },
-    (snap) => {
-      // Ignorar escrituras pendientes locales (eco de nuestra propia escritura)
-      if (snap.metadata.hasPendingWrites) return;
-      // Ignorar si nosotros acabamos de guardar (bandera de 500ms)
-      if (window._fbSyncInProgress) return;
-      if (!snap.exists()) return;
-      const data = snap.data();
-      if (!data.state) return;
+    function(snap) {
+      var hasPending = snap.metadata.hasPendingWrites;
+      var fromCache  = snap.metadata.fromCache;
+      var snapTs     = snap.exists() ? (snap.data().updatedAt && snap.data().updatedAt.toMillis ? snap.data().updatedAt.toMillis() : 0) : 0;
+      console.log('[FB-SNAP] snapshot recibido — exists=' + snap.exists() + ', hasPendingWrites=' + hasPending + ', fromCache=' + fromCache + ', snapTs=' + snapTs + ', _fbCloudUpdatedAt=' + (window._fbCloudUpdatedAt||0) + ', _fbSyncInProgress=' + window._fbSyncInProgress);
 
-      const snapTs = data.updatedAt?.toMillis?.() || 0;
+      // Ignorar escrituras pendientes locales (eco de nuestra propia escritura)
+      if (hasPending) { console.log('[FB-SNAP] IGNORADO: hasPendingWrites=true'); return; }
+      // Ignorar si nosotros acabamos de guardar (bandera de 500ms)
+      if (window._fbSyncInProgress) { console.log('[FB-SNAP] IGNORADO: _fbSyncInProgress=true'); return; }
+      if (!snap.exists()) { console.log('[FB-SNAP] IGNORADO: documento no existe'); return; }
+      var data = snap.data();
+      if (!data.state) { console.log('[FB-SNAP] IGNORADO: data.state vacío'); return; }
+
       // Aceptar actualizaciones del servidor aunque snapTs sea 0
-      // (puede ser 0 si el timestamp aún no llegó, pero fromCache=false garantiza que es del servidor)
-      if (!snap.metadata.fromCache && snapTs > 0 && snapTs <= (window._fbCloudUpdatedAt || 0)) return;
+      if (!snap.metadata.fromCache && snapTs > 0 && snapTs <= (window._fbCloudUpdatedAt || 0)) {
+        console.log('[FB-SNAP] IGNORADO: snapTs (' + snapTs + ') <= _fbCloudUpdatedAt (' + (window._fbCloudUpdatedAt||0) + ')');
+        return;
+      }
 
       if (snapTs > 0) window._fbCloudUpdatedAt = snapTs;
       state      = data.state;
@@ -7296,7 +7308,8 @@ async function fbSyncProgressFromCloud() {
       localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
       localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
 
-      fbToast('🔄 Progreso sincronizado desde otro dispositivo', 'success');
+      console.log('[FB-SNAP] APLICADO: estado actualizado desde otro dispositivo');
+      fbToast('Progreso sincronizado desde otro dispositivo', 'success');
 
       window._fbSyncInProgress = true;
       try {
@@ -7308,36 +7321,47 @@ async function fbSyncProgressFromCloud() {
         window._fbSyncInProgress = false;
       }
     },
-    (e) => fbToast('⚠️ Error en listener: ' + e.code, 'error')
+    function(e) { fbToast('Error en listener: ' + e.code, 'error'); }
   );
 }
 
 function fbSaveProgressToCloud() {
-  if (!_currentUser || !window.__fb) return;
-  // No guardar si estamos procesando un sync entrante (evita el ciclo A→nube→A)
-  if (window._fbSyncInProgress) return;
+  console.log('[FB-SYNC] fbSaveProgressToCloud() llamada — _currentUser=' + !!_currentUser + ', _fbDb=' + !!_fbDb + ', __fb=' + !!window.__fb + ', _fbSyncInProgress=' + window._fbSyncInProgress);
+  if (!_currentUser || !window.__fb) {
+    console.warn('[FB-SYNC] ABORTADO: falta _currentUser o __fb');
+    return;
+  }
+  if (!_fbDb) {
+    console.warn('[FB-SYNC] ABORTADO: _fbDb es null/undefined');
+    return;
+  }
+  // No guardar si estamos procesando un sync entrante (evita el ciclo A->nube->A)
+  if (window._fbSyncInProgress) {
+    console.warn('[FB-SYNC] ABORTADO: _fbSyncInProgress=true');
+    return;
+  }
 
   const { doc, setDoc, serverTimestamp } = window.__fb;
 
   // Marcar que somos nosotros quienes escribimos, para ignorar el eco del snapshot
   window._fbSyncInProgress = true;
+  console.log('[FB-SYNC] Escribiendo en Firestore progress/' + _currentUser.uid + ' — state keys:', Object.keys(state));
 
   setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
     state,
     attemptLog,
     updatedAt: serverTimestamp()
-  }) // sin merge:true → escritura atómica completa, sin datos fantasma de sesiones viejas
-    .then(() => {
-      console.log('☁️ Progreso guardado en Firestore');
-      // Dar 500ms para que llegue el eco del snapshot y lo ignoremos,
-      // luego liberar la bandera
-      setTimeout(() => { window._fbSyncInProgress = false; }, 500);
+  })
+    .then(function() {
+      console.log('[FB-SYNC] OK: Progreso guardado en Firestore');
+      fbToast('Guardado en la nube', 'success');
+      setTimeout(function() { window._fbSyncInProgress = false; }, 500);
     })
-    .catch(e => {
+    .catch(function(e) {
       window._fbSyncInProgress = false;
-      console.error('❌ Firebase save error:', e.code, e.message);
+      console.error('[FB-SYNC] ERROR al guardar:', e.code, e.message);
       if (e.code === 'permission-denied') {
-        fbToast('⚠️ Sin permisos para guardar el progreso en la nube', 'error');
+        fbToast('Sin permisos para guardar el progreso en la nube', 'error');
       }
     });
 }
