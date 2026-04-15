@@ -1,3 +1,4 @@
+//PRUEB 42 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -7216,21 +7217,27 @@
 let _fbProgressUnsubscribe = null;
 
 async function fbSyncProgressFromCloud() {
-  if (!_currentUser) return;
+  if (!_currentUser || !_fbDb) {
+    fbToast('⚠️ Error interno: Firebase no inicializado', 'error');
+    return;
+  }
+
   const { doc, onSnapshot } = window.__fb;
   const uid = _currentUser.uid;
 
+  // Cancelar listener anterior
   if (_fbProgressUnsubscribe) {
     _fbProgressUnsubscribe();
     _fbProgressUnsubscribe = null;
   }
 
-  // Carga inicial: esperamos el primer snapshot antes de continuar
+  // Carga inicial: primer onSnapshot resuelve la Promise
   await new Promise((resolve) => {
-    const unsub = onSnapshot(
+    const unsubOnce = onSnapshot(
       doc(_fbDb, 'progress', uid),
+      { includeMetadataChanges: false },
       (snap) => {
-        unsub();
+        unsubOnce();
         if (snap.exists()) {
           const data = snap.data();
           if (data.state) {
@@ -7238,42 +7245,44 @@ async function fbSyncProgressFromCloud() {
             attemptLog = data.attemptLog || [];
             localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
             localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-            // Guardar el timestamp de la nube como referencia de "versión actual"
             window._fbCloudUpdatedAt = data.updatedAt?.toMillis?.() || 0;
-            console.log('☁️ Progreso inicial cargado desde la nube');
+            fbToast('☁️ Progreso cargado desde la nube', 'success');
+          } else {
+            fbToast('☁️ Sin progreso guardado aún', 'info');
           }
+        } else {
+          fbToast('☁️ Primera vez: sin progreso en la nube', 'info');
         }
         resolve();
       },
-      (e) => { console.warn('⚠️ Error en carga inicial:', e.message); resolve(); }
+      (e) => {
+        fbToast('❌ Error leyendo Firestore: ' + e.code, 'error');
+        resolve();
+      }
     );
   });
 
-  // Listener en tiempo real para cambios desde otros dispositivos
+  // Listener permanente para tiempo real
   _fbProgressUnsubscribe = onSnapshot(
     doc(_fbDb, 'progress', uid),
+    { includeMetadataChanges: false },
     (snap) => {
-      // Si estamos guardando nosotros mismos, ignorar el eco
       if (window._fbSyncInProgress) return;
       if (!snap.exists()) return;
-
       const data = snap.data();
       if (!data.state) return;
 
-      // Usar updatedAt del servidor como árbitro de versiones:
-      // solo aplicar si el snapshot es MÁS NUEVO que lo que tenemos
       const snapTs = data.updatedAt?.toMillis?.() || 0;
       if (snapTs <= (window._fbCloudUpdatedAt || 0)) return;
 
-      console.log('☁️ Progreso recibido desde otro dispositivo — actualizando UI');
       window._fbCloudUpdatedAt = snapTs;
-
       state      = data.state;
       attemptLog = data.attemptLog || [];
       localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
       localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
 
-      // Re-renderizar si hay cuestionario abierto
+      fbToast('🔄 Progreso sincronizado desde otro dispositivo', 'success');
+
       window._fbSyncInProgress = true;
       try {
         if (currentSection && preguntasPorSeccion[currentSection]) {
@@ -7284,9 +7293,33 @@ async function fbSyncProgressFromCloud() {
         window._fbSyncInProgress = false;
       }
     },
-    (e) => console.warn('⚠️ Error en listener de progreso:', e.message)
+    (e) => fbToast('⚠️ Error en listener: ' + e.code, 'error')
   );
 }
+
+function fbSaveProgressToCloud() {
+  if (!_currentUser || !_fbDb || !window.__fb) return;
+  if (window._fbSyncInProgress) return;
+
+  const { doc, setDoc, serverTimestamp } = window.__fb;
+
+  window._fbSyncInProgress = true;
+  setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+    state,
+    attemptLog,
+    updatedAt: serverTimestamp()
+  })
+  .then(() => {
+    fbToast('💾 Guardado en la nube', 'success');
+    setTimeout(() => { window._fbSyncInProgress = false; }, 600);
+  })
+  .catch(e => {
+    window._fbSyncInProgress = false;
+    fbToast('❌ Error al guardar: ' + e.code, 'error');
+  });
+}
+
+window._fbSaveProgressToCloud = fbSaveProgressToCloud;
 
 function fbSaveProgressToCloud() {
   if (!_currentUser || !window.__fb) return;
@@ -7328,7 +7361,8 @@ window._fbSaveProgressToCloud = fbSaveProgressToCloud;
     if (window.__firebase_app && window.__firebase_auth && window.__firebase_firestore) {
       fbInit();
     } else {
-      setTimeout(fbWaitAndInit, 100);
+     // Escuchar el evento en lugar de hacer polling con setTimeout
+    document.addEventListener('firebaseReady', () => fbInit(), { once: true });
     }
   }
 
