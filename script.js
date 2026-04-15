@@ -1,4 +1,4 @@
-//PRUEB 46 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 47 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -6503,6 +6503,8 @@
               await fbSyncProgressFromCloud();
               history.replaceState({ section: null }, 'Menú Principal', '#menu');
               showMenu();
+              // Mostrar la barra de usuario siempre, inmediatamente
+              fbShowUserBar();
               requestAnimationFrame(() => requestAnimationFrame(() => fbUpdateAdminButton()));
             } else if (status === 'pending') {
               quitarLoadingShield();
@@ -7155,6 +7157,7 @@
         <button class="ub-ver-progreso" id="fb-bar-ver-progreso">📊 Ver mi progreso</button>
         <button class="ub-logout" id="fb-bar-logout">Cerrar sesión</button>
       </div>`;
+    bar.classList.add('visible');
     document.getElementById('fb-bar-logout').onclick = fbLogout;
     document.getElementById('fb-bar-ver-progreso').onclick = () => {
       const btn = document.getElementById('btn-ver-progreso');
@@ -8456,13 +8459,13 @@ function fbSaveProgressToCloud() {
   let _fbSessionUnsubscribeLocal = null;
 
   function _fbGetOrCreateDeviceId() {
-    // localStorage: el ID sobrevive recargas y múltiples pestañas del mismo navegador.
-    // Dos pestañas del mismo browser comparten el mismo deviceId -> no se expulsan entre si.
-    // Un celular diferente tendra su propio deviceId -> si se expulsa.
-    let id = localStorage.getItem('fb_device_id');
+    // sessionStorage: el ID es único por pestaña/ventana y NO sobrevive entre pestañas.
+    // Cada pestaña (incluso del mismo navegador) tiene su propio deviceId.
+    // Si abrís la misma cuenta en otra pestaña, celular o computadora -> se expulsa la anterior.
+    let id = sessionStorage.getItem('fb_device_id');
     if (!id) {
       id = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
-      localStorage.setItem('fb_device_id', id);
+      sessionStorage.setItem('fb_device_id', id);
     }
     return id;
   }
@@ -8473,19 +8476,21 @@ function fbSaveProgressToCloud() {
     const deviceId = _fbGetOrCreateDeviceId();
 
     try {
-      // FIX 2: Leer antes de escribir
-      // Si existe una sesion activa de OTRO dispositivo con lastSeen reciente
-      // (< 30 s), ese dispositivo acaba de loguearse y es el dueno legitimo.
-      // En ese caso NO sobreescribimos: el nuevo intento vera que su deviceId
-      // no coincide y mostrara el modal de expulsion.
+      // Con sessionStorage cada pestaña/recarga tiene su propio deviceId.
+      // El comportamiento es "el último en registrarse gana" (expulsa al anterior).
+      // Solo evitamos sobreescribir si hubo una sesión de OTRO dispositivo en los últimos
+      // 5 segundos Y ya estamos en la misma pestaña (recarga muy rápida):
+      // En ese caso dejamos que el onSnapshot nos detecte como desplazados.
       try {
         const existing = await getDoc(doc(_fbDb, 'sessions', uid));
         if (existing.exists()) {
           const d = existing.data();
           const otroDevice = d.deviceId && d.deviceId !== deviceId;
-          const reciente   = d.updatedAt && d.updatedAt.toMillis &&
-                             (Date.now() - d.updatedAt.toMillis()) < 30000;
-          if (otroDevice && reciente) {
+          const muyReciente = d.updatedAt && d.updatedAt.toMillis &&
+                             (Date.now() - d.updatedAt.toMillis()) < 5000;
+          if (otroDevice && muyReciente) {
+            // Sesión registrada hace < 5s por otro device: escuchamos sin sobreescribir,
+            // el onSnapshot nos mostrará el modal de expulsión.
             console.warn('[SESSION] Sesion reciente de otro device detectada - no sobreescribir');
             _fbEscucharSesion(uid, deviceId);
             return;
@@ -8522,7 +8527,7 @@ function fbSaveProgressToCloud() {
       if (!_sessionGuardActiva) return; // Ignorar disparo inicial
 
       const data     = snap.data();
-      const myDevice = localStorage.getItem('fb_device_id');
+      const myDevice = sessionStorage.getItem('fb_device_id');
       if (data.deviceId && data.deviceId !== myDevice) {
         console.warn('[SESSION] Sesion abierta en otro dispositivo:', data.deviceId);
         clearTimeout(_guardTimer);
