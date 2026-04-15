@@ -1,4 +1,4 @@
-//PRUEB 44 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 45 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -7296,9 +7296,14 @@ async function fbSyncProgressFromCloud() {
       var data = snap.data();
       if (!data.state) { console.log('[FB-SNAP] IGNORADO: data.state vacío'); return; }
 
-      // Aceptar actualizaciones del servidor aunque snapTs sea 0
-      if (!snap.metadata.fromCache && snapTs > 0 && snapTs <= (window._fbCloudUpdatedAt || 0)) {
-        console.log('[FB-SNAP] IGNORADO: snapTs (' + snapTs + ') <= _fbCloudUpdatedAt (' + (window._fbCloudUpdatedAt||0) + ')');
+      // Aceptar actualizaciones del servidor aunque snapTs sea 0.
+      // IMPORTANTE: usar < estricto (no <=) para NO descartar updates con el mismo
+      // timestamp que el último recibido — esto podría descartar cambios válidos del
+      // otro dispositivo que llegaron con serverTimestamp igual.
+      // Si snapTs es 0 y NO viene de caché, es una actualización real con timestamp aún
+      // pendiente de resolución — se debe procesar igual.
+      if (!snap.metadata.fromCache && snapTs > 0 && snapTs < (window._fbCloudUpdatedAt || 0)) {
+        console.log('[FB-SNAP] IGNORADO: snapTs (' + snapTs + ') < _fbCloudUpdatedAt (' + (window._fbCloudUpdatedAt||0) + ')');
         return;
       }
 
@@ -7355,7 +7360,9 @@ function fbSaveProgressToCloud() {
     .then(function() {
       console.log('[FB-SYNC] OK: Progreso guardado en Firestore');
       fbToast('Guardado en la nube', 'success');
-      setTimeout(function() { window._fbSyncInProgress = false; }, 500);
+      // Liberar el flag en 200ms (suficiente para que llegue el eco del snapshot local)
+      // Antes era 500ms, lo que silenciaba guardados legítimos en respuestas rápidas
+      setTimeout(function() { window._fbSyncInProgress = false; }, 200);
     })
     .catch(function(e) {
       window._fbSyncInProgress = false;
@@ -7366,7 +7373,9 @@ function fbSaveProgressToCloud() {
     });
 }
 
-window._fbSaveProgressToCloud = fbSaveProgressToCloud;
+  // Asignar AQUÍ, dentro del IIFE y justo después de definir la función,
+  // para que saveJSON() siempre la encuentre aunque se llame antes de fbInit()
+  window._fbSaveProgressToCloud = fbSaveProgressToCloud;
 
   // saveJSON ya incluye sincronización con Firestore (ver definición arriba)
 
