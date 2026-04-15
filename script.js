@@ -1,4 +1,4 @@
-//PRUEBA 49 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 50 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -8470,6 +8470,11 @@ function fbSaveProgressToCloud() {
 
   async function _fbRegisterSession(uid) {
     if (!window.__fb || !_fbDb) return;
+    // Admin no tiene restricción de sesión única
+    if (_currentUserData?.role === 'admin') {
+      console.log('[SESSION] Admin detectado — sin restricción de sesión única');
+      return;
+    }
     const { doc, setDoc, serverTimestamp } = window.__fb;
     const deviceId = _fbGetOrCreateDeviceId();
 
@@ -8535,26 +8540,55 @@ function fbSaveProgressToCloud() {
           Tu cuenta fue iniciada en otro dispositivo o pestaña.<br>
           Por seguridad, esta sesión se cerrará automáticamente.
         </div>
-        <div class="fbsd-countdown" id="fbsd-countdown">8</div>
+        <div class="fbsd-countdown" id="fbsd-countdown">30</div>
         <button class="fbsd-btn" id="fbsd-btn-cerrar">Entendido — Cerrar sesión</button>
       </div>
     `;
     document.body.appendChild(overlay);
 
-    document.getElementById('fbsd-btn-cerrar').onclick = () => {
+    document.getElementById('fbsd-btn-cerrar').onclick = async () => {
+      clearInterval(cdInterval);
       overlay.remove();
+      // Guardar progreso explícitamente antes de cerrar sesión
+      if (_currentUser && _fbDb && window.__fb && Object.keys(state).length > 0) {
+        try {
+          const { doc, setDoc, serverTimestamp } = window.__fb;
+          await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+            state,
+            attemptLog,
+            updatedAt: serverTimestamp()
+          });
+          localStorage.setItem('quiz_progress_ts', String(Date.now()));
+        } catch (e) {
+          console.error('[SESSION] Error al guardar progreso antes de cerrar sesión duplicada:', e);
+        }
+      }
       fbLogout();
     };
 
-    // Cuenta regresiva de 8 segundos
-    let segs = 8;
+    // Cuenta regresiva de 30 segundos
+    let segs = 30;
     const cdEl = document.getElementById('fbsd-countdown');
-    const cdInterval = setInterval(() => {
+    const cdInterval = setInterval(async () => {
       segs--;
       if (cdEl) cdEl.textContent = segs;
       if (segs <= 0) {
         clearInterval(cdInterval);
         overlay.remove();
+        // Guardar progreso antes de cerrar sesión automáticamente
+        if (_currentUser && _fbDb && window.__fb && Object.keys(state).length > 0) {
+          try {
+            const { doc, setDoc, serverTimestamp } = window.__fb;
+            await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+              state,
+              attemptLog,
+              updatedAt: serverTimestamp()
+            });
+            localStorage.setItem('quiz_progress_ts', String(Date.now()));
+          } catch (e) {
+            console.error('[SESSION] Error al guardar progreso en cierre automático por sesión duplicada:', e);
+          }
+        }
         fbLogout();
       }
     }, 1000);
