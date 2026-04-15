@@ -289,13 +289,13 @@
   }
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    // Sincronizar con Firestore cuando cambia el progreso (debounce 2s)
+    // Sincronizar con Firestore cuando cambia el progreso (debounce 1.5s)
     if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
       clearTimeout(window._fbSaveTimer);
       window._fbSaveTimer = setTimeout(() => {
-        window._fbSaveTimer = null; // limpiar ANTES de guardar para que el listener no lo ignore
+        window._fbSaveTimer = null;
         if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
-      }, 2000);
+      }, 1500);
     }
   }
   function cap(str) {
@@ -7227,9 +7227,9 @@
     _fbProgressUnsubscribe = onSnapshot(
       doc(_fbDb, 'progress', uid),
       (snap) => {
-        // Ignorar el eco de nuestra propia escritura usando un flag dedicado
-        if (window._fbIgnoreNextSnapshot) {
-          window._fbIgnoreNextSnapshot = false;
+        // Si hay escrituras propias pendientes, ignorar el eco
+        if (window._fbPendingWrites && window._fbPendingWrites > 0) {
+          window._fbPendingWrites = Math.max(0, window._fbPendingWrites - 1);
           return;
         }
         if (!snap.exists()) return;
@@ -7247,7 +7247,8 @@
         localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
         console.log('☁️ Progreso recibido desde otro dispositivo — actualizando UI');
 
-        // Si hay un cuestionario abierto, re-renderizarlo para mostrar las preguntas respondidas
+        // Actualización en tiempo real: re-renderizar el cuestionario activo
+        // para mostrar las preguntas respondidas sin recargar la página
         if (currentSection && preguntasPorSeccion[currentSection]) {
           generarCuestionario(currentSection);
         }
@@ -7261,13 +7262,16 @@
   function fbSaveProgressToCloud() {
     if (!_currentUser || !window.__fb) return;
     const { doc, setDoc, serverTimestamp } = window.__fb;
-    window._fbIgnoreNextSnapshot = true; // ignorar el eco de esta escritura
+    // Usar un contador en lugar de un booleano: cada escritura pendiente incrementa,
+    // el listener decrementa. Así múltiples escrituras rápidas no bloquean la sincronización.
+    window._fbPendingWrites = (window._fbPendingWrites || 0) + 1;
     setDoc(doc(_fbDb,'progress',_currentUser.uid), {
       state, attemptLog, updatedAt: serverTimestamp()
     }, { merge: true })
       .then(() => console.log('☁️ Progreso guardado en Firestore'))
       .catch(e => {
-        window._fbIgnoreNextSnapshot = false;
+        // En caso de error, decrementar para no bloquear futuros snapshots
+        window._fbPendingWrites = Math.max(0, (window._fbPendingWrites || 1) - 1);
         console.warn('Firebase save error:', e);
       });
   }
