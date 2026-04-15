@@ -1,4 +1,5 @@
-//PRUEB 45 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 46 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+// Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -290,22 +291,11 @@
   }
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    // Sincronizar con Firestore cuando cambia el progreso (debounce 1.5s)
-    // No disparar si estamos procesando una sincronizacion entrante desde la nube
-    if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
-      console.log('[FB-SYNC] saveJSON(' + key + ') — _fbSyncInProgress=' + window._fbSyncInProgress + ', _currentUser=' + !!window._fbCurrentUser + ', _fbSaveProgressToCloud=' + !!window._fbSaveProgressToCloud);
-      if (window._fbSyncInProgress) {
-        console.warn('[FB-SYNC] BLOQUEADO por _fbSyncInProgress=true — NO se guardara en nube');
-        return;
-      }
-      clearTimeout(window._fbSaveTimer);
-      window._fbSaveTimer = setTimeout(function() {
-        window._fbSaveTimer = null;
-        console.log('[FB-SYNC] Debounce disparado → llamando _fbSaveProgressToCloud');
-        if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
-        else console.error('[FB-SYNC] ERROR: _fbSaveProgressToCloud no definido');
-      }, 1500);
-    }
+    // Ya NO sincronizamos automáticamente con Firestore en cada cambio.
+    // El progreso se guarda en la nube:
+    //   • Al cerrar sesión  → fbLogout() llama fbSaveProgressToCloud() antes del signOut
+    //   • Al iniciar sesión → fbSyncProgressFromCloud() trae el más reciente (por timestamp)
+    // Esto elimina decenas de escrituras/lecturas por sesión.
   }
   function cap(str) {
     return str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
@@ -557,22 +547,38 @@
    * Estructura: preguntas/{seccionId}/items/{docId}
    * Devuelve una Promise que resuelve cuando las preguntas están listas.
    */
+  const PREGUNTAS_CACHE_PREFIX = 'fb_q_cache_';
+  const PREGUNTAS_CACHE_TTL    = 24 * 60 * 60 * 1000; // 24 horas
+
   function cargarSeccion(seccionId) {
-    if (_seccionesYaCargadas.has(seccionId) || (window.preguntasPorSeccion && window.preguntasPorSeccion[seccionId] && window.preguntasPorSeccion[seccionId].length > 0)) {
+    if (_seccionesYaCargadas.has(seccionId) ||
+        (window.preguntasPorSeccion?.[seccionId]?.length > 0)) {
       _seccionesYaCargadas.add(seccionId);
       return Promise.resolve();
     }
 
+    // ── Intentar desde caché localStorage primero ──────────────────
+    try {
+      const cached = JSON.parse(localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId) || 'null');
+      if (cached && cached.preguntas && cached.ts &&
+          (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
+        if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+        window.preguntasPorSeccion[seccionId] = cached.preguntas;
+        _seccionesYaCargadas.add(seccionId);
+        console.log('📦 Caché local:', seccionId, '→', cached.preguntas.length, 'preguntas');
+        return Promise.resolve();
+      }
+    } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
+
+    // ── Cargar desde Firestore ──────────────────────────────────────
     return new Promise((resolve) => {
       function intentarCarga() {
-        // Esperar a que Firebase esté listo y _fbDb inicializado
         if (!window.__firebaseReady || !window.__firebase_firestore) {
           document.addEventListener('firebaseReady', intentarCarga, { once: true });
           return;
         }
         if (typeof fbInit === 'function') fbInit();
 
-        // Dar un tick para que fbInit() termine de asignar _fbDb
         setTimeout(async () => {
           try {
             const { collection, getDocs, query, orderBy } = window.__firebase_firestore;
@@ -595,31 +601,55 @@
             if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
             window.preguntasPorSeccion[seccionId] = preguntas;
 
-            // Aplicar ediciones de admin guardadas en colección 'questions'
+            // ── Aplicar ediciones de admin (con caché de 1 hora) ──────
             try {
-              const { collection: col2, query: q2, where: w2, getDocs: gd2 } = window.__firebase_firestore;
-              const editQ = q2(col2(db, 'questions'), w2('seccionId', '==', seccionId));
-              const editSnap = await gd2(editQ);
-              if (!editSnap.empty) {
-                editSnap.forEach(editDoc => {
-                  const ed = editDoc.data();
-                  const idx = ed.qIndex;
-                  if (preguntas[idx]) {
-                    if (ed.pregunta    !== undefined) preguntas[idx].pregunta    = ed.pregunta;
-                    if (ed.opciones    !== undefined) preguntas[idx].opciones    = ed.opciones;
-                    if (ed.correcta    !== undefined) preguntas[idx].correcta    = ed.correcta;
-                    if (ed.explicacion !== undefined) preguntas[idx].explicacion = ed.explicacion;
-                    if (ed.imagen      !== undefined) preguntas[idx].imagen      = ed.imagen;
-                  }
-                });
-                console.log('✏️ Ediciones aplicadas para:', seccionId, '→', editSnap.size, 'preguntas editadas');
+              const EDIT_CACHE_KEY = 'fb_edits_cache_' + seccionId;
+              let ediciones = null;
+              try {
+                const ec = JSON.parse(localStorage.getItem(EDIT_CACHE_KEY) || 'null');
+                if (ec && ec.ts && (Date.now() - ec.ts) < 60 * 60 * 1000) {
+                  ediciones = ec.data; // usar caché de ediciones (< 1 hora)
+                  console.log('📦 Ediciones admin desde caché:', seccionId);
+                }
+              } catch (_) {}
+
+              if (ediciones === null) {
+                // Leer ediciones desde Firestore y cachear
+                const { collection: col2, query: q2, where: w2, getDocs: gd2 } = window.__firebase_firestore;
+                const editQ = q2(col2(db, 'questions'), w2('seccionId', '==', seccionId));
+                const editSnap = await gd2(editQ);
+                ediciones = [];
+                editSnap.forEach(d => ediciones.push(d.data()));
+                try {
+                  localStorage.setItem(EDIT_CACHE_KEY, JSON.stringify({ ts: Date.now(), data: ediciones }));
+                } catch (_) {}
+                if (ediciones.length > 0)
+                  console.log('✏️ Ediciones admin cargadas y cacheadas:', seccionId, '→', ediciones.length);
               }
-            } catch(editErr) {
+
+              ediciones.forEach(ed => {
+                const idx = ed.qIndex;
+                if (!preguntas[idx]) return;
+                if (ed.pregunta    !== undefined) preguntas[idx].pregunta    = ed.pregunta;
+                if (ed.opciones    !== undefined) preguntas[idx].opciones    = ed.opciones;
+                if (ed.correcta    !== undefined) preguntas[idx].correcta    = ed.correcta;
+                if (ed.explicacion !== undefined) preguntas[idx].explicacion = ed.explicacion;
+                if (ed.imagen      !== undefined) preguntas[idx].imagen      = ed.imagen;
+              });
+            } catch (editErr) {
               console.warn('No se pudieron cargar ediciones de admin:', editErr.message);
             }
 
+            // ── Guardar preguntas en caché localStorage ───────────────
+            try {
+              localStorage.setItem(
+                PREGUNTAS_CACHE_PREFIX + seccionId,
+                JSON.stringify({ ts: Date.now(), preguntas })
+              );
+            } catch (_) { /* quota exceeded en localStorage → ignorar */ }
+
             _seccionesYaCargadas.add(seccionId);
-            console.log('✅ Firestore:', seccionId, '→', preguntas.length, 'preguntas');
+            console.log('✅ Firestore→caché:', seccionId, '→', preguntas.length, 'preguntas');
             resolve();
           } catch (e) {
             console.error('❌ Error cargando desde Firestore:', seccionId, e);
@@ -5007,6 +5037,9 @@
           updatedBy  : _currentUser.uid
         }, { merge: true });
         fbToast('✅ Explicación guardada en Firestore', 'success');
+        // Invalidar caché local de ediciones para esta sección
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+        try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
         if (wrap) wrap.remove();
         // Actualizar el dataset del div y el texto del botón sin regenerar todo
         const expDiv = document.getElementById(`explicacion-${seccionId}-${qIndex}`);
@@ -7026,30 +7059,45 @@
   }
 
   async function fbLogout() {
-    // Cancelar listener de progreso en tiempo real antes de cerrar sesión
-    // _fbProgressUnsubscribe es la variable del scope externo usada por fbSyncProgressFromCloud
+    // ── 1. Cancelar listeners en tiempo real ────────────────────────
     if (typeof _fbProgressUnsubscribe !== 'undefined' && _fbProgressUnsubscribe) {
       _fbProgressUnsubscribe();
       _fbProgressUnsubscribe = null;
     }
-    // También cancelar si hubiera una referencia local (compatibilidad)
     if (_progressUnsubscribe) {
       _progressUnsubscribe();
       _progressUnsubscribe = null;
     }
+
+    // ── 2. Guardar progreso en Firestore ANTES de cerrar sesión ──────
+    if (_currentUser && _fbDb && window.__fb && Object.keys(state).length > 0) {
+      try {
+        fbToast('Guardando progreso…', 'info');
+        const { doc, setDoc, serverTimestamp } = window.__fb;
+        await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+          state,
+          attemptLog,
+          updatedAt: serverTimestamp()
+        });
+        localStorage.setItem('quiz_progress_ts', String(Date.now()));
+        fbToast('✅ Progreso guardado en la nube', 'success');
+      } catch (e) {
+        console.error('[FB-LOGOUT] Error al guardar progreso antes de cerrar sesión:', e);
+        fbToast('⚠️ No se pudo guardar el progreso en la nube', 'error');
+      }
+    }
+
+    // ── 3. Cerrar sesión en Firebase Auth ───────────────────────────
     const { fbSignOut } = window.__fb;
     await fbSignOut(_fbAuth);
-    // Limpiar todos los elementos del DOM vinculados a la sesión anterior
+
+    // ── 4. Limpiar DOM y estado local ───────────────────────────────
     document.getElementById('fb-user-bar')?.remove();
     document.getElementById('li-admin-btn')?.remove();
     document.getElementById('li-edit-respuestas')?.remove();
     document.getElementById('fb-admin-panel')?.remove();
-    // Limpiar SOLO localStorage (orden de preguntas, timer, scroll).
-    // NO se toca el progreso guardado en Firestore (colección 'progress'),
-    // para que el usuario pueda continuar desde otro dispositivo.
     state = {};
     attemptLog = [];
-    // Resetear índice del buscador para que se reconstruya en el próximo login
     searchIndex = [];
     indexBuilt = false;
     indexBuilding = false;
@@ -7058,11 +7106,10 @@
     try { localStorage.removeItem(TIMER_STORAGE_KEY); } catch {}
     try { localStorage.removeItem(SCROLL_POSITION_KEY); } catch {}
     try { localStorage.removeItem(LAST_SECTION_KEY); } catch {}
-    // Limpiar secciones cacheadas en memoria (se recargarán desde Firestore al volver)
+    // Limpiar secciones en memoria (se recargarán desde caché o Firestore en el próximo login)
     _seccionesYaCargadas.clear();
     if (window.preguntasPorSeccion) window.preguntasPorSeccion = {};
     window._extrapolacionAplicada = false;
-    // Resetear flags
     window._fbAdminButtonsSetup = false;
     window._fbCurrentUser = null;
     window._fbCurrentUserData = null;
@@ -7236,98 +7283,43 @@ async function fbSyncProgressFromCloud() {
     return;
   }
 
-  const { doc, onSnapshot } = window.__fb;
+  const { doc, getDoc } = window.__firebase_firestore;
   const uid = _currentUser.uid;
 
-  // Cancelar listener anterior
-  if (_fbProgressUnsubscribe) {
-    _fbProgressUnsubscribe();
-    _fbProgressUnsubscribe = null;
-  }
+  try {
+    fbToast('☁️ Cargando progreso…', 'info');
+    const snap = await getDoc(doc(_fbDb, 'progress', uid));
 
-  // Carga inicial: primer onSnapshot resuelve la Promise
-  await new Promise((resolve) => {
-    const unsubOnce = onSnapshot(
-      doc(_fbDb, 'progress', uid),
-      { includeMetadataChanges: false },
-      (snap) => {
-        unsubOnce();
-        if (snap.exists()) {
-          const data = snap.data();
-          if (data.state) {
-            state      = data.state;
-            attemptLog = data.attemptLog || [];
-            localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
-            localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-            // Sólo registrar timestamp si ya llegó del servidor (no null)
-            const ts = data.updatedAt?.toMillis?.() || 0;
-            window._fbCloudUpdatedAt = ts;
-            fbToast('☁️ Progreso cargado desde la nube', 'success');
-          } else {
-            fbToast('☁️ Sin progreso guardado aún', 'info');
-          }
-        } else {
-          fbToast('☁️ Primera vez: sin progreso en la nube', 'info');
-        }
-        resolve();
-      },
-      (e) => {
-        fbToast('❌ Error leyendo Firestore: ' + e.code, 'error');
-        resolve();
-      }
-    );
-  });
+    if (!snap.exists()) {
+      fbToast('☁️ Primera vez: sin progreso en la nube', 'info');
+      return;
+    }
 
-  // Listener permanente para tiempo real
-  _fbProgressUnsubscribe = onSnapshot(
-    doc(_fbDb, 'progress', uid),
-    { includeMetadataChanges: true },
-    function(snap) {
-      var hasPending = snap.metadata.hasPendingWrites;
-      var fromCache  = snap.metadata.fromCache;
-      var snapTs     = snap.exists() ? (snap.data().updatedAt && snap.data().updatedAt.toMillis ? snap.data().updatedAt.toMillis() : 0) : 0;
-      console.log('[FB-SNAP] snapshot recibido — exists=' + snap.exists() + ', hasPendingWrites=' + hasPending + ', fromCache=' + fromCache + ', snapTs=' + snapTs + ', _fbCloudUpdatedAt=' + (window._fbCloudUpdatedAt||0) + ', _fbSyncInProgress=' + window._fbSyncInProgress);
+    const data = snap.data();
+    if (!data.state) {
+      fbToast('☁️ Sin progreso guardado aún', 'info');
+      return;
+    }
 
-      // Ignorar escrituras pendientes locales (eco de nuestra propia escritura)
-      if (hasPending) { console.log('[FB-SNAP] IGNORADO: hasPendingWrites=true'); return; }
-      // Ignorar si nosotros acabamos de guardar (bandera de 500ms)
-      if (window._fbSyncInProgress) { console.log('[FB-SNAP] IGNORADO: _fbSyncInProgress=true'); return; }
-      if (!snap.exists()) { console.log('[FB-SNAP] IGNORADO: documento no existe'); return; }
-      var data = snap.data();
-      if (!data.state) { console.log('[FB-SNAP] IGNORADO: data.state vacío'); return; }
+    const cloudTs = data.updatedAt?.toMillis?.() || 0;
+    const localTs = parseInt(localStorage.getItem('quiz_progress_ts') || '0', 10);
 
-      // Aceptar actualizaciones del servidor aunque snapTs sea 0.
-      // IMPORTANTE: usar < estricto (no <=) para NO descartar updates con el mismo
-      // timestamp que el último recibido — esto podría descartar cambios válidos del
-      // otro dispositivo que llegaron con serverTimestamp igual.
-      // Si snapTs es 0 y NO viene de caché, es una actualización real con timestamp aún
-      // pendiente de resolución — se debe procesar igual.
-      if (!snap.metadata.fromCache && snapTs > 0 && snapTs < (window._fbCloudUpdatedAt || 0)) {
-        console.log('[FB-SNAP] IGNORADO: snapTs (' + snapTs + ') < _fbCloudUpdatedAt (' + (window._fbCloudUpdatedAt||0) + ')');
-        return;
-      }
-
-      if (snapTs > 0) window._fbCloudUpdatedAt = snapTs;
+    if (cloudTs >= localTs) {
+      // La nube es más reciente (o igual) → usar la nube
       state      = data.state;
       attemptLog = data.attemptLog || [];
       localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
       localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-
-      console.log('[FB-SNAP] APLICADO: estado actualizado desde otro dispositivo');
-      fbToast('Progreso sincronizado desde otro dispositivo', 'success');
-
-      window._fbSyncInProgress = true;
-      try {
-        if (currentSection && preguntasPorSeccion[currentSection]) {
-          generarCuestionario(currentSection);
-        }
-        if (typeof actualizarPanelProgreso === 'function') actualizarPanelProgreso();
-      } finally {
-        window._fbSyncInProgress = false;
-      }
-    },
-    function(e) { fbToast('Error en listener: ' + e.code, 'error'); }
-  );
+      localStorage.setItem('quiz_progress_ts', String(cloudTs));
+      window._fbCloudUpdatedAt = cloudTs;
+      fbToast('☁️ Progreso cargado desde la nube', 'success');
+    } else {
+      // El local es más reciente → no sobreescribir, la nube se actualizará al cerrar sesión
+      fbToast('📱 Progreso local más reciente — se sincronizará al cerrar sesión', 'info');
+    }
+  } catch (e) {
+    fbToast('❌ Error leyendo Firestore: ' + e.code, 'error');
+  }
 }
 
 function fbSaveProgressToCloud() {
@@ -7359,6 +7351,7 @@ function fbSaveProgressToCloud() {
   })
     .then(function() {
       console.log('[FB-SYNC] OK: Progreso guardado en Firestore');
+      localStorage.setItem('quiz_progress_ts', String(Date.now()));
       fbToast('Guardado en la nube', 'success');
       // Liberar el flag en 200ms (suficiente para que llegue el eco del snapshot local)
       // Antes era 500ms, lo que silenciaba guardados legítimos en respuestas rápidas
@@ -7959,6 +7952,9 @@ function fbSaveProgressToCloud() {
           updatedBy  : _currentUser.uid
         }, { merge: true });
         fbToast('✅ Pregunta guardada en Firestore', 'success');
+        // Invalidar caché local para que el cambio sea visible en el próximo cargarSeccion()
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+        try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
         overlay.remove();
         generarCuestionario(seccionId);
       } catch(e) {
@@ -8196,6 +8192,9 @@ function fbSaveProgressToCloud() {
               }, { merge: true });
               savingSpan.style.display = 'none';
               fbToast(`✅ Preg. ${qIndex+1} — respuesta correcta actualizada`, 'success');
+              // Invalidar caché local de ediciones para esta sección
+              try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+              try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
             } catch(e) {
               savingSpan.style.display = 'none';
               fbToast(`❌ Error al guardar: ${e.message}`, 'error');
