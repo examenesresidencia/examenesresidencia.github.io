@@ -1,4 +1,4 @@
-//PRUEB 45 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 46 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -8442,52 +8442,97 @@ function fbSaveProgressToCloud() {
   };
 
   // ════════════════════════════════════════════════════════════════
-  // MÓDULO 3: SESIÓN ÚNICA POR DISPOSITIVO (deviceId en sessionStorage)
+  // MÓDULO 3: SESIÓN ÚNICA POR DISPOSITIVO (deviceId en localStorage)
   // ════════════════════════════════════════════════════════════════
+  // FIXES aplicados:
+  //   1) deviceId en localStorage (no sessionStorage): persiste entre recargas
+  //      y pestañas del mismo navegador, evitando que cada pestaña genere un ID nuevo.
+  //   2) Leer el doc de sesión ANTES de escribir: si hay una sesión activa de
+  //      otro deviceId reciente (< 30 s), no sobreescribir para no desplazar
+  //      una sesión legítima que acaba de iniciarse.
+  //   3) El onSnapshot ignora el primer disparo (propio): espera 1 s
+  //      antes de activar la guardia para evitar falsos positivos al recargar.
 
   let _fbSessionUnsubscribeLocal = null;
 
   function _fbGetOrCreateDeviceId() {
-    let id = sessionStorage.getItem('fb_device_id');
+    // localStorage: el ID sobrevive recargas y múltiples pestañas del mismo navegador.
+    // Dos pestañas del mismo browser comparten el mismo deviceId -> no se expulsan entre si.
+    // Un celular diferente tendra su propio deviceId -> si se expulsa.
+    let id = localStorage.getItem('fb_device_id');
     if (!id) {
       id = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
-      sessionStorage.setItem('fb_device_id', id);
+      localStorage.setItem('fb_device_id', id);
     }
     return id;
   }
 
   async function _fbRegisterSession(uid) {
     if (!window.__fb || !_fbDb) return;
-    const { doc, setDoc, onSnapshot, serverTimestamp } = window.__fb;
+    const { doc, setDoc, getDoc, onSnapshot, serverTimestamp } = window.__fb;
     const deviceId = _fbGetOrCreateDeviceId();
 
     try {
+      // FIX 2: Leer antes de escribir
+      // Si existe una sesion activa de OTRO dispositivo con lastSeen reciente
+      // (< 30 s), ese dispositivo acaba de loguearse y es el dueno legitimo.
+      // En ese caso NO sobreescribimos: el nuevo intento vera que su deviceId
+      // no coincide y mostrara el modal de expulsion.
+      try {
+        const existing = await getDoc(doc(_fbDb, 'sessions', uid));
+        if (existing.exists()) {
+          const d = existing.data();
+          const otroDevice = d.deviceId && d.deviceId !== deviceId;
+          const reciente   = d.updatedAt && d.updatedAt.toMillis &&
+                             (Date.now() - d.updatedAt.toMillis()) < 30000;
+          if (otroDevice && reciente) {
+            console.warn('[SESSION] Sesion reciente de otro device detectada - no sobreescribir');
+            _fbEscucharSesion(uid, deviceId);
+            return;
+          }
+        }
+      } catch (_) { /* Si falla la lectura previa, continuar con escritura normal */ }
+
       await setDoc(doc(_fbDb, 'sessions', uid), {
         deviceId,
-        lastSeen: serverTimestamp(),
+        lastSeen : serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      console.log('[SESSION] Sesión registrada — deviceId:', deviceId);
+      console.log('[SESSION] Sesion registrada - deviceId:', deviceId);
 
-      // Escuchar cambios: si deviceId cambia, otro dispositivo tomó la sesión
-      if (_fbSessionUnsubscribeLocal) _fbSessionUnsubscribeLocal();
-
-      _fbSessionUnsubscribeLocal = onSnapshot(doc(_fbDb, 'sessions', uid), (snap) => {
-        if (!snap.exists() || !_currentUser) return;
-        const data = snap.data();
-        const myDeviceId = sessionStorage.getItem('fb_device_id');
-        if (data.deviceId && data.deviceId !== myDeviceId) {
-          console.warn('[SESSION] Sesión abierta en otro dispositivo:', data.deviceId);
-          if (_fbSessionUnsubscribeLocal) {
-            _fbSessionUnsubscribeLocal();
-            _fbSessionUnsubscribeLocal = null;
-          }
-          _fbMostrarModalSesionDuplicada();
-        }
-      });
+      _fbEscucharSesion(uid, deviceId);
     } catch (e) {
-      console.warn('[SESSION] Error al registrar sesión:', e.message);
+      console.warn('[SESSION] Error al registrar sesion:', e.message);
     }
+  }
+
+  function _fbEscucharSesion(uid, deviceId) {
+    const { doc, onSnapshot } = window.__fb;
+    if (_fbSessionUnsubscribeLocal) _fbSessionUnsubscribeLocal();
+
+    // FIX 3: Ignorar el primer disparo del snapshot
+    // El primer evento de onSnapshot es inmediato (refleja el doc que acabamos
+    // de escribir o el estado local en cache). Activar la guardia solo despues
+    // de 1 segundo evita falsos positivos en recargas rapidas.
+    let _sessionGuardActiva = false;
+    const _guardTimer = setTimeout(() => { _sessionGuardActiva = true; }, 1000);
+
+    _fbSessionUnsubscribeLocal = onSnapshot(doc(_fbDb, 'sessions', uid), (snap) => {
+      if (!snap.exists() || !_currentUser) return;
+      if (!_sessionGuardActiva) return; // Ignorar disparo inicial
+
+      const data     = snap.data();
+      const myDevice = localStorage.getItem('fb_device_id');
+      if (data.deviceId && data.deviceId !== myDevice) {
+        console.warn('[SESSION] Sesion abierta en otro dispositivo:', data.deviceId);
+        clearTimeout(_guardTimer);
+        if (_fbSessionUnsubscribeLocal) {
+          _fbSessionUnsubscribeLocal();
+          _fbSessionUnsubscribeLocal = null;
+        }
+        _fbMostrarModalSesionDuplicada();
+      }
+    });
   }
 
   function _fbMostrarModalSesionDuplicada() {
