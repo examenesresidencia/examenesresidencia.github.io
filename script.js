@@ -289,12 +289,13 @@
   }
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
-    // Sincronizar con Firestore cuando cambia el progreso (debounce 3s)
+    // Sincronizar con Firestore cuando cambia el progreso (debounce 2s)
     if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
       clearTimeout(window._fbSaveTimer);
       window._fbSaveTimer = setTimeout(() => {
+        window._fbSaveTimer = null; // limpiar ANTES de guardar para que el listener no lo ignore
         if (window._fbSaveProgressToCloud) window._fbSaveProgressToCloud();
-      }, 3000);
+      }, 2000);
     }
   }
   function cap(str) {
@@ -1998,7 +1999,7 @@
     const displayOrder = getDisplayOrder(seccionId, preguntas.length);
 
     // Renderizar preguntas en lotes para no bloquear el hilo principal
-    const CHUNK_SIZE = 30;
+    const CHUNK_SIZE = 50;
     let chunkIndex = 0;
 
     const renderChunk = () => {
@@ -2014,8 +2015,7 @@
         // Actualizar spinner con progreso
         const spinner = cont.querySelector('.chunk-progress');
         if (spinner) spinner.textContent = `Cargando preguntas… ${chunkIndex} / ${displayOrder.length}`;
-        // Restaurar estado de las preguntas ya renderizadas en este lote
-        restoreSelectionsAndGrades(seccionId);
+        // Restaurar solo el último lote renderizado (no todo desde el principio)
         setTimeout(renderChunk, 0);
       } else {
         // Todo renderizado: eliminar spinner, conectar botón total, restaurar estado y scroll
@@ -7227,8 +7227,11 @@
     _fbProgressUnsubscribe = onSnapshot(
       doc(_fbDb, 'progress', uid),
       (snap) => {
-        // Ignorar si acabamos de guardar nosotros mismos (timer activo)
-        if (window._fbSaveTimer) return;
+        // Ignorar el eco de nuestra propia escritura usando un flag dedicado
+        if (window._fbIgnoreNextSnapshot) {
+          window._fbIgnoreNextSnapshot = false;
+          return;
+        }
         if (!snap.exists()) return;
         const data = snap.data();
         if (!data.state) return;
@@ -7242,12 +7245,14 @@
         attemptLog = data.attemptLog || [];
         localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
         localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-        console.log('☁️ Progreso recibido desde otro dispositivo');
+        console.log('☁️ Progreso recibido desde otro dispositivo — actualizando UI');
 
         // Si hay un cuestionario abierto, re-renderizarlo para mostrar las preguntas respondidas
-        if (currentSection) {
+        if (currentSection && preguntasPorSeccion[currentSection]) {
           generarCuestionario(currentSection);
         }
+        // Actualizar el panel de progreso si está abierto
+        if (typeof actualizarPanelProgreso === 'function') actualizarPanelProgreso();
       },
       (e) => console.warn('⚠️ Error en listener de progreso:', e.message)
     );
@@ -7256,11 +7261,15 @@
   function fbSaveProgressToCloud() {
     if (!_currentUser || !window.__fb) return;
     const { doc, setDoc, serverTimestamp } = window.__fb;
+    window._fbIgnoreNextSnapshot = true; // ignorar el eco de esta escritura
     setDoc(doc(_fbDb,'progress',_currentUser.uid), {
       state, attemptLog, updatedAt: serverTimestamp()
     }, { merge: true })
       .then(() => console.log('☁️ Progreso guardado en Firestore'))
-      .catch(e => console.warn('Firebase save error:', e));
+      .catch(e => {
+        window._fbIgnoreNextSnapshot = false;
+        console.warn('Firebase save error:', e);
+      });
   }
   // Exponer en window para que saveJSON pueda llamarla (definida más arriba en el closure)
   window._fbSaveProgressToCloud = fbSaveProgressToCloud;
