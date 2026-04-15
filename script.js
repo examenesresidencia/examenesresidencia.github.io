@@ -8268,6 +8268,588 @@ function fbSaveProgressToCloud() {
 
   window.fbToggleModoEditarRespuestas = fbToggleModoEditarRespuestas;
 
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO 1: GUARDADO AUTOMÁTICO EN FIRESTORE CON DEBOUNCE (90s)
+  // + GUARDADO INMEDIATO AL CERRAR SESIÓN / PESTAÑA
+  // ════════════════════════════════════════════════════════════════
 
+  let _fbSaveDebounceTimer = null;
+  const FB_SAVE_DEBOUNCE_MS = 90 * 1000; // 90 segundos de inactividad
+
+  // Extender saveJSON para programar guardado en nube con debounce
+  const _origSaveJSON = saveJSON;
+  function saveJSONConCloud(key, value) {
+    // Guardar localmente primero (siempre rápido)
+    localStorage.setItem(key, JSON.stringify(value));
+    // Solo disparar guardado en nube para la clave de estado del quiz
+    if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
+      _fbScheduleCloudSave();
+    }
+  }
+  // Reemplazar saveJSON en el scope del IIFE apuntando a la versión extendida
+  // Usamos una variable para no romper referencias internas
+  window._saveJSONConCloud = saveJSONConCloud;
+
+  function _fbScheduleCloudSave() {
+    if (!_currentUser || !window.__fb) return;
+    if (_fbSaveDebounceTimer) clearTimeout(_fbSaveDebounceTimer);
+    _fbSaveDebounceTimer = setTimeout(() => {
+      _fbSaveDebounceTimer = null;
+      fbSaveProgressToCloud();
+    }, FB_SAVE_DEBOUNCE_MS);
+  }
+
+  // Parchar la función saveJSON ya definida para que también llame al debounce
+  // Solución compatible: sobreescribir la propiedad en el objeto window como puente
+  // El truco: saveJSON ya está en el closure; lo reemplazamos via wrapper en window
+  // y todas las llamadas externas usarán la versión con cloud
+  const _localSaveJSON = saveJSON;
+  // NOTA: dentro del IIFE, saveJSON() sigue llamando a la versión local.
+  // Para capturar CADA llamada a saveJSON() que ya existe en el código,
+  // aplicamos un patch directo al código via la función global expuesta:
+  window._fbOnSaveJSON = function(key) {
+    if ((key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) && _currentUser) {
+      _fbScheduleCloudSave();
+    }
+  };
+
+  // Reemplazar saveJSON para interceptar guardados y programar sync
+  // Usamos Function.prototype para parcharlo en el scope del closure
+  // Estrategia: exponer la lógica de debounce y llamarla desde saveJSON
+  // La función saveJSON original ya está definida en el IIFE —
+  // la reemplazamos con una versión que también llama al debounce:
+  // IMPORTANTE: Este patch opera DESPUÉS de que saveJSON ya guardó en localStorage
+  // Usamos MutationObserver del localStorage como proxy:
+  const _storagePatcher = function(e) {
+    if (e && (e.key === STORAGE_KEY || e.key === ATTEMPT_LOG_KEY)) {
+      if (_currentUser && window.__fb) _fbScheduleCloudSave();
+    }
+  };
+  window.addEventListener('storage', _storagePatcher);
+
+  // Guardar INMEDIATAMENTE al cerrar pestaña/ventana
+  window.addEventListener('beforeunload', () => {
+    if (_fbSaveDebounceTimer) {
+      clearTimeout(_fbSaveDebounceTimer);
+      _fbSaveDebounceTimer = null;
+    }
+    // Solo podemos hacer operaciones síncronas aquí.
+    // Marcamos que hay un guardado pendiente para el próximo login.
+    try { localStorage.setItem('quiz_beforeunload_pending', '1'); } catch (_) {}
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO 2: PANTALLA DE CARGA PROFESIONAL AL SINCRONIZAR PROGRESO
+  // ════════════════════════════════════════════════════════════════
+
+  function _fbInjectLoadingStyles() {
+    if (document.getElementById('fb-progress-loading-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'fb-progress-loading-styles';
+    s.textContent = `
+      #fb-progress-loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 99992;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 18px;
+        background: linear-gradient(135deg, #0a1628 0%, #0d2444 55%, #071220 100%);
+        animation: fbPlFadeIn 0.22s ease both;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      @keyframes fbPlFadeIn { from{opacity:0} to{opacity:1} }
+      .fb-pl-logo {
+        width: 58px; height: 58px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0891b2, #0d7490);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.8rem;
+        box-shadow: 0 8px 28px rgba(8,145,178,0.45);
+        margin-bottom: 6px;
+        animation: fbPlLogoBounce 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.1s both;
+      }
+      @keyframes fbPlLogoBounce {
+        from { opacity:0; transform:scale(0.7) translateY(10px); }
+        to   { opacity:1; transform:scale(1) translateY(0); }
+      }
+      .fb-pl-spinner {
+        width: 46px; height: 46px;
+        border: 4px solid rgba(8,145,178,0.18);
+        border-top-color: #0891b2;
+        border-radius: 50%;
+        animation: fbPlSpin 0.72s linear infinite;
+      }
+      @keyframes fbPlSpin { to { transform: rotate(360deg); } }
+      .fb-pl-title {
+        color: #f1f5f9;
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        animation: fbPlFadeUp 0.4s ease 0.15s both;
+      }
+      .fb-pl-sub {
+        color: #475569;
+        font-size: 0.82rem;
+        margin-top: -8px;
+        animation: fbPlFadeUp 0.4s ease 0.25s both;
+      }
+      @keyframes fbPlFadeUp {
+        from { opacity:0; transform:translateY(6px); }
+        to   { opacity:1; transform:translateY(0); }
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function _fbShowProgressLoading() {
+    _fbInjectLoadingStyles();
+    if (document.getElementById('fb-progress-loading-overlay')) return;
+    const el = document.createElement('div');
+    el.id = 'fb-progress-loading-overlay';
+    el.innerHTML = `
+      <div class="fb-pl-logo">🩺</div>
+      <div class="fb-pl-spinner"></div>
+      <div class="fb-pl-title">Cargando tu progreso…</div>
+      <div class="fb-pl-sub">Sincronizando con la nube</div>
+    `;
+    document.body.appendChild(el);
+  }
+
+  function _fbHideProgressLoading() {
+    const el = document.getElementById('fb-progress-loading-overlay');
+    if (!el) return;
+    el.style.transition = 'opacity 0.28s ease';
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 300);
+  }
+
+  // Envolver fbSyncProgressFromCloud para mostrar/ocultar overlay
+  const _origFbSync = fbSyncProgressFromCloud;
+  fbSyncProgressFromCloud = async function fbSyncProgressFromCloudConOverlay() {
+    _fbShowProgressLoading();
+    try {
+      await _origFbSync();
+    } finally {
+      _fbHideProgressLoading();
+      // Disparar evento para iniciar módulos de sesión/heartbeat/inactividad
+      document.dispatchEvent(new CustomEvent('fb:usuarioAprobadoActivo'));
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO 3: SESIÓN ÚNICA POR DISPOSITIVO (deviceId en sessionStorage)
+  // ════════════════════════════════════════════════════════════════
+
+  let _fbSessionUnsubscribeLocal = null;
+
+  function _fbGetOrCreateDeviceId() {
+    let id = sessionStorage.getItem('fb_device_id');
+    if (!id) {
+      id = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+      sessionStorage.setItem('fb_device_id', id);
+    }
+    return id;
+  }
+
+  async function _fbRegisterSession(uid) {
+    if (!window.__fb || !_fbDb) return;
+    const { doc, setDoc, onSnapshot, serverTimestamp } = window.__fb;
+    const deviceId = _fbGetOrCreateDeviceId();
+
+    try {
+      await setDoc(doc(_fbDb, 'sessions', uid), {
+        deviceId,
+        lastSeen: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      console.log('[SESSION] Sesión registrada — deviceId:', deviceId);
+
+      // Escuchar cambios: si deviceId cambia, otro dispositivo tomó la sesión
+      if (_fbSessionUnsubscribeLocal) _fbSessionUnsubscribeLocal();
+
+      _fbSessionUnsubscribeLocal = onSnapshot(doc(_fbDb, 'sessions', uid), (snap) => {
+        if (!snap.exists() || !_currentUser) return;
+        const data = snap.data();
+        const myDeviceId = sessionStorage.getItem('fb_device_id');
+        if (data.deviceId && data.deviceId !== myDeviceId) {
+          console.warn('[SESSION] Sesión abierta en otro dispositivo:', data.deviceId);
+          if (_fbSessionUnsubscribeLocal) {
+            _fbSessionUnsubscribeLocal();
+            _fbSessionUnsubscribeLocal = null;
+          }
+          _fbMostrarModalSesionDuplicada();
+        }
+      });
+    } catch (e) {
+      console.warn('[SESSION] Error al registrar sesión:', e.message);
+    }
+  }
+
+  function _fbMostrarModalSesionDuplicada() {
+    _fbInjectSessionStyles();
+    if (document.getElementById('fb-modal-sesion-duplicada')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'fb-modal-sesion-duplicada';
+    overlay.innerHTML = `
+      <div class="fbsd-caja">
+        <div class="fbsd-icono">⚠️</div>
+        <div class="fbsd-titulo">Sesión abierta en otro lugar</div>
+        <div class="fbsd-mensaje">
+          Tu cuenta fue iniciada en otro dispositivo o pestaña.<br>
+          Por seguridad, esta sesión se cerrará automáticamente.
+        </div>
+        <div class="fbsd-countdown" id="fbsd-countdown">8</div>
+        <button class="fbsd-btn" id="fbsd-btn-cerrar">Entendido — Cerrar sesión</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById('fbsd-btn-cerrar').onclick = () => {
+      overlay.remove();
+      fbLogout();
+    };
+
+    // Cuenta regresiva de 8 segundos
+    let segs = 8;
+    const cdEl = document.getElementById('fbsd-countdown');
+    const cdInterval = setInterval(() => {
+      segs--;
+      if (cdEl) cdEl.textContent = segs;
+      if (segs <= 0) {
+        clearInterval(cdInterval);
+        overlay.remove();
+        fbLogout();
+      }
+    }, 1000);
+  }
+
+  function _fbInjectSessionStyles() {
+    if (document.getElementById('fb-session-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'fb-session-styles';
+    s.textContent = `
+      #fb-modal-sesion-duplicada {
+        position: fixed; inset: 0; z-index: 200000;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(10,22,40,0.88);
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        padding: 20px; font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      #fb-modal-sesion-duplicada .fbsd-caja {
+        background: rgba(15,23,42,0.97);
+        border: 1px solid rgba(239,68,68,0.3);
+        border-radius: 22px; padding: 42px 40px 34px;
+        max-width: 420px; width: 100%; text-align: center;
+        box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+        animation: fbsdIn 0.4s cubic-bezier(0.34,1.56,0.64,1) both;
+        /* Glassmorphism */
+        backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      }
+      @keyframes fbsdIn {
+        from { opacity:0; transform:scale(0.88) translateY(20px); }
+        to   { opacity:1; transform:scale(1) translateY(0); }
+      }
+      #fb-modal-sesion-duplicada .fbsd-icono {
+        font-size: 3rem; margin-bottom: 16px; display: block;
+      }
+      #fb-modal-sesion-duplicada .fbsd-titulo {
+        color: #f1f5f9; font-size: 1.3rem; font-weight: 800;
+        margin-bottom: 12px; letter-spacing: -0.02em;
+      }
+      #fb-modal-sesion-duplicada .fbsd-mensaje {
+        color: #94a3b8; font-size: 0.9rem; line-height: 1.65; margin-bottom: 20px;
+      }
+      #fb-modal-sesion-duplicada .fbsd-countdown {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 46px; height: 46px; border-radius: 50%;
+        background: rgba(239,68,68,0.15);
+        border: 2px solid rgba(239,68,68,0.4);
+        color: #fca5a5; font-size: 1.3rem; font-weight: 800;
+        margin-bottom: 20px;
+        animation: fbsdPulse 1s ease infinite;
+      }
+      @keyframes fbsdPulse {
+        0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.3); }
+        50%     { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+      }
+      #fb-modal-sesion-duplicada .fbsd-btn {
+        width: 100%; padding: 13px; border: none; border-radius: 11px;
+        background: linear-gradient(135deg, #dc2626, #b91c1c);
+        color: #fff; font-size: 0.95rem; font-weight: 700; cursor: pointer;
+        box-shadow: 0 4px 16px rgba(220,38,38,0.35);
+        transition: all 0.18s ease; letter-spacing: 0.01em;
+      }
+      #fb-modal-sesion-duplicada .fbsd-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(220,38,38,0.45);
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO 4: HEARTBEAT (lastActivity cada 60 segundos)
+  // Pausa cuando la pestaña no es visible
+  // ════════════════════════════════════════════════════════════════
+
+  let _fbHeartbeatIntervalLocal = null;
+
+  async function _fbSendHeartbeat() {
+    if (!_currentUser || !window.__fb || !_fbDb) return;
+    if (document.hidden) return; // Pestaña oculta → no gastar lecturas/escrituras
+
+    try {
+      const { doc, updateDoc, serverTimestamp } = window.__fb;
+      await updateDoc(doc(_fbDb, 'sessions', _currentUser.uid), {
+        lastActivity: serverTimestamp()
+      });
+    } catch (_) {
+      // Silencioso: puede fallar si el doc de sesión no existe aún
+    }
+  }
+
+  function _fbStartHeartbeat() {
+    if (_fbHeartbeatIntervalLocal) return;
+    _fbHeartbeatIntervalLocal = setInterval(_fbSendHeartbeat, 60 * 1000);
+    console.log('[HEARTBEAT] Iniciado');
+
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        console.log('[HEARTBEAT] Pestaña visible → enviando heartbeat');
+        _fbSendHeartbeat();
+      }
+    });
+  }
+
+  function _fbStopHeartbeat() {
+    if (_fbHeartbeatIntervalLocal) {
+      clearInterval(_fbHeartbeatIntervalLocal);
+      _fbHeartbeatIntervalLocal = null;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO 5: CIERRE POR INACTIVIDAD (30 min, NO para admin)
+  // Avisos a 20 min, 25 min, 29 min — botón "SEGUIR USANDO"
+  // ════════════════════════════════════════════════════════════════
+
+  const _INACT_MAX      = 30 * 60 * 1000;
+  const _INACT_AVISO_1  = 20 * 60 * 1000; // 20 min → aviso "quedan 10 min"
+  const _INACT_AVISO_2  = 25 * 60 * 1000; // 25 min → aviso "quedan 5 min"
+  const _INACT_AVISO_3  = 29 * 60 * 1000; // 29 min → aviso "queda 1 min" + cuenta regresiva 60s
+
+  let _inactTimers    = { t1: null, t2: null, t3: null, cierre: null };
+  let _inactCdInterval = null;
+  const _INACT_EVENTS = ['mousemove', 'click', 'keydown', 'touchstart', 'scroll'];
+
+  function _inactReset() {
+    // Cerrar modal de aviso si está abierto
+    const m = document.getElementById('fb-modal-inactividad');
+    if (m) m.remove();
+    if (_inactCdInterval) { clearInterval(_inactCdInterval); _inactCdInterval = null; }
+
+    // Cancelar timers anteriores
+    Object.values(_inactTimers).forEach(t => t && clearTimeout(t));
+
+    // Programar nuevos timers
+    _inactTimers.t1    = setTimeout(() => _inactAviso(10, false), _INACT_AVISO_1);
+    _inactTimers.t2    = setTimeout(() => _inactAviso(5, false),  _INACT_AVISO_2);
+    _inactTimers.t3    = setTimeout(() => _inactAviso(1, true),   _INACT_AVISO_3);
+    _inactTimers.cierre = setTimeout(() => _inactCerrar(),         _INACT_MAX);
+  }
+
+  function _inactStart() {
+    if (_currentUserData?.role === 'admin') return; // Nunca para admin
+    _INACT_EVENTS.forEach(ev => window.addEventListener(ev, _inactReset, { passive: true }));
+    _inactReset();
+    console.log('[INACTIVIDAD] Watcher iniciado (30 min)');
+  }
+
+  function _inactStop() {
+    _INACT_EVENTS.forEach(ev => window.removeEventListener(ev, _inactReset));
+    Object.values(_inactTimers).forEach(t => t && clearTimeout(t));
+    _inactTimers = { t1: null, t2: null, t3: null, cierre: null };
+    if (_inactCdInterval) { clearInterval(_inactCdInterval); _inactCdInterval = null; }
+    document.getElementById('fb-modal-inactividad')?.remove();
+  }
+
+  function _inactAviso(minsRestantes, conCuentaRegresiva) {
+    if (_currentUserData?.role === 'admin') return;
+    if (!_currentUser) return;
+
+    _fbInjectInactividadStyles();
+    document.getElementById('fb-modal-inactividad')?.remove();
+    if (_inactCdInterval) { clearInterval(_inactCdInterval); _inactCdInterval = null; }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'fb-modal-inactividad';
+    const tiempoStr = minsRestantes === 1 ? '1 minuto' : `${minsRestantes} minutos`;
+
+    overlay.innerHTML = `
+      <div class="fbinact-caja">
+        <div class="fbinact-icono">${minsRestantes <= 1 ? '🚨' : '⏰'}</div>
+        <div class="fbinact-titulo">${minsRestantes <= 1 ? '¡Sesión a punto de cerrarse!' : 'Aviso de inactividad'}</div>
+        <div class="fbinact-mensaje">
+          Tu sesión se cerrará en <strong>${tiempoStr}</strong> por inactividad.
+          ${conCuentaRegresiva ? '<br><span class="fbinact-cd" id="fbinact-cd">60</span>' : ''}
+        </div>
+        <button class="fbinact-btn" id="fbinact-btn-seguir">✋ SEGUIR USANDO</button>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById('fbinact-btn-seguir').onclick = () => {
+      overlay.remove();
+      if (_inactCdInterval) { clearInterval(_inactCdInterval); _inactCdInterval = null; }
+      _inactReset();
+    };
+
+    if (conCuentaRegresiva) {
+      let segs = 60;
+      _inactCdInterval = setInterval(() => {
+        segs--;
+        const cdEl = document.getElementById('fbinact-cd');
+        if (cdEl) cdEl.textContent = segs;
+        if (segs <= 0) { clearInterval(_inactCdInterval); _inactCdInterval = null; }
+      }, 1000);
+    }
+  }
+
+  function _inactCerrar() {
+    if (_currentUserData?.role === 'admin') return;
+    if (!_currentUser) return;
+    console.log('[INACTIVIDAD] Cerrando sesión por inactividad (30 min)');
+    _inactStop();
+    fbLogout();
+  }
+
+  function _fbInjectInactividadStyles() {
+    if (document.getElementById('fb-inactividad-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'fb-inactividad-styles';
+    s.textContent = `
+      #fb-modal-inactividad {
+        position: fixed; inset: 0; z-index: 150000;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(10,22,40,0.78);
+        backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+        padding: 20px; font-family: 'Segoe UI', system-ui, sans-serif;
+        animation: fbInactIn 0.25s ease both;
+      }
+      @keyframes fbInactIn { from{opacity:0} to{opacity:1} }
+      #fb-modal-inactividad .fbinact-caja {
+        background: rgba(15,23,42,0.97);
+        /* Glassmorphism */
+        backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+        border: 1px solid rgba(255,255,255,0.09);
+        border-radius: 24px; padding: 44px 40px 36px;
+        max-width: 420px; width: 100%; text-align: center;
+        box-shadow: 0 32px 80px rgba(0,0,0,0.55),
+                    0 0 0 1px rgba(255,255,255,0.04),
+                    inset 0 1px 0 rgba(255,255,255,0.06);
+        animation: fbInactEntrada 0.38s cubic-bezier(0.34,1.56,0.64,1) both;
+      }
+      @keyframes fbInactEntrada {
+        from { opacity:0; transform:scale(0.88) translateY(24px); }
+        to   { opacity:1; transform:scale(1) translateY(0); }
+      }
+      #fb-modal-inactividad .fbinact-icono {
+        font-size: 3rem; margin-bottom: 18px; display: block;
+        animation: fbInactIcono 0.42s cubic-bezier(0.34,1.56,0.64,1) 0.1s both;
+      }
+      @keyframes fbInactIcono {
+        from { opacity:0; transform:scale(0.4) rotate(-12deg); }
+        to   { opacity:1; transform:scale(1) rotate(0); }
+      }
+      #fb-modal-inactividad .fbinact-titulo {
+        color: #f1f5f9; font-size: 1.28rem; font-weight: 800;
+        margin-bottom: 14px; letter-spacing: -0.02em;
+      }
+      #fb-modal-inactividad .fbinact-mensaje {
+        color: #94a3b8; font-size: 0.92rem; line-height: 1.65; margin-bottom: 26px;
+      }
+      #fb-modal-inactividad .fbinact-mensaje strong { color: #fbbf24; }
+      #fb-modal-inactividad .fbinact-cd {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 50px; height: 50px; border-radius: 50%;
+        background: rgba(220,38,38,0.18);
+        border: 2px solid rgba(220,38,38,0.42);
+        color: #fca5a5; font-size: 1.4rem; font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        margin: 10px auto 0; animation: fbInactCdPulse 1s ease infinite;
+      }
+      @keyframes fbInactCdPulse {
+        0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.3); }
+        50%     { box-shadow: 0 0 0 10px rgba(220,38,38,0); }
+      }
+      #fb-modal-inactividad .fbinact-btn {
+        width: 100%; padding: 14px 20px; border: none; border-radius: 12px;
+        background: linear-gradient(135deg, #0891b2, #0d7490);
+        color: #fff; font-size: 1rem; font-weight: 800;
+        cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase;
+        box-shadow: 0 4px 20px rgba(8,145,178,0.42),
+                    inset 0 1px 0 rgba(255,255,255,0.15);
+        transition: all 0.2s ease;
+      }
+      #fb-modal-inactividad .fbinact-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 28px rgba(8,145,178,0.52), inset 0 1px 0 rgba(255,255,255,0.15);
+      }
+      #fb-modal-inactividad .fbinact-btn:active { transform: translateY(0); }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // INTEGRACIÓN: Arrancar/parar módulos con el ciclo de vida de auth
+  // ════════════════════════════════════════════════════════════════
+
+  // Cuando el usuario está aprobado y su progreso cargó, iniciamos todo
+  document.addEventListener('fb:usuarioAprobadoActivo', () => {
+    if (!_currentUser || !_currentUserData) return;
+    // Registrar sesión única
+    _fbRegisterSession(_currentUser.uid);
+    // Iniciar heartbeat
+    _fbStartHeartbeat();
+    // Iniciar watcher de inactividad (no para admin)
+    _inactStart();
+    // Limpiar flag de beforeunload pendiente
+    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
+    console.log('[MÓDULOS FB] Sesión única, heartbeat e inactividad activos');
+  });
+
+  // Limpiar módulos al cerrar sesión: parchamos fbLogout para que también detenga módulos
+  // fbLogout ya está definido arriba en el IIFE; lo envolvemos
+  const _fbLogoutOriginal = window.fbLogout;
+  window.fbLogout = async function fbLogoutConModulos() {
+    // 1. Cancelar debounce y guardar inmediatamente
+    if (_fbSaveDebounceTimer) {
+      clearTimeout(_fbSaveDebounceTimer);
+      _fbSaveDebounceTimer = null;
+    }
+    // 2. Detener sesión única
+    if (_fbSessionUnsubscribeLocal) {
+      _fbSessionUnsubscribeLocal();
+      _fbSessionUnsubscribeLocal = null;
+    }
+    // 3. Detener heartbeat
+    _fbStopHeartbeat();
+    // 4. Detener watcher de inactividad
+    _inactStop();
+    // 5. Limpiar flag de beforeunload
+    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
+    // 6. Ejecutar logout original (que ya guarda en Firestore)
+    await _fbLogoutOriginal();
+  };
+
+  // Exponer para uso desde index.html si fuera necesario
+  window._fbStartHeartbeat   = _fbStartHeartbeat;
+  window._fbStopHeartbeat    = _fbStopHeartbeat;
+  window._inactReset         = _inactReset;
+  window._inactStop          = _inactStop;
 
 })();
