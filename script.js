@@ -1,4 +1,3 @@
-
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -288,8 +287,16 @@
       return fallback;
     }
   }
+  let _fbSaveTimer = null;
   function saveJSON(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
+    // Sincronizar con Firestore cuando cambia el progreso
+    if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
+      clearTimeout(_fbSaveTimer);
+      _fbSaveTimer = setTimeout(() => {
+        if (typeof fbSaveProgressToCloud === 'function') fbSaveProgressToCloud();
+      }, 2000);
+    }
   }
   function cap(str) {
     return str ? str.charAt(0).toUpperCase() + str.slice(1) : "";
@@ -2729,16 +2736,6 @@
         if (pregDiv && separador) {
           cont.insertBefore(pregDiv, separador);
         }
-
-        // Renumerar todas las preguntas según su posición visual actual en el DOM
-        const todosDivs = cont.querySelectorAll('.pregunta');
-        todosDivs.forEach((div, posicion) => {
-          const h3 = div.querySelector('h3');
-          if (h3) {
-            // Reemplazar solo el número al inicio: "280. Texto..." → "4. Texto..."
-            h3.textContent = h3.textContent.replace(/^\d+\.\s*/, `${posicion + 1}. `);
-          }
-        });
       }
     }
 
@@ -7010,6 +7007,11 @@
   }
 
   async function fbLogout() {
+    // Cancelar listener de progreso en tiempo real antes de cerrar sesión
+    if (_fbProgressUnsubscribe) {
+      _fbProgressUnsubscribe();
+      _fbProgressUnsubscribe = null;
+    }
     const { fbSignOut } = window.__fb;
     await fbSignOut(_fbAuth);
     // Limpiar todos los elementos del DOM vinculados a la sesión anterior
@@ -7201,28 +7203,57 @@
   }
 
   // ── Sincronización de progreso con Firestore ─────────────────
+  let _fbProgressUnsubscribe = null; // para cancelar el listener al hacer logout
+
   async function fbSyncProgressFromCloud() {
     if (!_currentUser) return;
-    const { doc, getDoc } = window.__fb;
+    const { doc, getDoc, onSnapshot } = window.__fb;
     const uid = _currentUser.uid;
 
+    // 1) Carga inicial: traer el estado de la nube antes de mostrar el menú
     try {
       const snap = await getDoc(doc(_fbDb, 'progress', uid));
-      if (!snap.exists()) return;
-      const data = snap.data();
-      // La nube siempre gana: sobreescribir el estado local completamente
-      if (data.state) {
-        state = data.state;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.state) {
+          state = data.state;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+        if (data.attemptLog) {
+          attemptLog = data.attemptLog;
+          localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
+        }
+        console.log('☁️ Progreso cargado desde la nube (carga inicial)');
       }
-      if (data.attemptLog) {
-        attemptLog = data.attemptLog;
-        localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
-      }
-      console.log('☁️ Progreso cargado desde la nube');
     } catch(e) {
       console.warn('⚠️ No se pudo cargar progreso desde la nube:', e.message);
     }
+
+    // 2) Listener en tiempo real: si otro dispositivo guarda, se refleja acá
+    if (_fbProgressUnsubscribe) _fbProgressUnsubscribe(); // limpiar listener anterior
+    _fbProgressUnsubscribe = onSnapshot(
+      doc(_fbDb, 'progress', uid),
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        // Ignorar actualizaciones que este mismo dispositivo acaba de escribir
+        // (el debounce de 2s garantiza que no pisamos nada en vuelo)
+        const newState = data.state || {};
+        const newLog   = data.attemptLog || [];
+
+        // Solo actualizar si los datos de la nube son distintos a lo local
+        const localState = JSON.stringify(state);
+        const cloudState = JSON.stringify(newState);
+        if (localState !== cloudState || JSON.stringify(attemptLog) !== JSON.stringify(newLog)) {
+          state = newState;
+          attemptLog = newLog;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+          localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
+          console.log('☁️ Progreso sincronizado desde la nube (tiempo real)');
+        }
+      },
+      (e) => console.warn('⚠️ Error en listener de progreso:', e.message)
+    );
   }
 
   function fbSaveProgressToCloud() {
@@ -7233,17 +7264,7 @@
     }, { merge: true }).catch(e => console.warn('Firebase save error:', e));
   }
 
-  // ── Patch de saveJSON para también guardar en Firestore ───────
-  const _origSaveJSON = saveJSON;
-  // Sobrescribir saveJSON con debounce para no saturar Firestore
-  let _fbSaveTimer = null;
-  saveJSON = function(key, value) {
-    _origSaveJSON(key, value);
-    if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
-      clearTimeout(_fbSaveTimer);
-      _fbSaveTimer = setTimeout(() => { fbSaveProgressToCloud(); }, 2000);
-    }
-  };
+  // saveJSON ya incluye sincronización con Firestore (ver definición arriba)
 
   // ── Arranque ─────────────────────────────────────────────────
   // Esperar a que los módulos Firebase estén disponibles
