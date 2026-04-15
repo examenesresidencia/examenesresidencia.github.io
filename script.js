@@ -1,4 +1,4 @@
-//PRUEB 46 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEB 45 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -6535,7 +6535,12 @@
   // ── Mostrar / ocultar pantalla de auth ───────────────────────
   function fbShowAuthScreen(vista = 'login') {
     fbEnsureOverlay();
-    document.getElementById('fb-auth-overlay').style.display = 'flex';
+    const ov = document.getElementById('fb-auth-overlay');
+    // Guardia: si ya se muestra esta misma vista, no re-renderizar
+    // (evita el doble render al inicio y el bucle en dispositivos lentos)
+    if (ov.style.display === 'flex' && ov.dataset.vistaActual === vista) return;
+    ov.dataset.vistaActual = vista;
+    ov.style.display = 'flex';
     // Ocultar contenido principal
     document.querySelectorAll('body > div:not(#fb-auth-overlay), body > button').forEach(el => {
       el.style.visibility = 'hidden';
@@ -7392,25 +7397,22 @@ function fbSaveProgressToCloud() {
     setTimeout(() => shield.remove(), 320);
   }
 
-  // Mostrar login INMEDIATAMENTE, sin esperar a Firebase.
-  // fbHideAuthScreen() solo se llama cuando onAuthStateChanged confirma usuario aprobado.
-  function mostrarLoginInmediato() {
-    fbEnsureOverlay();
-    fbShowAuthScreen('login');
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', mostrarLoginInmediato);
-  } else {
-    mostrarLoginInmediato();
-  }
+  // El login lo muestra onAuthStateChanged una única vez.
+  // mostrarLoginInmediato() fue eliminado para evitar el doble render
+  // que causaba que los botones quedaran sin función en algunos dispositivos.
 
   fbWaitAndInit();
 
-  // Safety net: si Firebase no resuelve en 10s, quitar el shield (el login ya está visible)
+  // Safety net: si Firebase no resuelve en 10s, quitar el shield.
+  // Solo mostrar el login si el overlay todavía no está visible
+  // (evita el bucle de re-render en dispositivos con red lenta).
   setTimeout(() => {
     quitarLoadingShield();
     if (!_currentUser) {
-      fbShowAuthScreen('login');
+      const ov = document.getElementById('fb-auth-overlay');
+      if (!ov || ov.style.display !== 'flex') {
+        fbShowAuthScreen('login');
+      }
     }
   }, 10000);
 
