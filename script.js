@@ -1,4 +1,4 @@
-//PRUEBA 58 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 60 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
@@ -472,6 +472,8 @@
       return seccionId.replace('unico', 'Único ');   // "unico2023" → "Único 2023"
     if (esExamenUBA(seccionId))
       return seccionId.replace('uba', 'UBA ');       // "uba2019"   → "UBA 2019"
+    if (esCompilado(seccionId))
+      return seccionId.replace('compilado', 'Compilado '); // "compilado3" → "Compilado 3"
     return seccionId;
   }
 
@@ -479,8 +481,8 @@
     if (window._extrapolacionAplicada) return;
     window._extrapolacionAplicada = true;
 
-    // Procesar tanto exámenes únicos como UBA con la misma lógica
-    const fuentesOficiales = [...EXAMENES_UNICOS, ...EXAMENES_UBA];
+    // Procesar exámenes únicos, UBA y compilados con la misma lógica de extrapolación
+    const fuentesOficiales = [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
 
     fuentesOficiales.forEach(seccionId => {
       const preguntas = preguntasPorSeccion[seccionId];
@@ -1163,10 +1165,10 @@
   function getOrBuildShuffleForQuestion(seccionId, qIndex, opciones) {
     const s = state[seccionId];
 
-    // En exámenes únicos y UBA (cuestionarios de origen): opciones en orden original.
+    // En exámenes únicos, UBA y compilados (cuestionarios de origen): opciones en orden original.
     // Las preguntas extrapoladas hacia especialidades se mezclan normalmente.
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
-    if (esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+    if (esExamenUnico(seccionId) || esExamenUBA(seccionId) || esCompilado(seccionId)) {
       const inv = {};
       opciones.forEach((_, i) => { inv[i] = i; });
       return { inv, opcionesMezcladas: opciones.slice() };
@@ -2086,9 +2088,10 @@
     const esSimulacro = seccionId === 'simulador';
     const esUnico     = esExamenUnico(seccionId);
     const esUBA       = esExamenUBA(seccionId);
+    const esComp      = esCompilado(seccionId);
 
-    // Simulacro, Único y UBA: orden secuencial fijo — las preguntas NO se mueven nunca
-    if (esSimulacro || esUnico || esUBA) {
+    // Simulacro, Único, UBA y Compilados: orden secuencial fijo — las preguntas NO se mueven nunca
+    if (esSimulacro || esUnico || esUBA || esComp) {
       const ordenSecuencial = [];
       for (let i = 0; i < preguntasLen; i++) ordenSecuencial.push(i);
       return ordenSecuencial;
@@ -2265,7 +2268,9 @@
         const esSimulacroCtx  = (seccionId === 'simulador');
         const esUnico         = esExamenUnico(seccionId);
         const esUBACtx        = esExamenUBA(seccionId);
-        const esOrigenOficial = esUnico || esUBACtx; // cuestionario de origen (único o UBA)
+        const esCompCtx       = esCompilado(seccionId);
+        // Cuestionario de origen: único, UBA o compilado propio
+        const esOrigenOficial = esUnico || esUBACtx || esCompCtx;
 
         // Normalizar: algunos archivos usan "nombreArchivo" como campo raíz del objeto
         // en lugar de dentro de "etiquetas: {}". Leemos ambos lugares como fallback.
@@ -8035,9 +8040,8 @@ function fbSaveProgressToCloud() {
           updatedBy  : _currentUser.uid
         }, { merge: true });
         fbToast('✅ Pregunta guardada en Firestore', 'success');
-        // Invalidar caché local para que el cambio sea visible en el próximo cargarSeccion()
-        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
-        try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
+        // Notificar a todos los clientes via onSnapshot (invalida caché y recarga en tiempo real)
+        await _bumpContentVersion(seccionId, qIndex, nuevaCorrecta);
         overlay.remove();
         generarCuestionario(seccionId);
       } catch(e) {
@@ -8275,9 +8279,8 @@ function fbSaveProgressToCloud() {
               }, { merge: true });
               savingSpan.style.display = 'none';
               fbToast(`✅ Preg. ${qIndex+1} — respuesta correcta actualizada`, 'success');
-              // Invalidar caché local de ediciones para esta sección
-              try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
-              try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
+              // Notificar a todos los clientes via onSnapshot
+              await _bumpContentVersion(seccionId, qIndex, preg.correcta);
             } catch(e) {
               savingSpan.style.display = 'none';
               fbToast(`❌ Error al guardar: ${e.message}`, 'error');
@@ -8350,6 +8353,169 @@ function fbSaveProgressToCloud() {
   };
 
   window.fbToggleModoEditarRespuestas = fbToggleModoEditarRespuestas;
+
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO 0: SINCRONIZACIÓN DE CONTENIDO EN TIEMPO REAL
+  // ════════════════════════════════════════════════════════════════
+  // LÓGICA:
+  //   - Admin guarda cualquier edición → llama _bumpContentVersion()
+  //     que escribe {version: timestamp} en Firestore meta/contentVersion.
+  //   - Todos los clientes (incluso el admin) tienen un onSnapshot sobre
+  //     ese único documento liviano.
+  //   - Cuando cambia → se invalida la caché de esa sección, se recargan
+  //     las preguntas desde Firestore y se recalifica al usuario si corresponde.
+  //   - Costo: 1 lectura/usuario al conectarse + 1 lectura/usuario por cada
+  //     edición del admin. Con 3 usuarios y 20 ediciones/día = ~63 lecturas/día
+  //     sobre 50.000 disponibles. Impacto mínimo.
+
+  let _contentVersionUnsubscribe = null; // función para cancelar el listener
+
+  // ── Escribe la nueva versión en Firestore al guardar cualquier edición ──
+  async function _bumpContentVersion(seccionId, qIndex, nuevaCorrecta) {
+    if (!window.__fb || !_fbDb) return;
+    try {
+      const { doc, setDoc, serverTimestamp } = window.__fb;
+      await setDoc(doc(_fbDb, 'meta', 'contentVersion'), {
+        version   : Date.now(),
+        seccionId,                        // sección afectada
+        qIndex    : qIndex ?? null,       // índice de pregunta (null si afecta a toda la sección)
+        nuevaCorrecta: nuevaCorrecta ?? null, // nueva respuesta correcta (para recalificar)
+        updatedAt : serverTimestamp()
+      });
+      console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId);
+    } catch (e) {
+      console.warn('[CONTENT-SYNC] Error al actualizar versión:', e.message);
+    }
+  }
+
+  // ── Recalifica una pregunta ya respondida si cambió la correcta ──
+  function _recalificarPregunta(seccionId, qIndex, nuevaCorrecta) {
+    const s = state[seccionId];
+    if (!s || !s.graded || !s.graded[qIndex]) return; // no respondida aún
+    if (!nuevaCorrecta || !Array.isArray(nuevaCorrecta)) return;
+
+    const shuffleMap = s.shuffleMap && s.shuffleMap[qIndex]; // mapa mixed→original
+    const respuestasUsuario = s.answers[qIndex] || [];       // índices que eligió el usuario
+
+    // Convertir respuestas del usuario (índices mezclados) a índices originales
+    let respuestasOriginales;
+    if (shuffleMap) {
+      respuestasOriginales = respuestasUsuario.map(mixedIdx => {
+        const entry = Object.entries(shuffleMap).find(([, orig]) => orig === mixedIdx);
+        return entry ? parseInt(entry[0]) : mixedIdx;
+      });
+    } else {
+      respuestasOriginales = respuestasUsuario.slice();
+    }
+
+    // Determinar si el usuario acertó con la nueva clave
+    const acerto = nuevaCorrecta.every(c => respuestasOriginales.includes(c)) &&
+                   respuestasOriginales.every(r => nuevaCorrecta.includes(r));
+
+    const eraCorrecta = s.graded[qIndex] === true;
+    if (acerto === eraCorrecta) return; // no cambió nada para este usuario
+
+    // Actualizar el estado
+    s.graded[qIndex] = acerto;
+    saveJSON(STORAGE_KEY, state);
+
+    // Actualizar el puntaje visual si la pregunta está renderizada
+    const puntajeEl = document.getElementById(`puntaje-${seccionId}-${qIndex}`);
+    if (puntajeEl) {
+      // Repintar el div de la pregunta completo
+      const pregDiv = puntajeEl.closest('.pregunta');
+      if (pregDiv) {
+        pregDiv.classList.remove('correcta', 'incorrecta');
+        pregDiv.classList.add(acerto ? 'correcta' : 'incorrecta');
+      }
+      // Actualizar el ícono ✅/❌
+      const checkEl = pregDiv?.querySelector('.check-respuesta');
+      if (checkEl) checkEl.textContent = acerto ? '✅' : '❌';
+    }
+
+    const msg = acerto
+      ? '✅ ¡Tu respuesta es ahora correcta! El admin corrigió la pregunta.'
+      : '❌ Tu respuesta quedó incorrecta tras la corrección del admin.';
+    fbToast(msg, acerto ? 'success' : 'info');
+    console.log(`[CONTENT-SYNC] Preg. ${qIndex + 1} de "${seccionId}" recalificada → ${acerto ? 'CORRECTA' : 'INCORRECTA'}`);
+  }
+
+  // ── Invalida caché de una sección y recarga en segundo plano ──
+  async function _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta) {
+    // 1. Limpiar caché local de esa sección
+    try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
+    try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+    _seccionesYaCargadas.delete(seccionId);
+    if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+    window._extrapolacionAplicada = false;
+
+    // 2. Recargar preguntas frescas desde Firestore
+    await cargarSeccion(seccionId);
+    aplicarExtrapolacion();
+
+    // 3. Recalificar si cambió la respuesta correcta y el usuario ya respondió
+    if (qIndex !== null && qIndex !== undefined && nuevaCorrecta) {
+      _recalificarPregunta(seccionId, qIndex, nuevaCorrecta);
+    }
+
+    // 4. Si el usuario está viendo esa sección ahora mismo, rerenderizar
+    if (currentSection === seccionId) {
+      generarCuestionario(seccionId);
+      fbToast('📥 Contenido actualizado por el admin', 'info');
+    }
+
+    console.log('[CONTENT-SYNC] Sección recargada:', seccionId);
+  }
+
+  // ── Inicia el listener en tiempo real sobre meta/contentVersion ──
+  function _startContentVersionWatcher() {
+    if (_contentVersionUnsubscribe) return; // ya activo
+    if (!window.__firebase_firestore || !_fbDb) {
+      // Firebase aún no está listo, esperar el evento
+      document.addEventListener('firebaseReady', _startContentVersionWatcher, { once: true });
+      return;
+    }
+
+    const { doc, onSnapshot } = window.__firebase_firestore;
+    let primeraLectura = true; // ignorar el disparo inicial (estado actual, no un cambio)
+
+    _contentVersionUnsubscribe = onSnapshot(
+      doc(_fbDb, 'meta', 'contentVersion'),
+      (snap) => {
+        if (primeraLectura) {
+          primeraLectura = false;
+          console.log('[CONTENT-SYNC] Listener activo. Versión inicial:', snap.data()?.version ?? 'ninguna');
+          return;
+        }
+        if (!snap.exists()) return;
+
+        const data = snap.data();
+        const seccionId    = data.seccionId    ?? null;
+        const qIndex       = data.qIndex       ?? null;
+        const nuevaCorrecta = data.nuevaCorrecta ?? null;
+
+        console.log('[CONTENT-SYNC] Cambio detectado → sección:', seccionId, '| preg:', qIndex);
+
+        if (seccionId) {
+          _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
+        }
+      },
+      (err) => {
+        console.warn('[CONTENT-SYNC] Error en listener:', err.message);
+      }
+    );
+
+    console.log('[CONTENT-SYNC] onSnapshot registrado en meta/contentVersion');
+  }
+
+  // ── Detiene el listener (al cerrar sesión) ──
+  function _stopContentVersionWatcher() {
+    if (_contentVersionUnsubscribe) {
+      _contentVersionUnsubscribe();
+      _contentVersionUnsubscribe = null;
+      console.log('[CONTENT-SYNC] Listener detenido');
+    }
+  }
 
   // ════════════════════════════════════════════════════════════════
   // MÓDULO 1: GUARDADO INMEDIATO EN FIRESTORE (debounce 1.5s)
@@ -8926,9 +9092,11 @@ function fbSaveProgressToCloud() {
     _fbStartHeartbeat();
     // Iniciar watcher de inactividad (no para admin)
     _inactStart();
+    // Iniciar sincronización de contenido en tiempo real (todos los usuarios, incluso admin)
+    _startContentVersionWatcher();
     // Limpiar flag de beforeunload pendiente
     try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
-    console.log('[MÓDULOS FB] Sesión única, heartbeat e inactividad activos');
+    console.log('[MÓDULOS FB] Sesión única, heartbeat, inactividad y content-sync activos');
   });
 
   // Limpiar módulos al cerrar sesión: parchamos fbLogout para que también detenga módulos
@@ -8949,9 +9117,11 @@ function fbSaveProgressToCloud() {
     _fbStopHeartbeat();
     // 4. Detener watcher de inactividad
     _inactStop();
-    // 5. Limpiar flag de beforeunload
+    // 5. Detener sincronización de contenido en tiempo real
+    _stopContentVersionWatcher();
+    // 6. Limpiar flag de beforeunload
     try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
-    // 6. Ejecutar logout original (que ya guarda en Firestore)
+    // 7. Ejecutar logout original (que ya guarda en Firestore)
     await _fbLogoutOriginal();
   };
 
