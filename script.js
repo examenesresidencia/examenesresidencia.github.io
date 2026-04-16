@@ -1,4 +1,4 @@
-//PRUEBA 55 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 57 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
