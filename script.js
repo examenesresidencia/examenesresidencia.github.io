@@ -1,4 +1,4 @@
-//PRUEBA 52 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 53 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -564,9 +564,13 @@
       if (cached && cached.preguntas && cached.ts &&
           (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
-        window.preguntasPorSeccion[seccionId] = cached.preguntas;
+        // Filtrar clones extrapolados que pudieran haberse guardado en caché en sesiones
+        // anteriores. Los clones se identifican por tener _origenExamen definido.
+        // Así la extrapolación siempre parte de datos limpios y no acumula duplicados.
+        const preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
+        window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
-        console.log('📦 Caché local:', seccionId, '→', cached.preguntas.length, 'preguntas');
+        console.log('📦 Caché local:', seccionId, '→', preguntasLimpias.length, 'preguntas');
         return Promise.resolve();
       }
     } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
