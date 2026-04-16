@@ -1,4 +1,4 @@
-//PRUEBA 61 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 61.1 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
