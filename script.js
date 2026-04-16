@@ -1,4 +1,4 @@
-//PRUEBA 51 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 52 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -497,10 +497,11 @@
 
         if (!preguntasPorSeccion[key]) return; // especialidad no existe en la BD
 
-        // Evitar duplicados: comparar por texto de pregunta + seccionId de origen
+        // Evitar duplicados: comparar solo por texto de pregunta (sin importar el origen).
+        // Esto evita que la misma pregunta aparezca dos veces cuando existe en múltiples
+        // exámenes (ej: UBA 2019 y Único 2023) con el mismo enunciado pero distinto origen.
         const yaExiste = preguntasPorSeccion[key].some(
-          p => p.pregunta === preg.pregunta &&
-               p._origenExamen === seccionId
+          p => p.pregunta === preg.pregunta
         );
         if (yaExiste) return;
 
