@@ -1,4 +1,5 @@
-//PRUEBA 57 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 58 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+// Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -497,12 +498,18 @@
 
         if (!preguntasPorSeccion[key]) return; // especialidad no existe en la BD
 
-        // Evitar duplicados: comparar solo por texto de pregunta (sin importar el origen).
-        // Esto evita que la misma pregunta aparezca dos veces cuando existe en múltiples
-        // exámenes (ej: UBA 2019 y Único 2023) con el mismo enunciado pero distinto origen.
-        const yaExiste = preguntasPorSeccion[key].some(
-          p => p.pregunta === preg.pregunta
+        // Evitar duplicados: comparar por texto de pregunta normalizado (sin número, sin espacios extra).
+        // Esto evita duplicados aunque haya pequeñas diferencias de espacios o tildes.
+        function normalizarEnunciado(texto) {
+          return (texto || '').trim()
+            .replace(/^\d+[\.\-\)]\s*/, '') // quitar número inicial (ej: "39. " o "114. ")
+            .replace(/\s+/g, ' ')           // colapsar espacios múltiples
+            .toLowerCase();
+        }
+        const enunciadosEspecialidad = new Set(
+          preguntasPorSeccion[key].map(p => normalizarEnunciado(p.pregunta))
         );
+        const yaExiste = enunciadosEspecialidad.has(normalizarEnunciado(preg.pregunta));
         if (yaExiste) return;
 
         // Clonar la pregunta: en la especialidad se comporta igual que cualquier otra
@@ -541,6 +548,41 @@
   // por:
   //   <script>window.preguntasPorSeccion = {};</script>
 
+  // ── Migración única: limpiar cachés de especialidades que puedan tener duplicados ──
+  // Se ejecuta una sola vez por instalación (guarda marca en localStorage).
+  (function limpiarCacheEspecialidadesConDuplicados() {
+    const MIGRATION_KEY = 'quiz_cache_dedup_migration_v1';
+    if (localStorage.getItem(MIGRATION_KEY)) return;
+    const especialidades = Object.values(MAPA_ESPECIALIDAD_KEY).filter((v, i, a) => a.indexOf(v) === i);
+    let limpiadas = 0;
+    especialidades.forEach(seccionId => {
+      try {
+        const cacheKey = 'fb_q_cache_' + seccionId;
+        const raw = localStorage.getItem(cacheKey);
+        if (!raw) return;
+        const cached = JSON.parse(raw);
+        if (!cached || !cached.preguntas) return;
+        // Quitar clones extrapolados y deduplicar por enunciado
+        let limpias = cached.preguntas.filter(p => !p._origenExamen);
+        const vistos = new Set();
+        limpias = limpias.filter(p => {
+          const k = (p.pregunta || '').trim();
+          if (vistos.has(k)) return false;
+          vistos.add(k);
+          return true;
+        });
+        if (limpias.length !== cached.preguntas.length) {
+          // Forzar recarga desde Firestore eliminando la caché obsoleta
+          localStorage.removeItem(cacheKey);
+          limpiadas++;
+        }
+      } catch (_) {}
+    });
+    localStorage.setItem(MIGRATION_KEY, '1');
+    if (limpiadas > 0)
+      console.log('🧹 Migración dedup: se limpió caché de', limpiadas, 'especialidades con duplicados');
+  })();
+
   const _seccionesYaCargadas = new Set();
 
   /**
@@ -569,9 +611,9 @@
         // Así la extrapolación siempre parte de datos limpios y no acumula duplicados.
         let preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
 
-        // Deduplicar por enunciado en exámenes Único y UBA: si la misma pregunta
-        // está dos veces en caché (mismo enunciado, distinto número), conservar solo la primera.
-        if (esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+        // Deduplicar por enunciado: aplica a exámenes Único/UBA Y a especialidades destino.
+        // En especialidades destino elimina duplicados nativos que pudieran haberse acumulado.
+        {
           const vistos = new Set();
           const antes = preguntasLimpias.length;
           preguntasLimpias = preguntasLimpias.filter(p => {
@@ -620,9 +662,9 @@
               return pregunta;
             });
 
-            // Deduplicar por enunciado en exámenes Único y UBA: si la misma pregunta
-            // aparece dos veces en Firestore (mismo enunciado, distinto número), conservar solo la primera.
-            if (esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+            // Deduplicar por enunciado: aplica a exámenes Único/UBA Y a especialidades destino.
+            // En especialidades destino elimina duplicados nativos que pudieran existir en Firestore.
+            {
               const vistos = new Set();
               const antes = preguntas.length;
               preguntas = preguntas.filter(p => {
