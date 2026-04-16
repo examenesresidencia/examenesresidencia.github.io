@@ -1,6 +1,7 @@
-//PRUEBA 61.1 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 62 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix: eliminado modal de confirmación al salir del cuestionario (innecesario con guardado Firebase en tiempo real)
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
-// Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
+// Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
 /* ========== script.js ========== */
 /* Requisitos:
    1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
@@ -802,178 +803,6 @@
     });
   }
 
-  // ======== Modal de salida al menú principal ========
-  function inyectarEstilosModalSalida() {
-    if (document.getElementById('modal-salida-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'modal-salida-styles';
-    style.textContent = `
-      #modal-salida-cuestionario {
-        position: fixed;
-        inset: 0;
-        z-index: 25000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(15,23,42,0.62);
-        backdrop-filter: blur(5px);
-        -webkit-backdrop-filter: blur(5px);
-        animation: modalSalidaOverlay 0.22s ease both;
-      }
-      @keyframes modalSalidaOverlay {
-        from { opacity: 0; }
-        to { opacity: 1; }
-      }
-      #modal-salida-cuestionario .ms-caja {
-        background: #fff;
-        border-radius: 20px;
-        box-shadow: 0 28px 70px rgba(0,0,0,0.22), 0 4px 18px rgba(0,0,0,0.09);
-        padding: 38px 40px 32px;
-        max-width: 460px;
-        width: 92%;
-        text-align: center;
-        animation: modalSalidaEntrada 0.34s cubic-bezier(0.34,1.56,0.64,1) both;
-        position: relative;
-      }
-      @keyframes modalSalidaEntrada {
-        from { opacity: 0; transform: scale(0.88) translateY(22px); }
-        to   { opacity: 1; transform: scale(1) translateY(0); }
-      }
-      #modal-salida-cuestionario .ms-icono {
-        width: 64px;
-        height: 64px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, #e0f2fe, #bae6fd);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.9rem;
-        margin: 0 auto 20px;
-        box-shadow: 0 4px 14px rgba(13,116,144,0.15);
-      }
-      #modal-salida-cuestionario .ms-titulo {
-        font-size: 1.22rem;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 10px;
-        line-height: 1.3;
-      }
-      #modal-salida-cuestionario .ms-mensaje {
-        font-size: 0.91rem;
-        color: #475569;
-        line-height: 1.65;
-        margin-bottom: 10px;
-      }
-      #modal-salida-cuestionario .ms-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-        background: linear-gradient(135deg, #f0fdf4, #dcfce7);
-        border: 1px solid #86efac;
-        color: #166534;
-        border-radius: 100px;
-        padding: 6px 16px;
-        font-size: 0.84rem;
-        font-weight: 600;
-        margin-bottom: 24px;
-        letter-spacing: 0.01em;
-      }
-      #modal-salida-cuestionario .ms-btns {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-      }
-      #modal-salida-cuestionario .ms-btn-quedar {
-        flex: 1;
-        padding: 12px 20px;
-        border-radius: 10px;
-        font-size: 0.92rem;
-        font-weight: 600;
-        cursor: pointer;
-        border: 1.5px solid #e2e8f0;
-        background: #f8fafc;
-        color: #475569;
-        transition: all 0.18s ease;
-        min-width: 120px;
-      }
-      #modal-salida-cuestionario .ms-btn-quedar:hover {
-        background: #e2e8f0;
-        border-color: #cbd5e1;
-      }
-      #modal-salida-cuestionario .ms-btn-salir {
-        flex: 1;
-        padding: 12px 20px;
-        border-radius: 10px;
-        font-size: 0.92rem;
-        font-weight: 600;
-        cursor: pointer;
-        border: none;
-        background: linear-gradient(135deg, #0d7490, #0891b2);
-        color: #fff;
-        box-shadow: 0 4px 14px rgba(13,116,144,0.28);
-        transition: all 0.18s ease;
-        min-width: 120px;
-      }
-      #modal-salida-cuestionario .ms-btn-salir:hover {
-        background: linear-gradient(135deg, #0e6584, #0d7490);
-        box-shadow: 0 6px 20px rgba(13,116,144,0.38);
-        transform: translateY(-1px);
-      }
-      #modal-salida-cuestionario .ms-btn-salir:active { transform: translateY(0); }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function mostrarModalSalida(preguntasRespondidas, totalPreguntas, onConfirmar) {
-    inyectarEstilosModalSalida();
-
-    const existente = document.getElementById('modal-salida-cuestionario');
-    if (existente) existente.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'modal-salida-cuestionario';
-
-    const pendientes = totalPreguntas - preguntasRespondidas;
-
-    overlay.innerHTML = `
-      <div class="ms-caja">
-        <div class="ms-icono">📋</div>
-        <div class="ms-titulo">¿Salir del cuestionario?</div>
-        <div class="ms-mensaje">
-          Podés volver más tarde y continuar donde lo dejaste.<br>
-          ${pendientes > 0 
-            ? `Tenés <strong>${pendientes} pregunta${pendientes !== 1 ? 's' : ''} pendiente${pendientes !== 1 ? 's' : ''}</strong> por responder.`
-            : 'Ya respondiste todas las preguntas.'}
-        </div>
-        <div class="ms-badge">
-          ✅ ${preguntasRespondidas} respuesta${preguntasRespondidas !== 1 ? 's' : ''} guardada${preguntasRespondidas !== 1 ? 's' : ''} — no se perderán
-        </div>
-        <div class="ms-btns">
-          <button class="ms-btn-quedar" id="ms-btn-quedar">Seguir respondiendo</button>
-          <button class="ms-btn-salir" id="ms-btn-salir">Salir al menú</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-
-    document.getElementById('ms-btn-quedar').addEventListener('click', () => {
-      overlay.remove();
-      // Restaurar la URL a la sección vigente para que F5 recargue la página correcta
-      if (currentSection) {
-        history.pushState({ section: currentSection }, `Cuestionario ${currentSection}`, `#${currentSection}`);
-      }
-    });
-    document.getElementById('ms-btn-salir').addEventListener('click', () => {
-      overlay.remove();
-      onConfirmar();
-    });
-
-    // Cerrar al hacer clic fuera
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-  }
 
   function _ejecutarShowMenu() {
     // Detener el temporizador si estábamos en el simulacro
@@ -1003,27 +832,6 @@
   }
 
   function showMenu() {
-    // Para el simulacro: comportamiento especial (ya tenía su propio flujo)
-    if (currentSection === 'simulador') {
-      _ejecutarShowMenu();
-      return;
-    }
-
-    // Para cuestionarios normales con respuestas guardadas: mostrar modal
-    if (currentSection && preguntasPorSeccion[currentSection]) {
-      const s = state[currentSection];
-      const estaCompleto = s && s.totalShown;
-
-      if (!estaCompleto && s && s.graded) {
-        const preguntasRespondidas = Object.keys(s.graded).filter(k => s.graded[k]).length;
-        if (preguntasRespondidas > 0) {
-          const totalPreguntas = (preguntasPorSeccion[currentSection] || []).length;
-          mostrarModalSalida(preguntasRespondidas, totalPreguntas, _ejecutarShowMenu);
-          return;
-        }
-      }
-    }
-
     _ejecutarShowMenu();
   }
 
@@ -2981,6 +2789,116 @@
     // Si ya está mostrado, el botón no hace nada (el resultado ya está visible)
   }
 
+  // ======== Estilos compartidos para modales (reinicio, etc.) ========
+  function inyectarEstilosModalSalida() {
+    if (document.getElementById('modal-salida-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'modal-salida-styles';
+    style.textContent = `
+      @keyframes modalSalidaOverlay {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+      @keyframes modalSalidaEntrada {
+        from { opacity: 0; transform: scale(0.88) translateY(22px); }
+        to   { opacity: 1; transform: scale(1) translateY(0); }
+      }
+      .ms-caja {
+        background: #fff;
+        border-radius: 20px;
+        box-shadow: 0 28px 70px rgba(0,0,0,0.22), 0 4px 18px rgba(0,0,0,0.09);
+        padding: 38px 40px 32px;
+        max-width: 460px;
+        width: 92%;
+        text-align: center;
+        animation: modalSalidaEntrada 0.34s cubic-bezier(0.34,1.56,0.64,1) both;
+        position: relative;
+      }
+      .ms-icono {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #e0f2fe, #bae6fd);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.9rem;
+        margin: 0 auto 20px;
+        box-shadow: 0 4px 14px rgba(13,116,144,0.15);
+      }
+      .ms-titulo {
+        font-size: 1.22rem;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 10px;
+        line-height: 1.3;
+      }
+      .ms-mensaje {
+        font-size: 0.91rem;
+        color: #475569;
+        line-height: 1.65;
+        margin-bottom: 10px;
+      }
+      .ms-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+        border: 1px solid #86efac;
+        color: #166534;
+        border-radius: 100px;
+        padding: 6px 16px;
+        font-size: 0.84rem;
+        font-weight: 600;
+        margin-bottom: 24px;
+        letter-spacing: 0.01em;
+      }
+      .ms-btns {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+      }
+      .ms-btn-quedar {
+        flex: 1;
+        padding: 12px 20px;
+        border-radius: 10px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: 1.5px solid #e2e8f0;
+        background: #f8fafc;
+        color: #475569;
+        transition: all 0.18s ease;
+        min-width: 120px;
+      }
+      .ms-btn-quedar:hover {
+        background: #e2e8f0;
+        border-color: #cbd5e1;
+      }
+      .ms-btn-salir {
+        flex: 1;
+        padding: 12px 20px;
+        border-radius: 10px;
+        font-size: 0.92rem;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        background: linear-gradient(135deg, #0d7490, #0891b2);
+        color: #fff;
+        box-shadow: 0 4px 14px rgba(13,116,144,0.28);
+        transition: all 0.18s ease;
+        min-width: 120px;
+      }
+      .ms-btn-salir:hover {
+        background: linear-gradient(135deg, #0e6584, #0d7490);
+        box-shadow: 0 6px 20px rgba(13,116,144,0.38);
+        transform: translateY(-1px);
+      }
+      .ms-btn-salir:active { transform: translateY(0); }
+    `;
+    document.head.appendChild(style);
+  }
+
   // ======== Modal de reinicio ========
   function mostrarModalReinicio(seccionId, hayRespuestas) {
     inyectarEstilosModalSalida(); // reutiliza los mismos estilos base
@@ -3080,20 +2998,10 @@
 
     if (currentSection && state[currentSection] && !state[currentSection].totalShown) {
       const s = state[currentSection];
-      const hayRespuestas = s && s.graded && Object.keys(s.graded).some(k => s.graded[k]);
-      if (hayRespuestas) {
-        const totalPreguntas = (preguntasPorSeccion[currentSection] || []).length;
-        const preguntasRespondidas = Object.keys(s.graded).filter(k => s.graded[k]).length;
-        const seccionGuardada = currentSection;
-        mostrarModalSalida(preguntasRespondidas, totalPreguntas, () => {
-          currentSection = null;
-          document.querySelectorAll(".pagina-cuestionario").forEach(p => p.classList.remove("activa"));
-          mostrarSubmenu(submenuId);
-        });
-        return;
-      }
       // Sin respuestas: aleatorizar de nuevo
-      limpiarSeccion(currentSection, true);
+      if (!s || !s.graded || !Object.keys(s.graded).some(k => s.graded[k])) {
+        limpiarSeccion(currentSection, true);
+      }
     }
 
     currentSection = null;
@@ -4368,23 +4276,6 @@
     }
 
     window.volverAlMenu = function () {
-      const seccion = currentSection;
-      const s = seccion ? state[seccion] : null;
-      const hayProgresoParcial = s && !s.totalShown && s.graded &&
-        Object.keys(s.graded).some(k => s.graded[k]) &&
-        seccion !== 'simulador';
-
-      if (hayProgresoParcial) {
-        const totalPreguntas = (preguntasPorSeccion[seccion] || []).length;
-        const preguntasRespondidas = Object.keys(s.graded).filter(k => s.graded[k]).length;
-        mostrarModalSalida(preguntasRespondidas, totalPreguntas, () => {
-          limpiarUIBuscador();
-          history.replaceState({ section: null }, 'Menú Principal', '#menu');
-          _ejecutarShowMenu();
-        });
-        return;
-      }
-
       limpiarUIBuscador();
       history.replaceState({ section: null }, 'Menú Principal', '#menu');
       _ejecutarShowMenu();
