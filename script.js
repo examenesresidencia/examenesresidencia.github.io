@@ -1170,7 +1170,7 @@
     // Admin: también opciones en orden original en especialidades (para editar sin que cambien de lugar).
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
     if (esExamenUnico(seccionId) || esExamenUBA(seccionId) || esCompilado(seccionId) ||
-        (window.fbIsAdmin && window.fbIsAdmin())) {
+        (_currentUserData && _currentUserData.role === 'admin')) {
       const inv = {};
       opciones.forEach((_, i) => { inv[i] = i; });
       return { inv, opcionesMezcladas: opciones.slice() };
@@ -2094,7 +2094,7 @@
 
     // Simulacro, Único, UBA y Compilados: orden secuencial fijo — las preguntas NO se mueven nunca
     // Admin: también orden secuencial fijo en especialidades (para editar sin que cambien de lugar)
-    if (esSimulacro || esUnico || esUBA || esComp || (window.fbIsAdmin && window.fbIsAdmin())) {
+    if (esSimulacro || esUnico || esUBA || esComp || (_currentUserData && _currentUserData.role === 'admin')) {
       const ordenSecuencial = [];
       for (let i = 0; i < preguntasLen; i++) ordenSecuencial.push(i);
       return ordenSecuencial;
