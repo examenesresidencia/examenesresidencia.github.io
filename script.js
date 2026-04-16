@@ -1,4 +1,4 @@
-//PRUEBA 60 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 61 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
@@ -1167,8 +1167,10 @@
 
     // En exámenes únicos, UBA y compilados (cuestionarios de origen): opciones en orden original.
     // Las preguntas extrapoladas hacia especialidades se mezclan normalmente.
+    // Admin: también opciones en orden original en especialidades (para editar sin que cambien de lugar).
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
-    if (esExamenUnico(seccionId) || esExamenUBA(seccionId) || esCompilado(seccionId)) {
+    if (esExamenUnico(seccionId) || esExamenUBA(seccionId) || esCompilado(seccionId) ||
+        (window.fbIsAdmin && window.fbIsAdmin())) {
       const inv = {};
       opciones.forEach((_, i) => { inv[i] = i; });
       return { inv, opcionesMezcladas: opciones.slice() };
@@ -2091,13 +2093,14 @@
     const esComp      = esCompilado(seccionId);
 
     // Simulacro, Único, UBA y Compilados: orden secuencial fijo — las preguntas NO se mueven nunca
-    if (esSimulacro || esUnico || esUBA || esComp) {
+    // Admin: también orden secuencial fijo en especialidades (para editar sin que cambien de lugar)
+    if (esSimulacro || esUnico || esUBA || esComp || (window.fbIsAdmin && window.fbIsAdmin())) {
       const ordenSecuencial = [];
       for (let i = 0; i < preguntasLen; i++) ordenSecuencial.push(i);
       return ordenSecuencial;
     }
 
-    // Especialidades / compilados:
+    // Especialidades / compilados (usuarios no-admin):
     // 1) Respondidas: orden fijo (el orden cronológico en que se respondieron)
     const answered = s.answeredOrder.slice();
 
