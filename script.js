@@ -1,4 +1,4 @@
-//PRUEBA 50 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 51 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -7360,9 +7360,8 @@ function fbSaveProgressToCloud() {
     .then(function() {
       console.log('[FB-SYNC] OK: Progreso guardado en Firestore');
       localStorage.setItem('quiz_progress_ts', String(Date.now()));
-      fbToast('Guardado en la nube', 'success');
+      // Sin toast en guardado automático (ocurre cada 1.5s — sería molesto para el usuario)
       // Liberar el flag en 200ms (suficiente para que llegue el eco del snapshot local)
-      // Antes era 500ms, lo que silenciaba guardados legítimos en respuestas rápidas
       setTimeout(function() { window._fbSyncInProgress = false; }, 200);
     })
     .catch(function(e) {
@@ -8274,29 +8273,21 @@ function fbSaveProgressToCloud() {
   window.fbToggleModoEditarRespuestas = fbToggleModoEditarRespuestas;
 
   // ════════════════════════════════════════════════════════════════
-  // MÓDULO 1: GUARDADO AUTOMÁTICO EN FIRESTORE CON DEBOUNCE (90s)
+  // MÓDULO 1: GUARDADO INMEDIATO EN FIRESTORE (debounce 1.5s)
   // + GUARDADO INMEDIATO AL CERRAR SESIÓN / PESTAÑA
   // ════════════════════════════════════════════════════════════════
+  // LÓGICA: Cada vez que saveJSON() guarda en localStorage, se programa
+  // un guardado en Firestore con 1.5s de debounce.
+  // Esto significa: si el usuario responde varias preguntas en ráfaga,
+  // solo se hace UNA escritura en Firestore (al 1.5s de la última respuesta).
+  // Resultado: progreso en la nube actualizado en 1-2 segundos por respuesta.
 
   let _fbSaveDebounceTimer = null;
-  const FB_SAVE_DEBOUNCE_MS = 90 * 1000; // 90 segundos de inactividad
-
-  // Extender saveJSON para programar guardado en nube con debounce
-  const _origSaveJSON = saveJSON;
-  function saveJSONConCloud(key, value) {
-    // Guardar localmente primero (siempre rápido)
-    localStorage.setItem(key, JSON.stringify(value));
-    // Solo disparar guardado en nube para la clave de estado del quiz
-    if (key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) {
-      _fbScheduleCloudSave();
-    }
-  }
-  // Reemplazar saveJSON en el scope del IIFE apuntando a la versión extendida
-  // Usamos una variable para no romper referencias internas
-  window._saveJSONConCloud = saveJSONConCloud;
+  const FB_SAVE_DEBOUNCE_MS = 1500; // 1.5 segundos — guardado casi inmediato
 
   function _fbScheduleCloudSave() {
     if (!_currentUser || !window.__fb) return;
+    // Si hay un timer pendiente, cancelarlo (debounce: resetear el plazo)
     if (_fbSaveDebounceTimer) clearTimeout(_fbSaveDebounceTimer);
     _fbSaveDebounceTimer = setTimeout(() => {
       _fbSaveDebounceTimer = null;
@@ -8304,33 +8295,32 @@ function fbSaveProgressToCloud() {
     }, FB_SAVE_DEBOUNCE_MS);
   }
 
-  // Parchar la función saveJSON ya definida para que también llame al debounce
-  // Solución compatible: sobreescribir la propiedad en el objeto window como puente
-  // El truco: saveJSON ya está en el closure; lo reemplazamos via wrapper en window
-  // y todas las llamadas externas usarán la versión con cloud
-  const _localSaveJSON = saveJSON;
-  // NOTA: dentro del IIFE, saveJSON() sigue llamando a la versión local.
-  // Para capturar CADA llamada a saveJSON() que ya existe en el código,
-  // aplicamos un patch directo al código via la función global expuesta:
-  window._fbOnSaveJSON = function(key) {
-    if ((key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) && _currentUser) {
-      _fbScheduleCloudSave();
-    }
-  };
-
-  // Reemplazar saveJSON para interceptar guardados y programar sync
-  // Usamos Function.prototype para parcharlo en el scope del closure
-  // Estrategia: exponer la lógica de debounce y llamarla desde saveJSON
-  // La función saveJSON original ya está definida en el IIFE —
-  // la reemplazamos con una versión que también llama al debounce:
-  // IMPORTANTE: Este patch opera DESPUÉS de que saveJSON ya guardó en localStorage
-  // Usamos MutationObserver del localStorage como proxy:
+  // Interceptar cada llamada a saveJSON() dentro del IIFE vía el evento storage.
+  // saveJSON() escribe en localStorage → dispara 'storage' en otras pestañas Y
+  // también activamos _fbScheduleCloudSave directamente tras el write local.
   const _storagePatcher = function(e) {
     if (e && (e.key === STORAGE_KEY || e.key === ATTEMPT_LOG_KEY)) {
       if (_currentUser && window.__fb) _fbScheduleCloudSave();
     }
   };
   window.addEventListener('storage', _storagePatcher);
+
+  // Parche directo: reemplazar saveJSON en el closure para capturar writes
+  // de la misma pestaña (el evento 'storage' NO se dispara en la misma pestaña).
+  const _origSaveJSONForCloud = saveJSON;
+  saveJSON = function saveJSONInmediato(key, value) {
+    _origSaveJSONForCloud(key, value);
+    if ((key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) && _currentUser && window.__fb) {
+      _fbScheduleCloudSave();
+    }
+  };
+  // Exponer para módulos que usen window.saveJSON
+  window._saveJSONConCloud = saveJSON;
+  window._fbOnSaveJSON = function(key) {
+    if ((key === STORAGE_KEY || key === ATTEMPT_LOG_KEY) && _currentUser) {
+      _fbScheduleCloudSave();
+    }
+  };
 
   // Guardar INMEDIATAMENTE al cerrar pestaña/ventana
   window.addEventListener('beforeunload', () => {
@@ -8470,11 +8460,6 @@ function fbSaveProgressToCloud() {
 
   async function _fbRegisterSession(uid) {
     if (!window.__fb || !_fbDb) return;
-    // Admin no tiene restricción de sesión única
-    if (_currentUserData?.role === 'admin') {
-      console.log('[SESSION] Admin detectado — sin restricción de sesión única');
-      return;
-    }
     const { doc, setDoc, serverTimestamp } = window.__fb;
     const deviceId = _fbGetOrCreateDeviceId();
 
@@ -8540,55 +8525,26 @@ function fbSaveProgressToCloud() {
           Tu cuenta fue iniciada en otro dispositivo o pestaña.<br>
           Por seguridad, esta sesión se cerrará automáticamente.
         </div>
-        <div class="fbsd-countdown" id="fbsd-countdown">30</div>
+        <div class="fbsd-countdown" id="fbsd-countdown">8</div>
         <button class="fbsd-btn" id="fbsd-btn-cerrar">Entendido — Cerrar sesión</button>
       </div>
     `;
     document.body.appendChild(overlay);
 
-    document.getElementById('fbsd-btn-cerrar').onclick = async () => {
-      clearInterval(cdInterval);
+    document.getElementById('fbsd-btn-cerrar').onclick = () => {
       overlay.remove();
-      // Guardar progreso explícitamente antes de cerrar sesión
-      if (_currentUser && _fbDb && window.__fb && Object.keys(state).length > 0) {
-        try {
-          const { doc, setDoc, serverTimestamp } = window.__fb;
-          await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
-            state,
-            attemptLog,
-            updatedAt: serverTimestamp()
-          });
-          localStorage.setItem('quiz_progress_ts', String(Date.now()));
-        } catch (e) {
-          console.error('[SESSION] Error al guardar progreso antes de cerrar sesión duplicada:', e);
-        }
-      }
       fbLogout();
     };
 
-    // Cuenta regresiva de 30 segundos
-    let segs = 30;
+    // Cuenta regresiva de 8 segundos
+    let segs = 8;
     const cdEl = document.getElementById('fbsd-countdown');
-    const cdInterval = setInterval(async () => {
+    const cdInterval = setInterval(() => {
       segs--;
       if (cdEl) cdEl.textContent = segs;
       if (segs <= 0) {
         clearInterval(cdInterval);
         overlay.remove();
-        // Guardar progreso antes de cerrar sesión automáticamente
-        if (_currentUser && _fbDb && window.__fb && Object.keys(state).length > 0) {
-          try {
-            const { doc, setDoc, serverTimestamp } = window.__fb;
-            await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
-              state,
-              attemptLog,
-              updatedAt: serverTimestamp()
-            });
-            localStorage.setItem('quiz_progress_ts', String(Date.now()));
-          } catch (e) {
-            console.error('[SESSION] Error al guardar progreso en cierre automático por sesión duplicada:', e);
-          }
-        }
         fbLogout();
       }
     }, 1000);
