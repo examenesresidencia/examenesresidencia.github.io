@@ -1,4 +1,4 @@
-//PRUEBA 53 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
+//PRUEBA 55 <--  MODIFICAR ESTA LINEA CON CADA ACTUALIZACIÓN
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync solo en login/logout
 /* ========== script.js ========== */
 /* Requisitos:
@@ -567,7 +567,23 @@
         // Filtrar clones extrapolados que pudieran haberse guardado en caché en sesiones
         // anteriores. Los clones se identifican por tener _origenExamen definido.
         // Así la extrapolación siempre parte de datos limpios y no acumula duplicados.
-        const preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
+        let preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
+
+        // Deduplicar por enunciado en exámenes Único y UBA: si la misma pregunta
+        // está dos veces en caché (mismo enunciado, distinto número), conservar solo la primera.
+        if (esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+          const vistos = new Set();
+          const antes = preguntasLimpias.length;
+          preguntasLimpias = preguntasLimpias.filter(p => {
+            const key = (p.pregunta || '').trim();
+            if (vistos.has(key)) return false;
+            vistos.add(key);
+            return true;
+          });
+          if (preguntasLimpias.length < antes)
+            console.log('🔁 Dedup caché [' + seccionId + ']: ' + antes + ' → ' + preguntasLimpias.length + ' preguntas');
+        }
+
         window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
         console.log('📦 Caché local:', seccionId, '→', preguntasLimpias.length, 'preguntas');
@@ -599,10 +615,26 @@
               console.warn('⚠️ Sin preguntas en Firestore para:', seccionId);
               resolve(); return;
             }
-            const preguntas = snap.docs.map(d => {
+            let preguntas = snap.docs.map(d => {
               const { _idx, ...pregunta } = d.data();
               return pregunta;
             });
+
+            // Deduplicar por enunciado en exámenes Único y UBA: si la misma pregunta
+            // aparece dos veces en Firestore (mismo enunciado, distinto número), conservar solo la primera.
+            if (esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+              const vistos = new Set();
+              const antes = preguntas.length;
+              preguntas = preguntas.filter(p => {
+                const key = (p.pregunta || '').trim();
+                if (vistos.has(key)) return false;
+                vistos.add(key);
+                return true;
+              });
+              if (preguntas.length < antes)
+                console.log('🔁 Dedup Firestore [' + seccionId + ']: ' + antes + ' → ' + preguntas.length + ' preguntas');
+            }
+
             if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
             window.preguntasPorSeccion[seccionId] = preguntas;
 
@@ -8465,6 +8497,11 @@ function fbSaveProgressToCloud() {
 
   async function _fbRegisterSession(uid) {
     if (!window.__fb || !_fbDb) return;
+    // Admin está exento del bloqueo por sesión duplicada
+    if (_currentUser && _currentUser.email === ADMIN_EMAIL) {
+      console.log('[SESSION] Admin exento del control de sesión única');
+      return;
+    }
     const { doc, setDoc, serverTimestamp } = window.__fb;
     const deviceId = _fbGetOrCreateDeviceId();
 
@@ -8485,6 +8522,8 @@ function fbSaveProgressToCloud() {
   }
 
   function _fbEscucharSesion(uid, myDeviceId) {
+    // Admin exento: no escuchar cambios de sesión
+    if (_currentUser && _currentUser.email === ADMIN_EMAIL) return;
     const { doc, onSnapshot } = window.__fb;
     if (_fbSessionUnsubscribeLocal) _fbSessionUnsubscribeLocal();
 
@@ -8530,7 +8569,7 @@ function fbSaveProgressToCloud() {
           Tu cuenta fue iniciada en otro dispositivo o pestaña.<br>
           Por seguridad, esta sesión se cerrará automáticamente.
         </div>
-        <div class="fbsd-countdown" id="fbsd-countdown">8</div>
+        <div class="fbsd-countdown" id="fbsd-countdown">30</div>
         <button class="fbsd-btn" id="fbsd-btn-cerrar">Entendido — Cerrar sesión</button>
       </div>
     `;
@@ -8541,8 +8580,8 @@ function fbSaveProgressToCloud() {
       fbLogout();
     };
 
-    // Cuenta regresiva de 8 segundos
-    let segs = 8;
+    // Cuenta regresiva de 30 segundos
+    let segs = 30;
     const cdEl = document.getElementById('fbsd-countdown');
     const cdInterval = setInterval(() => {
       segs--;
