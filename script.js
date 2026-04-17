@@ -1,8 +1,9 @@
-//PRUEBA 68 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 69 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
 // Fix: explicaciones se cierran al iniciar sesión, cerrar sesión, recargar, volver al menú
+// Fix: modal de edición admin se veía roto al recargar página con sesión activa (estilos no inyectados)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
 /* ========== script.js ========== */
 /* Requisitos:
@@ -7493,6 +7494,10 @@ function fbSaveProgressToCloud() {
     if (!fbIsAdmin()) return;
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
     if (!preg) return;
+
+    // Asegurar que los estilos del modal estén inyectados incluso si el usuario
+    // recargó la página sin pasar por el formulario de login (sesión restaurada por Firebase Auth)
+    fbInjectAuthStyles();
 
     document.getElementById('fb-modal-edit-q')?.remove();
 
