@@ -1,4 +1,4 @@
-//PRUEBA 64 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 65 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: eliminado modal de confirmación al salir del cuestionario (innecesario con guardado Firebase en tiempo real)
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
