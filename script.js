@@ -1,8 +1,8 @@
-//PRUEBA 67 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix: invalidación de caché al guardar desde modal admin (ediciones persistentes entre sesiones)
-// Fix: reglas Firestore para colección meta/contentVersion (sync en tiempo real)
-// Fix: layout del modal admin en pantallas pequeñas (overflow-x:hidden, box-sizing, padding)
-// Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
+//PRUEBA 68 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
+// Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
+// Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
+// Fix: explicaciones se cierran al iniciar sesión, cerrar sesión, recargar, volver al menú
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
 /* ========== script.js ========== */
 /* Requisitos:
@@ -834,10 +834,49 @@
   }
 
   function showMenu() {
+    cerrarTodasLasExplicaciones();
     _ejecutarShowMenu();
   }
 
   let lastShuffleTemp = {};
+
+  // ── Cierra todas las explicaciones abiertas en todas las secciones ──
+  // Actúa tanto en el DOM como en el estado persistido.
+  function cerrarTodasLasExplicaciones() {
+    // 1. Limpiar el estado persistido
+    let cambio = false;
+    Object.keys(state).forEach(seccionId => {
+      if (state[seccionId] && state[seccionId].explanationShown) {
+        const tieneAbiertas = Object.values(state[seccionId].explanationShown).some(v => v);
+        if (tieneAbiertas) {
+          state[seccionId].explanationShown = {};
+          cambio = true;
+        }
+      }
+    });
+    if (cambio) saveJSON(STORAGE_KEY, state);
+
+    // 2. Ocultar en el DOM todos los divs de explicación visibles
+    document.querySelectorAll('[id^="explicacion-"]').forEach(el => {
+      if (el.style.display !== 'none' && el.style.display !== '') {
+        el.style.display = 'none';
+        // Restaurar texto del botón correspondiente
+        // id formato: "explicacion-{seccionId}-{qIndex}"
+        const prefijo = 'explicacion-';
+        const sinPrefijo = el.id.slice(prefijo.length); // "{seccionId}-{qIndex}"
+        const ultimoGuion = sinPrefijo.lastIndexOf('-');
+        if (ultimoGuion !== -1) {
+          const secId = sinPrefijo.slice(0, ultimoGuion);
+          const btn = document.getElementById(`btn-explicacion-${secId}-${sinPrefijo.slice(ultimoGuion + 1)}`);
+          if (btn) {
+            const tieneContenido = el.dataset.tieneContenido === '1';
+            btn.textContent = tieneContenido ? 'Ver explicación' : '➕ Agregar explicación';
+          }
+        }
+      }
+    });
+  }
+  window.cerrarTodasLasExplicaciones = cerrarTodasLasExplicaciones;
 
   // ======== Helper: limpiar sección con o sin aleatorización de opciones ========
   // aleatorizar=true  → borra shuffleMap → las opciones se re-mezclan al regenerar
@@ -2249,9 +2288,15 @@
                 this._fallbackAgotado = true;
                 const srcOriginal = this.getAttribute('data-src-original') || '';
                 if (!srcOriginal.includes('/')) {
+                  // Intentar ruta local relativa
                   this.src = 'imagenes/' + srcOriginal;
                 } else {
+                  // Mostrar mensaje de error visible en lugar de ocultar silenciosamente
                   this.style.display = 'none';
+                  const errMsg = document.createElement('div');
+                  errMsg.style.cssText = 'background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;padding:8px 12px;margin:8px 0;color:#b91c1c;font-size:0.82rem;word-break:break-all;';
+                  errMsg.innerHTML = `⚠️ <strong>Imagen no encontrada.</strong> Verificá que esté subida a GitHub Pages:<br><code style="font-size:0.78rem;user-select:all">${srcOriginal}</code>`;
+                  this.parentNode?.insertBefore(errMsg, this.nextSibling);
                   console.warn('⚠️ Imagen no encontrada:', srcOriginal);
                 }
               };
@@ -3177,6 +3222,12 @@
   } catch (_) {}
 
   document.addEventListener("DOMContentLoaded", () => {
+    // Cerrar todas las explicaciones al cargar la página (recarga/F5)
+    Object.keys(state).forEach(sid => {
+      if (state[sid] && state[sid].explanationShown) state[sid].explanationShown = {};
+    });
+    saveJSON(STORAGE_KEY, state);
+
     buildProgressUI();
     setupBrowserNavigation();
     clearScrollPosition();
@@ -7067,6 +7118,9 @@
   }
 
   async function fbLogout() {
+    // Cerrar todas las explicaciones abiertas antes de guardar/salir
+    cerrarTodasLasExplicaciones();
+
     // ── 1. Cancelar listeners en tiempo real ────────────────────────
     if (typeof _fbProgressUnsubscribe !== 'undefined' && _fbProgressUnsubscribe) {
       _fbProgressUnsubscribe();
@@ -7317,6 +7371,10 @@ async function fbSyncProgressFromCloud() {
       // La nube es más reciente (o igual) → usar la nube
       state      = data.state;
       attemptLog = data.attemptLog || [];
+      // Cerrar todas las explicaciones al cargar progreso (login/recarga)
+      Object.keys(state).forEach(sid => {
+        if (state[sid] && state[sid].explanationShown) state[sid].explanationShown = {};
+      });
       localStorage.setItem(STORAGE_KEY,    JSON.stringify(state));
       localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
       localStorage.setItem('quiz_progress_ts', String(cloudTs));
@@ -7944,6 +8002,9 @@ function fbSaveProgressToCloud() {
       if (!nuevaPreg)     { fbShowEditErr('edit-q-err','El enunciado no puede estar vacío.'); return; }
       if (!correctaRadio) { fbShowEditErr('edit-q-err','Seleccioná la opción correcta.'); return; }
       const nuevaCorrecta = [parseInt(correctaRadio.value, 10)];
+      // Detectar si realmente cambió la respuesta correcta (para no recalificar innecesariamente)
+      const correctaAnterior = preg.correcta ? preg.correcta.slice() : [];
+      const cambioRespuesta = JSON.stringify(nuevaCorrecta.slice().sort()) !== JSON.stringify(correctaAnterior.slice().sort());
 
       const btn = document.getElementById('edit-q-save');
       btn.disabled = true; btn.textContent = 'Guardando…';
@@ -7974,11 +8035,27 @@ function fbSaveProgressToCloud() {
         _seccionesYaCargadas.delete(seccionId);
         if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
         // Notificar a todos los clientes via onSnapshot (invalida caché y recarga en tiempo real)
-        await _bumpContentVersion(seccionId, qIndex, nuevaCorrecta);
+        // Solo pasar nuevaCorrecta si realmente cambió la respuesta, para no recalificar innecesariamente
+        await _bumpContentVersion(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null);
         overlay.remove();
+        // Preservar scroll antes de recargar
+        const scrollAntesSave = window.pageYOffset || document.documentElement.scrollTop;
+        // No hacer scroll automático al primer sin responder
+        _scrollOnNextRender = false;
+        // Cerrar todas las explicaciones abiertas tras la edición del admin
+        if (state[seccionId] && state[seccionId].explanationShown) {
+          state[seccionId].explanationShown = {};
+          saveJSON(STORAGE_KEY, state);
+        }
         // Recargar desde Firestore para asegurar que el admin ve los datos recién guardados
         await cargarSeccion(seccionId);
         generarCuestionario(seccionId);
+        // Restaurar scroll después del render
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: scrollAntesSave, behavior: 'instant' });
+          });
+        });
       } catch(e) {
         fbShowEditErr('edit-q-err', 'Error al guardar: ' + e.message);
         btn.disabled = false; btn.textContent = '💾 Guardar en Firestore';
@@ -8395,7 +8472,22 @@ function fbSaveProgressToCloud() {
 
     // 4. Si el usuario está viendo esa sección ahora mismo, rerenderizar
     if (currentSection === seccionId) {
+      // Preservar posición del scroll antes de re-renderizar
+      const scrollAntes = window.pageYOffset || document.documentElement.scrollTop;
+      // No hacer scroll automático al primer sin responder: el usuario no pidió entrar a la sección
+      _scrollOnNextRender = false;
+      // Cerrar todas las explicaciones abiertas (fix 4: al actualizar contenido quedan cerradas)
+      if (state[seccionId] && state[seccionId].explanationShown) {
+        state[seccionId].explanationShown = {};
+        saveJSON(STORAGE_KEY, state);
+      }
       generarCuestionario(seccionId);
+      // Restaurar scroll después del render (sin desplazar al usuario)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.scrollTo({ top: scrollAntes, behavior: 'instant' });
+        });
+      });
       fbToast('📥 Contenido actualizado por el admin', 'info');
     }
 
