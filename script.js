@@ -1,4 +1,4 @@
-//PRUEBA 66 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 67 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: invalidación de caché al guardar desde modal admin (ediciones persistentes entre sesiones)
 // Fix: reglas Firestore para colección meta/contentVersion (sync en tiempo real)
 // Fix: layout del modal admin en pantallas pequeñas (overflow-x:hidden, box-sizing, padding)
@@ -8403,6 +8403,8 @@ function fbSaveProgressToCloud() {
   }
 
   // ── Inicia el listener en tiempo real sobre meta/contentVersion ──
+  const _CONTENT_VERSION_KEY = 'fb_content_version_known'; // versión conocida por el cliente
+
   function _startContentVersionWatcher() {
     if (_contentVersionUnsubscribe) return; // ya activo
     if (!window.__firebase_firestore || !_fbDb) {
@@ -8412,25 +8414,39 @@ function fbSaveProgressToCloud() {
     }
 
     const { doc, onSnapshot } = window.__firebase_firestore;
-    let primeraLectura = true; // ignorar el disparo inicial (estado actual, no un cambio)
+    let primeraLectura = true;
 
     _contentVersionUnsubscribe = onSnapshot(
       doc(_fbDb, 'meta', 'contentVersion'),
       (snap) => {
+        if (!snap.exists()) { primeraLectura = false; return; }
+
+        const data           = snap.data();
+        const versionRemota  = data.version       ?? null;
+        const seccionId      = data.seccionId     ?? null;
+        const qIndex         = data.qIndex        ?? null;
+        const nuevaCorrecta  = data.nuevaCorrecta ?? null;
+
         if (primeraLectura) {
           primeraLectura = false;
-          console.log('[CONTENT-SYNC] Listener activo. Versión inicial:', snap.data()?.version ?? 'ninguna');
+          // Comparar con la versión que el cliente guardó la última vez
+          let versionConocida = null;
+          try { versionConocida = localStorage.getItem(_CONTENT_VERSION_KEY); } catch (_) {}
+          const hayVersionNueva = versionRemota && String(versionRemota) !== String(versionConocida);
+          console.log('[CONTENT-SYNC] Versión remota:', versionRemota, '| conocida:', versionConocida, '| cambio pendiente:', hayVersionNueva);
+          if (hayVersionNueva && seccionId) {
+            // El cliente arrancó sin conocer esta edición → invalidar caché ahora
+            console.log('[CONTENT-SYNC] Invalidando caché al inicio para sección:', seccionId);
+            _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
+          }
+          // Guardar versión actual como conocida para la próxima sesión
+          try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
           return;
         }
-        if (!snap.exists()) return;
 
-        const data = snap.data();
-        const seccionId    = data.seccionId    ?? null;
-        const qIndex       = data.qIndex       ?? null;
-        const nuevaCorrecta = data.nuevaCorrecta ?? null;
-
-        console.log('[CONTENT-SYNC] Cambio detectado → sección:', seccionId, '| preg:', qIndex);
-
+        // Cambio en tiempo real (usuario ya tenía la sesión abierta)
+        console.log('[CONTENT-SYNC] Cambio en tiempo real → sección:', seccionId, '| preg:', qIndex);
+        try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
         if (seccionId) {
           _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
         }
