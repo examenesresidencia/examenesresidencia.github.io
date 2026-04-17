@@ -1,4 +1,4 @@
-//PRUEBA 63 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 64 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: eliminado modal de confirmación al salir del cuestionario (innecesario con guardado Firebase en tiempo real)
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
@@ -3183,10 +3183,9 @@
     window._buildEditoresAdminPendiente = true;
 
     const hash = window.location.hash.substring(1);
-    // Al recargar (F5/CTRL+SHIFT+R), siempre volver al menú principal
-    // para evitar que el panel de edición de admin quede abierto.
-    // Solo restaurar sección si la navegación proviene de pushState/popstate (no recarga).
-    if (hash && hash !== 'menu' && !window._isPageReload) {
+    // Restaurar la sección indicada en el hash, tanto en navegación normal
+    // como al recargar la página (F5). Si no hay hash válido, mostrar el menú.
+    if (hash && hash !== 'menu') {
       showSection(hash); // cargarSeccion() maneja el caso de sección inexistente
       currentSection = hash;
     } else {
@@ -7684,7 +7683,7 @@ function fbSaveProgressToCloud() {
           <!-- Panel imagen (se inserta aquí dinámicamente) -->
           <div id="meq-img-panel-container"></div>
           <textarea class="fb-input" id="edit-q-explicacion" rows="10"
-            style="resize:vertical;font-size:0.88rem;border-radius:0 0 8px 8px;border-top:none;margin-top:0;min-height:200px;">${preg.explicacion || ''}</textarea>
+            style="resize:vertical;font-size:0.88rem;border-radius:0 0 8px 8px;border-top:none;margin-top:0;min-height:200px;"></textarea>
         </div>
 
         <div class="fb-error" id="edit-q-err" style="margin-bottom:10px;"></div>
@@ -7693,6 +7692,10 @@ function fbSaveProgressToCloud() {
       </div>`;
 
     document.body.appendChild(overlay);
+
+    // Asignar el valor del textarea via .value para evitar que el HTML de la explicación
+    // se renderice como DOM en lugar de mostrarse como texto plano editable.
+    overlay.querySelector('#edit-q-explicacion').value = preg.explicacion || '';
 
     document.getElementById('edit-q-close').onclick  =
     document.getElementById('edit-q-cancel').onclick = () => overlay.remove();
