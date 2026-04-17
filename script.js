@@ -1,4 +1,4 @@
-//PRUEBA 62 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 63 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: eliminado modal de confirmación al salir del cuestionario (innecesario con guardado Firebase en tiempo real)
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
@@ -3158,6 +3158,22 @@
   }
 
   // ======== Inicio ========
+  // Detectar si la página fue recargada (F5 / CTRL+SHIFT+R / botón recargar del navegador).
+  // performance.navigation.type === 1 indica recarga. En navegadores modernos se usa
+  // PerformanceNavigationTiming. En ambos casos marcamos _isPageReload=true para que
+  // DOMContentLoaded no restaure la sección anterior y siempre vuelva al menú.
+  window._isPageReload = false;
+  try {
+    if (window.performance) {
+      const navEntries = performance.getEntriesByType('navigation');
+      if (navEntries.length > 0) {
+        window._isPageReload = navEntries[0].type === 'reload';
+      } else if (performance.navigation) {
+        window._isPageReload = performance.navigation.type === 1;
+      }
+    }
+  } catch (_) {}
+
   document.addEventListener("DOMContentLoaded", () => {
     buildProgressUI();
     setupBrowserNavigation();
@@ -3167,21 +3183,16 @@
     window._buildEditoresAdminPendiente = true;
 
     const hash = window.location.hash.substring(1);
-    if (hash && hash !== 'menu') {
+    // Al recargar (F5/CTRL+SHIFT+R), siempre volver al menú principal
+    // para evitar que el panel de edición de admin quede abierto.
+    // Solo restaurar sección si la navegación proviene de pushState/popstate (no recarga).
+    if (hash && hash !== 'menu' && !window._isPageReload) {
       showSection(hash); // cargarSeccion() maneja el caso de sección inexistente
       currentSection = hash;
     } else {
-      // Verificar si había una sección activa antes de recargar (F5)
-      const savedSection = sessionStorage.getItem('quiz_active_section');
-      if (savedSection) {
-        // Restaurar la sección en lugar de ir al menú
-        history.replaceState({ section: savedSection }, `Cuestionario ${savedSection}`, `#${savedSection}`);
-        showSection(savedSection);
-        currentSection = savedSection;
-      } else {
-        history.replaceState({ section: null }, 'Menú Principal', '#menu');
-        showMenu();
-      }
+      history.replaceState({ section: null }, 'Menú Principal', '#menu');
+      sessionStorage.removeItem('quiz_active_section');
+      showMenu();
     }
   });
 
@@ -5015,7 +5026,9 @@
           updatedBy  : _currentUser.uid
         }, { merge: true });
         fbToast('✅ Explicación guardada en Firestore', 'success');
-        // Invalidar caché local de ediciones para esta sección
+        // Notificar a todos los clientes (incluido el admin) del cambio de contenido
+        await _bumpContentVersion(seccionId, qIndex, null);
+        // Invalidar caché local de ediciones y preguntas para esta sección
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
         try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
         if (wrap) wrap.remove();
@@ -7604,12 +7617,12 @@ function fbSaveProgressToCloud() {
     }
 
     const opcionesHTML = preg.opciones.map((op, i) => `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
         <input type="radio" name="edit-correcta" value="${i}"
           ${preg.correcta.includes(i) ? 'checked' : ''}
           style="accent-color:#0891b2;width:16px;height:16px;flex-shrink:0;">
         <textarea class="fb-input edit-opcion" data-idx="${i}"
-          rows="2" style="flex:1;resize:vertical;font-size:0.88rem;">${op}</textarea>
+          rows="1" style="flex:1;resize:vertical;font-size:0.85rem;padding:6px 10px;">${op}</textarea>
       </div>`).join('');
 
     const overlay = document.createElement('div');
@@ -7617,7 +7630,8 @@ function fbSaveProgressToCloud() {
     overlay.style.cssText = [
       'position:fixed','inset:0','z-index:99998',
       'background:rgba(10,22,40,0.88)','backdrop-filter:blur(8px)',
-      'display:flex','align-items:center','justify-content:center','padding:20px',
+      'display:flex','align-items:flex-start','justify-content:center','padding:20px',
+      'overflow-y:auto',
       'font-family:Segoe UI,system-ui,sans-serif'
     ].join(';');
 
@@ -7630,8 +7644,8 @@ function fbSaveProgressToCloud() {
 
         <div class="fb-field">
           <label class="fb-label">Enunciado</label>
-          <textarea class="fb-input" id="edit-q-enunciado" rows="4"
-            style="resize:vertical;">${preg.pregunta}</textarea>
+          <textarea class="fb-input" id="edit-q-enunciado" rows="2"
+            style="resize:vertical;font-size:0.88rem;">${preg.pregunta}</textarea>
         </div>
 
         <div class="fb-field">
@@ -7669,8 +7683,8 @@ function fbSaveProgressToCloud() {
           </div>
           <!-- Panel imagen (se inserta aquí dinámicamente) -->
           <div id="meq-img-panel-container"></div>
-          <textarea class="fb-input" id="edit-q-explicacion" rows="5"
-            style="resize:vertical;font-size:0.88rem;border-radius:0 0 8px 8px;border-top:none;margin-top:0;">${preg.explicacion || ''}</textarea>
+          <textarea class="fb-input" id="edit-q-explicacion" rows="10"
+            style="resize:vertical;font-size:0.88rem;border-radius:0 0 8px 8px;border-top:none;margin-top:0;min-height:200px;">${preg.explicacion || ''}</textarea>
         </div>
 
         <div class="fb-error" id="edit-q-err" style="margin-bottom:10px;"></div>
