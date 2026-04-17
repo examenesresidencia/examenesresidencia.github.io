@@ -6491,8 +6491,17 @@
               // Esperar a que el progreso de la nube cargue ANTES de mostrar el menú
               // Así la nube siempre gana sobre cualquier dato local desactualizado
               await fbSyncProgressFromCloud();
-              history.replaceState({ section: null }, 'Menú Principal', '#menu');
-              showMenu();
+              // Restaurar la sección del hash si existe, o mostrar el menú principal.
+              // Esto permite que al recargar la página se vuelva a la sección que estaba activa.
+              const _hashAlAuth = window.location.hash.substring(1);
+              if (_hashAlAuth && _hashAlAuth !== 'menu') {
+                history.replaceState({ section: _hashAlAuth }, _hashAlAuth, '#' + _hashAlAuth);
+                showSection(_hashAlAuth);
+                currentSection = _hashAlAuth;
+              } else {
+                history.replaceState({ section: null }, 'Menú Principal', '#menu');
+                showMenu();
+              }
               // Mostrar la barra de usuario siempre, inmediatamente
               fbShowUserBar();
               requestAnimationFrame(() => requestAnimationFrame(() => fbUpdateAdminButton()));
@@ -7621,7 +7630,7 @@ function fbSaveProgressToCloud() {
           ${preg.correcta.includes(i) ? 'checked' : ''}
           style="accent-color:#0891b2;width:16px;height:16px;flex-shrink:0;">
         <textarea class="fb-input edit-opcion" data-idx="${i}"
-          rows="1" style="flex:1;resize:vertical;font-size:0.85rem;padding:6px 10px;">${op}</textarea>
+          rows="1" style="flex:1;resize:vertical;font-size:0.85rem;padding:6px 10px;"></textarea>
       </div>`).join('');
 
     const overlay = document.createElement('div');
@@ -7644,7 +7653,7 @@ function fbSaveProgressToCloud() {
         <div class="fb-field">
           <label class="fb-label">Enunciado</label>
           <textarea class="fb-input" id="edit-q-enunciado" rows="2"
-            style="resize:vertical;font-size:0.88rem;">${preg.pregunta}</textarea>
+            style="resize:vertical;font-size:0.88rem;"></textarea>
         </div>
 
         <div class="fb-field">
@@ -7693,8 +7702,12 @@ function fbSaveProgressToCloud() {
 
     document.body.appendChild(overlay);
 
-    // Asignar el valor del textarea via .value para evitar que el HTML de la explicación
+    // Asignar los valores de los textareas via .value para evitar que el HTML
     // se renderice como DOM en lugar de mostrarse como texto plano editable.
+    overlay.querySelector('#edit-q-enunciado').value = preg.pregunta || '';
+    overlay.querySelectorAll('.edit-opcion').forEach((ta, i) => {
+      ta.value = preg.opciones[i] || '';
+    });
     overlay.querySelector('#edit-q-explicacion').value = preg.explicacion || '';
 
     document.getElementById('edit-q-close').onclick  =
