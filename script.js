@@ -1,5 +1,7 @@
-//PRUEBA 65 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix: eliminado modal de confirmación al salir del cuestionario (innecesario con guardado Firebase en tiempo real)
+//PRUEBA 66 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix: invalidación de caché al guardar desde modal admin (ediciones persistentes entre sesiones)
+// Fix: reglas Firestore para colección meta/contentVersion (sync en tiempo real)
+// Fix: layout del modal admin en pantallas pequeñas (overflow-x:hidden, box-sizing, padding)
 // Fix: deduplicación de preguntas extrapoladas en especialidades (unique/UBA → pediatría, etc.)
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
 /* ========== script.js ========== */
@@ -7638,13 +7640,15 @@ function fbSaveProgressToCloud() {
     overlay.style.cssText = [
       'position:fixed','inset:0','z-index:99998',
       'background:rgba(10,22,40,0.88)','backdrop-filter:blur(8px)',
-      'display:flex','align-items:flex-start','justify-content:center','padding:20px',
-      'overflow-y:auto',
+      '-webkit-backdrop-filter:blur(8px)',
+      'display:flex','align-items:flex-start','justify-content:center',
+      'padding:20px 12px','overflow-y:auto','overflow-x:hidden',
+      'box-sizing:border-box',
       'font-family:Segoe UI,system-ui,sans-serif'
     ].join(';');
 
     overlay.innerHTML = `
-      <div class="fb-card" style="max-width:620px;width:100%;max-height:92vh;overflow-y:auto;">
+      <div class="fb-card" style="max-width:620px;width:100%;max-height:92vh;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
           <h3 style="color:#f1f5f9;margin:0;font-size:1.1rem;">✏️ Editar pregunta ${qIndex + 1}</h3>
           <button id="edit-q-close" style="background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;">✕</button>
@@ -7964,9 +7968,16 @@ function fbSaveProgressToCloud() {
           updatedBy  : _currentUser.uid
         }, { merge: true });
         fbToast('✅ Pregunta guardada en Firestore', 'success');
+        // Invalidar caché local para que la próxima sesión cargue datos frescos
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+        try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
+        _seccionesYaCargadas.delete(seccionId);
+        if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
         // Notificar a todos los clientes via onSnapshot (invalida caché y recarga en tiempo real)
         await _bumpContentVersion(seccionId, qIndex, nuevaCorrecta);
         overlay.remove();
+        // Recargar desde Firestore para asegurar que el admin ve los datos recién guardados
+        await cargarSeccion(seccionId);
         generarCuestionario(seccionId);
       } catch(e) {
         fbShowEditErr('edit-q-err', 'Error al guardar: ' + e.message);
