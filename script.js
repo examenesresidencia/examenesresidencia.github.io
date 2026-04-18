@@ -1,4 +1,4 @@
-//PRUEBA 71 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 72 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7369,9 +7369,16 @@
           </button>
         </div>
 
+        <!-- Nota explicativa -->
+        <div style="padding:10px 24px 0;font-size:0.78rem;color:#64748b;line-height:1.6;border-top:1px solid rgba(255,255,255,0.05);margin-top:4px;">
+          ℹ️ <strong style="color:#94a3b8;">¿Por qué el número de pregunta no coincide con el cuestionario?</strong>
+          El cuestionario aplica deduplicación automática al cargar — si una pregunta ya aparece repetida, omite las copias y recorre la numeración.
+          Por eso la "posición en Firestore" puede no coincidir con el número visible en pantalla.
+          Las entradas que ves aquí <em>sí existen en la base de datos</em> y son las que están generando la redundancia.
+        </div>
+
         <!-- Resumen -->
-        <div id="dup-resumen" style="padding:12px 24px;font-size:0.82rem;color:#94a3b8;
-          border-bottom:1px solid rgba(255,255,255,0.07);min-height:38px;"></div>
+        <div id="dup-resumen" style="padding:10px 24px 4px;font-size:0.82rem;color:#94a3b8;min-height:32px;"></div>
 
         <!-- Lista de grupos -->
         <div id="dup-lista" style="padding:16px 24px;max-height:60vh;overflow-y:auto;"></div>
@@ -7557,8 +7564,15 @@
             <span style="color:#94a3b8;font-size:0.78rem;white-space:nowrap;">
               📂 <strong style="color:#e2e8f0;">${item.seccionId}</strong>
               · doc: <code style="color:#7dd3fc;font-size:0.75rem;user-select:all;">${item.docId}</code>
-              · idx <abbr title="Índice en Firestore (orden de carga)">Firestore</abbr>: <strong style="color:#e2e8f0;">${item.idx}</strong>
+              · posición en Firestore: <strong style="color:#fbbf24;">${item.idx + 1}</strong>
+              <span style="color:#475569;font-size:0.7rem;">(idx ${item.idx})</span>
             </span>
+            <a href="#${item.seccionId}" target="_blank"
+              style="color:#38bdf8;font-size:0.72rem;text-decoration:none;white-space:nowrap;
+              padding:2px 8px;border:1px solid rgba(56,189,248,0.3);border-radius:4px;
+              background:rgba(56,189,248,0.07);" title="Abrir sección en nueva pestaña">
+              🔗 Abrir sección
+            </a>
           </div>
           ${itemIdx > 0 ? `
           <button class="dup-btn-eliminar-uno" data-docid="${item.docId}" data-seccion="${item.seccionId}"
