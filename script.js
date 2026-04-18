@@ -1,9 +1,10 @@
-//PRUEBA 69 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 70 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
 // Fix: explicaciones se cierran al iniciar sesión, cerrar sesión, recargar, volver al menú
-// Fix: modal de edición admin se veía roto al recargar página con sesión activa (estilos no inyectados)
+// Fix: modal de edición admin se veía roto al recargar página con sesión activa
+// NUEVO: buscador de preguntas duplicadas en Firestore con eliminación directa
 // Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
 /* ========== script.js ========== */
 /* Requisitos:
@@ -7254,6 +7255,19 @@
         <button class="admin-close" id="fb-admin-close">✕</button>
       </div>
       <div class="admin-section">
+        <div class="admin-section-title">🔍 Herramientas de contenido</div>
+        <div style="padding:0 0 12px;">
+          <button id="btn-buscar-duplicados" style="
+            width:100%;padding:12px 16px;border:none;border-radius:10px;
+            background:linear-gradient(135deg,#7c3aed,#6d28d9);
+            color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
+            box-shadow:0 4px 14px rgba(124,58,237,0.35);
+            transition:all 0.2s;letter-spacing:0.02em;">
+            🔁 Buscar preguntas duplicadas en Firestore
+          </button>
+        </div>
+      </div>
+      <div class="admin-section">
         <div class="admin-section-title">Solicitudes pendientes <span id="admin-badge-pending"></span></div>
         <div id="admin-requests-list"><div class="admin-empty">Cargando…</div></div>
       </div>
@@ -7263,9 +7277,368 @@
       </div>`;
 
     document.getElementById('fb-admin-close').onclick = () => { panel.style.display = 'none'; };
+    document.getElementById('btn-buscar-duplicados').onclick = () => fbAbrirBuscadorDuplicados();
 
     fbListenAdminRequests();
     fbListenAllUsers();
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // BUSCADOR DE PREGUNTAS DUPLICADAS EN FIRESTORE
+  // Escanea todas las secciones, agrupa por enunciado normalizado,
+  // muestra los grupos con duplicados y permite eliminar directamente.
+  // ════════════════════════════════════════════════════════════════
+
+  const TODAS_LAS_SECCIONES = [
+    'unico2016','unico2017','unico2018','unico2019','unico2020',
+    'unico2021','unico2022','unico2023','unico2024','unico2025',
+    'uba2016','uba2017','uba2018','uba2019',
+    'compilado1','compilado2','compilado3','compilado4','compilado5',
+    'compilado6','compilado7','compilado8','compilado9','compilado10',
+    'pediatria','cardiologia','neurologia','endocrinologia','neumonologia',
+    'nefrologia','digestivo','hematologia','infectologia','clinicamedica',
+    'ginecologia','obstetricia','cirugia','traumatologia','urologia',
+    'of','orl','dermatologia','psiquiatria','reumatologia',
+    'toxicologia','medicinalegal','saludpublica','medicinafamiliar'
+  ];
+
+  function _normalizarEnunciado(texto) {
+    if (!texto) return '';
+    return texto
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar tildes
+      .replace(/[^a-z0-9\s]/g, ' ')                     // quitar puntuación
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  async function fbAbrirBuscadorDuplicados() {
+    fbInjectAuthStyles();
+    _fbInjectDuplicadosStyles();
+
+    // ── Crear overlay ──────────────────────────────────────────────
+    document.getElementById('fb-modal-duplicados')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'fb-modal-duplicados';
+    overlay.style.cssText = [
+      'position:fixed','inset:0','z-index:200000',
+      'background:rgba(5,10,20,0.92)','backdrop-filter:blur(10px)',
+      '-webkit-backdrop-filter:blur(10px)',
+      'display:flex','align-items:flex-start','justify-content:center',
+      'padding:24px 12px','overflow-y:auto','box-sizing:border-box',
+      'font-family:Segoe UI,system-ui,sans-serif'
+    ].join(';');
+
+    overlay.innerHTML = `
+      <div style="max-width:780px;width:100%;background:rgba(15,23,42,0.98);
+        border:1px solid rgba(124,58,237,0.3);border-radius:20px;
+        box-shadow:0 32px 80px rgba(0,0,0,0.6);overflow:hidden;">
+
+        <div style="background:linear-gradient(135deg,#4c1d95,#6d28d9);
+          padding:20px 24px;display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div style="color:#fff;font-size:1.1rem;font-weight:800;letter-spacing:-0.01em;">
+              🔁 Buscador de preguntas duplicadas
+            </div>
+            <div style="color:rgba(255,255,255,0.65);font-size:0.8rem;margin-top:3px;">
+              Escanea Firestore en tiempo real — las eliminaciones son permanentes
+            </div>
+          </div>
+          <button id="dup-close" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
+            color:#fff;border-radius:50%;width:36px;height:36px;font-size:1.1rem;
+            cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
+        </div>
+
+        <!-- Filtros -->
+        <div style="padding:16px 24px;border-bottom:1px solid rgba(255,255,255,0.07);
+          display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <input id="dup-filtro-texto" type="text" placeholder="Filtrar por texto del enunciado…"
+            style="flex:1;min-width:180px;padding:9px 13px;border-radius:8px;
+            border:1.5px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);
+            color:#f1f5f9;font-size:0.85rem;outline:none;box-sizing:border-box;">
+          <select id="dup-filtro-seccion"
+            style="padding:9px 13px;border-radius:8px;border:1.5px solid rgba(255,255,255,0.12);
+            background:rgba(30,41,59,0.9);color:#f1f5f9;font-size:0.85rem;outline:none;cursor:pointer;">
+            <option value="">Todas las secciones</option>
+            ${TODAS_LAS_SECCIONES.map(s => `<option value="${s}">${s}</option>`).join('')}
+          </select>
+          <button id="dup-btn-scan" style="padding:9px 18px;border:none;border-radius:8px;
+            background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;
+            font-size:0.85rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+            🔍 Escanear
+          </button>
+        </div>
+
+        <!-- Resumen -->
+        <div id="dup-resumen" style="padding:12px 24px;font-size:0.82rem;color:#94a3b8;
+          border-bottom:1px solid rgba(255,255,255,0.07);min-height:38px;"></div>
+
+        <!-- Lista de grupos -->
+        <div id="dup-lista" style="padding:16px 24px;max-height:60vh;overflow-y:auto;"></div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('dup-close').onclick = () => overlay.remove();
+
+    // ── Eventos de filtro ──────────────────────────────────────────
+    document.getElementById('dup-btn-scan').onclick = () => _escanearDuplicados();
+    document.getElementById('dup-filtro-texto').addEventListener('input', _aplicarFiltrosDuplicados);
+    document.getElementById('dup-filtro-seccion').addEventListener('change', _aplicarFiltrosDuplicados);
+
+    // Escanear automáticamente al abrir
+    _escanearDuplicados();
+  }
+
+  // Datos del último escaneo (para filtrar sin re-escanear)
+  let _dupGruposCache = [];
+
+  async function _escanearDuplicados() {
+    const lista   = document.getElementById('dup-lista');
+    const resumen = document.getElementById('dup-resumen');
+    const btnScan = document.getElementById('dup-btn-scan');
+    if (!lista || !resumen) return;
+
+    btnScan.disabled  = true;
+    btnScan.textContent = '⏳ Escaneando…';
+    lista.innerHTML   = '<div style="text-align:center;padding:40px;color:#94a3b8;">Cargando todas las secciones desde Firestore…</div>';
+    resumen.textContent = '';
+
+    try {
+      const { collection, getDocs, query, orderBy, deleteDoc, doc } = window.__firebase_firestore || window.__fb;
+      const db = _fbDb;
+
+      // Mapa: clave_normalizada → [{seccionId, docId, idx, pregunta}]
+      const mapa = new Map();
+      let totalPreguntas = 0;
+      let seccionesEscaneadas = 0;
+
+      for (const seccionId of TODAS_LAS_SECCIONES) {
+        try {
+          const itemsRef = collection(db, 'preguntas', seccionId, 'items');
+          const snap = await getDocs(query(itemsRef, orderBy('_idx')));
+          if (snap.empty) continue;
+          seccionesEscaneadas++;
+          snap.forEach(docSnap => {
+            totalPreguntas++;
+            const data = docSnap.data();
+            const clave = _normalizarEnunciado(data.pregunta);
+            if (!clave) return;
+            if (!mapa.has(clave)) mapa.set(clave, []);
+            mapa.get(clave).push({
+              seccionId,
+              docId   : docSnap.id,
+              idx     : data._idx ?? '?',
+              pregunta: data.pregunta || '(sin enunciado)',
+              opciones: data.opciones || [],
+              correcta: data.correcta || []
+            });
+          });
+        } catch (_) { /* sección inexistente en Firestore → saltar */ }
+      }
+
+      // Filtrar solo grupos con más de 1 entrada
+      _dupGruposCache = [];
+      mapa.forEach((items, _clave) => {
+        if (items.length > 1) _dupGruposCache.push(items);
+      });
+      // Ordenar por cantidad de duplicados desc
+      _dupGruposCache.sort((a, b) => b.length - a.length);
+
+      resumen.innerHTML = `
+        Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
+        <strong style="color:#f1f5f9">${totalPreguntas.toLocaleString()}</strong> preguntas totales ·
+        Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>`;
+
+      _aplicarFiltrosDuplicados();
+
+    } catch (e) {
+      lista.innerHTML = `<div style="color:#f87171;padding:20px;">❌ Error al escanear: ${e.message}</div>`;
+    } finally {
+      if (btnScan) { btnScan.disabled = false; btnScan.textContent = '🔍 Escanear'; }
+    }
+  }
+
+  function _aplicarFiltrosDuplicados() {
+    const lista       = document.getElementById('dup-lista');
+    const filtroTexto = (document.getElementById('dup-filtro-texto')?.value || '').toLowerCase();
+    const filtroSecc  = document.getElementById('dup-filtro-seccion')?.value || '';
+    if (!lista) return;
+
+    let grupos = _dupGruposCache;
+
+    if (filtroTexto) {
+      grupos = grupos.filter(g =>
+        g.some(item => item.pregunta.toLowerCase().includes(filtroTexto))
+      );
+    }
+    if (filtroSecc) {
+      grupos = grupos.filter(g => g.some(item => item.seccionId === filtroSecc));
+    }
+
+    if (grupos.length === 0) {
+      lista.innerHTML = '<div style="text-align:center;padding:40px;color:#4ade80;font-size:1.05rem;">✅ No se encontraron duplicados con estos filtros.</div>';
+      return;
+    }
+
+    lista.innerHTML = '';
+    grupos.forEach((items, grupoIdx) => {
+      const card = document.createElement('div');
+      card.style.cssText = 'background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:12px;margin-bottom:16px;overflow:hidden;';
+
+      // Cabecera del grupo
+      const header = document.createElement('div');
+      header.style.cssText = 'background:rgba(124,58,237,0.15);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;';
+      header.innerHTML = `
+        <div style="color:#c4b5fd;font-size:0.78rem;font-weight:700;letter-spacing:0.04em;">
+          GRUPO ${grupoIdx + 1} — ${items.length} copias encontradas
+        </div>
+        <button class="dup-btn-eliminar-grupo" style="
+          padding:5px 12px;border:none;border-radius:6px;
+          background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.35);
+          color:#fca5a5;font-size:0.75rem;font-weight:700;cursor:pointer;">
+          🗑 Eliminar todas menos 1
+        </button>`;
+      card.appendChild(header);
+
+      // Enunciado (truncado)
+      const enunciado = document.createElement('div');
+      enunciado.style.cssText = 'padding:10px 16px 6px;color:#cbd5e1;font-size:0.85rem;line-height:1.5;border-bottom:1px solid rgba(255,255,255,0.06);';
+      const textoCorto = items[0].pregunta.length > 200 ? items[0].pregunta.slice(0, 200) + '…' : items[0].pregunta;
+      enunciado.textContent = textoCorto;
+      card.appendChild(enunciado);
+
+      // Filas de cada copia
+      items.forEach((item, itemIdx) => {
+        const fila = document.createElement('div');
+        fila.id = `dup-fila-${item.docId}`;
+        fila.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.05);gap:10px;flex-wrap:wrap;';
+        fila.innerHTML = `
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1;min-width:0;">
+            ${itemIdx === 0 ? '<span style="background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;">MANTENER</span>' : ''}
+            <span style="color:#94a3b8;font-size:0.78rem;white-space:nowrap;">
+              📂 <strong style="color:#e2e8f0;">${item.seccionId}</strong>
+              · doc: <code style="color:#7dd3fc;font-size:0.75rem;">${item.docId}</code>
+              · idx: <strong style="color:#e2e8f0;">${item.idx}</strong>
+            </span>
+          </div>
+          ${itemIdx > 0 ? `
+          <button class="dup-btn-eliminar-uno" data-docid="${item.docId}" data-seccion="${item.seccionId}"
+            style="padding:5px 12px;border:none;border-radius:6px;flex-shrink:0;
+            background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.35);
+            color:#fca5a5;font-size:0.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+            🗑 Eliminar esta
+          </button>` : ''}`;
+        card.appendChild(fila);
+      });
+
+      // Botón eliminar grupo (mantiene la primera, borra las demás)
+      header.querySelector('.dup-btn-eliminar-grupo').onclick = async () => {
+        const paraEliminar = items.slice(1); // conservar items[0]
+        if (!confirm(`¿Eliminar ${paraEliminar.length} copia(s) duplicada(s)?\n\nSe conservará la de "${items[0].seccionId}" (idx ${items[0].idx}).\nEsta acción no se puede deshacer.`)) return;
+        await _eliminarDuplicadosEnFirestore(paraEliminar, card);
+      };
+
+      // Botones eliminar individual
+      card.querySelectorAll('.dup-btn-eliminar-uno').forEach(btn => {
+        btn.onclick = async () => {
+          const docId   = btn.dataset.docid;
+          const seccion = btn.dataset.seccion;
+          const item    = items.find(i => i.docId === docId);
+          if (!item) return;
+          if (!confirm(`¿Eliminar esta pregunta de "${seccion}" (doc: ${docId})?\nEsta acción no se puede deshacer.`)) return;
+          await _eliminarDuplicadosEnFirestore([item], card, docId);
+        };
+      });
+
+      lista.appendChild(card);
+    });
+  }
+
+  async function _eliminarDuplicadosEnFirestore(items, cardEl, soloDocId = null) {
+    const { deleteDoc, doc } = window.__firebase_firestore || window.__fb;
+    const db = _fbDb;
+    let eliminados = 0;
+    const errores = [];
+
+    for (const item of items) {
+      try {
+        await deleteDoc(doc(db, 'preguntas', item.seccionId, 'items', item.docId));
+        eliminados++;
+
+        // Invalidar caché de esa sección
+        try { localStorage.removeItem('fb_q_cache_' + item.seccionId); } catch (_) {}
+        try { localStorage.removeItem('fb_edits_cache_' + item.seccionId); } catch (_) {}
+        _seccionesYaCargadas.delete(item.seccionId);
+        if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[item.seccionId];
+
+        // Quitar la fila del DOM
+        const fila = document.getElementById(`dup-fila-${item.docId}`);
+        if (fila) {
+          fila.style.transition = 'opacity 0.3s, max-height 0.3s';
+          fila.style.opacity = '0';
+          fila.style.overflow = 'hidden';
+          fila.style.maxHeight = fila.offsetHeight + 'px';
+          setTimeout(() => {
+            fila.style.maxHeight = '0';
+            fila.style.padding = '0';
+            setTimeout(() => fila.remove(), 300);
+          }, 50);
+        }
+      } catch (e) {
+        errores.push(`${item.docId}: ${e.message}`);
+      }
+    }
+
+    // Actualizar _dupGruposCache removiendo los docIds eliminados
+    const eliminadosIds = new Set(items.map(i => i.docId));
+    _dupGruposCache = _dupGruposCache.map(g => g.filter(i => !eliminadosIds.has(i.docId))).filter(g => g.length > 1);
+
+    // Actualizar el resumen
+    const resumen = document.getElementById('dup-resumen');
+    if (resumen) {
+      const match = resumen.innerHTML.match(/Grupos con duplicados.*?<strong[^>]*>(\d+)<\/strong>/);
+      if (match) {
+        resumen.innerHTML = resumen.innerHTML.replace(
+          /Grupos con duplicados.*$/,
+          `Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>`
+        );
+      }
+    }
+
+    if (errores.length === 0) {
+      fbToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
+      // Si el grupo quedó sin duplicados, colapsar la card
+      if (cardEl) {
+        const filasRestantes = cardEl.querySelectorAll('.dup-btn-eliminar-uno');
+        if (filasRestantes.length === 0) {
+          cardEl.style.transition = 'opacity 0.4s';
+          cardEl.style.opacity = '0';
+          setTimeout(() => cardEl.remove(), 400);
+        }
+      }
+    } else {
+      fbToast(`⚠️ Eliminados: ${eliminados}. Errores: ${errores.join(', ')}`, 'error');
+    }
+  }
+
+  function _fbInjectDuplicadosStyles() {
+    if (document.getElementById('fb-duplicados-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'fb-duplicados-styles';
+    s.textContent = `
+      #fb-modal-duplicados ::-webkit-scrollbar { width:6px; }
+      #fb-modal-duplicados ::-webkit-scrollbar-track { background:rgba(255,255,255,0.04); }
+      #fb-modal-duplicados ::-webkit-scrollbar-thumb { background:rgba(124,58,237,0.4); border-radius:3px; }
+      #dup-filtro-texto:focus { border-color:#7c3aed !important; background:rgba(124,58,237,0.08) !important; }
+      .dup-btn-eliminar-uno:hover, .dup-btn-eliminar-grupo:hover {
+        background:rgba(239,68,68,0.32) !important;
+        border-color:rgba(239,68,68,0.6) !important;
+        color:#fff !important;
+      }
+    `;
+    document.head.appendChild(s);
   }
 
   function fbListenAdminRequests() {
