@@ -1,4 +1,4 @@
-//PRUEBA 70 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 71 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7304,10 +7304,10 @@
 
   function _normalizarEnunciado(texto) {
     if (!texto) return '';
+    // Comparación EXACTA: solo lowercase + colapsar espacios múltiples + trim.
+    // NO se quitan tildes ni puntuación para evitar falsos positivos.
     return texto
       .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar tildes
-      .replace(/[^a-z0-9\s]/g, ' ')                     // quitar puntuación
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -7489,38 +7489,75 @@
 
       // Cabecera del grupo
       const header = document.createElement('div');
-      header.style.cssText = 'background:rgba(124,58,237,0.15);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;';
+      header.style.cssText = 'background:rgba(124,58,237,0.15);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
       header.innerHTML = `
         <div style="color:#c4b5fd;font-size:0.78rem;font-weight:700;letter-spacing:0.04em;">
-          GRUPO ${grupoIdx + 1} — ${items.length} copias encontradas
+          GRUPO ${grupoIdx + 1} — ${items.length} copias con enunciado idéntico
         </div>
-        <button class="dup-btn-eliminar-grupo" style="
-          padding:5px 12px;border:none;border-radius:6px;
-          background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.35);
-          color:#fca5a5;font-size:0.75rem;font-weight:700;cursor:pointer;">
-          🗑 Eliminar todas menos 1
-        </button>`;
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="dup-btn-toggle-opciones" style="
+            padding:4px 10px;border:1px solid rgba(148,163,184,0.3);border-radius:6px;
+            background:rgba(255,255,255,0.06);color:#94a3b8;font-size:0.72rem;font-weight:600;cursor:pointer;">
+            👁 Ver opciones
+          </button>
+          <button class="dup-btn-eliminar-grupo" style="
+            padding:5px 12px;border:none;border-radius:6px;
+            background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.35);
+            color:#fca5a5;font-size:0.75rem;font-weight:700;cursor:pointer;">
+            🗑 Eliminar todas menos 1
+          </button>
+        </div>`;
       card.appendChild(header);
 
-      // Enunciado (truncado)
+      // Enunciado compartido (verificado idéntico)
       const enunciado = document.createElement('div');
-      enunciado.style.cssText = 'padding:10px 16px 6px;color:#cbd5e1;font-size:0.85rem;line-height:1.5;border-bottom:1px solid rgba(255,255,255,0.06);';
-      const textoCorto = items[0].pregunta.length > 200 ? items[0].pregunta.slice(0, 200) + '…' : items[0].pregunta;
-      enunciado.textContent = textoCorto;
+      enunciado.style.cssText = 'padding:10px 16px 8px;color:#e2e8f0;font-size:0.86rem;line-height:1.6;border-bottom:1px solid rgba(255,255,255,0.06);font-style:italic;';
+      enunciado.textContent = `"${items[0].pregunta}"`;
       card.appendChild(enunciado);
+
+      // Panel de opciones (oculto por defecto)
+      const panelOpciones = document.createElement('div');
+      panelOpciones.style.cssText = 'display:none;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.06);';
+      // Mostrar opciones de la primera copia
+      const opcionesHtml = items[0].opciones.map((op, i) => {
+        const esCorrecta = items[0].correcta.includes(i);
+        return `<div style="padding:3px 0;color:${esCorrecta ? '#4ade80' : '#94a3b8'};font-size:0.78rem;">
+          ${esCorrecta ? '✅' : '○'} ${op}
+        </div>`;
+      }).join('');
+      panelOpciones.innerHTML = `<div style="color:#7dd3fc;font-size:0.72rem;font-weight:700;margin-bottom:6px;letter-spacing:0.04em;">OPCIONES (primera copia):</div>${opcionesHtml}`;
+      card.appendChild(panelOpciones);
+
+      // Toggle opciones
+      header.querySelector('.dup-btn-toggle-opciones').onclick = (e) => {
+        const visible = panelOpciones.style.display !== 'none';
+        panelOpciones.style.display = visible ? 'none' : 'block';
+        e.target.textContent = visible ? '👁 Ver opciones' : '🙈 Ocultar opciones';
+      };
 
       // Filas de cada copia
       items.forEach((item, itemIdx) => {
         const fila = document.createElement('div');
         fila.id = `dup-fila-${item.docId}`;
-        fila.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.05);gap:10px;flex-wrap:wrap;';
+        fila.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.04);gap:10px;flex-wrap:wrap;';
+
+        // Verificar si las opciones son idénticas a la primera copia
+        const opcionesIguales = JSON.stringify(item.opciones) === JSON.stringify(items[0].opciones);
+        const correctaIgual   = JSON.stringify(item.correcta)  === JSON.stringify(items[0].correcta);
+        const esExacta = opcionesIguales && correctaIgual;
+
         fila.innerHTML = `
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1;min-width:0;">
-            ${itemIdx === 0 ? '<span style="background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;">MANTENER</span>' : ''}
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0;">
+            ${itemIdx === 0
+              ? '<span style="background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;">MANTENER</span>'
+              : ''}
+            ${!esExacta && itemIdx > 0
+              ? '<span title="Las opciones o la respuesta correcta difieren de la primera copia" style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.3);color:#fbbf24;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;cursor:help;">⚠️ Opciones distintas</span>'
+              : ''}
             <span style="color:#94a3b8;font-size:0.78rem;white-space:nowrap;">
               📂 <strong style="color:#e2e8f0;">${item.seccionId}</strong>
-              · doc: <code style="color:#7dd3fc;font-size:0.75rem;">${item.docId}</code>
-              · idx: <strong style="color:#e2e8f0;">${item.idx}</strong>
+              · doc: <code style="color:#7dd3fc;font-size:0.75rem;user-select:all;">${item.docId}</code>
+              · idx <abbr title="Índice en Firestore (orden de carga)">Firestore</abbr>: <strong style="color:#e2e8f0;">${item.idx}</strong>
             </span>
           </div>
           ${itemIdx > 0 ? `
@@ -7533,10 +7570,16 @@
         card.appendChild(fila);
       });
 
+      // Nota aclaratoria
+      const nota = document.createElement('div');
+      nota.style.cssText = 'padding:6px 16px 8px;color:#475569;font-size:0.72rem;';
+      nota.textContent = 'La primera entrada se marcará como MANTENER. Las demás se pueden eliminar individualmente o todas a la vez.';
+      card.appendChild(nota);
+
       // Botón eliminar grupo (mantiene la primera, borra las demás)
       header.querySelector('.dup-btn-eliminar-grupo').onclick = async () => {
         const paraEliminar = items.slice(1); // conservar items[0]
-        if (!confirm(`¿Eliminar ${paraEliminar.length} copia(s) duplicada(s)?\n\nSe conservará la de "${items[0].seccionId}" (idx ${items[0].idx}).\nEsta acción no se puede deshacer.`)) return;
+        if (!confirm(`¿Eliminar ${paraEliminar.length} copia(s) duplicada(s)?\n\nSe conservará la de "${items[0].seccionId}" (idx Firestore: ${items[0].idx}).\nEsta acción no se puede deshacer.`)) return;
         await _eliminarDuplicadosEnFirestore(paraEliminar, card);
       };
 
