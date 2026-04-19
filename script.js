@@ -1,4 +1,4 @@
-//PRUEBA 75 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 76 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7135,20 +7135,43 @@
     }
 
     // ── 2. Guardar progreso en Firestore ANTES de cerrar sesión ──────
-    if (_currentUser && _fbDb && window.__fb && Object.keys(state).length > 0) {
+    if (_currentUser && _fbDb && window.__fb) {
+      // Tomar el state más reciente: memoria o localStorage (el que tenga más datos)
+      let stateParaGuardar = state;
       try {
-        fbToast('Guardando progreso…', 'info');
-        const { doc, setDoc, serverTimestamp } = window.__fb;
-        await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
-          state,
-          attemptLog,
-          updatedAt: serverTimestamp()
-        });
-        localStorage.setItem('quiz_progress_ts', String(Date.now()));
-        fbToast('✅ Progreso guardado en la nube', 'success');
-      } catch (e) {
-        console.error('[FB-LOGOUT] Error al guardar progreso antes de cerrar sesión:', e);
-        fbToast('⚠️ No se pudo guardar el progreso en la nube', 'error');
+        const localState = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        const localKeys  = Object.keys(localState).length;
+        const memKeys    = Object.keys(state).length;
+        // Usar el que tenga más secciones respondidas
+        if (localKeys > memKeys) {
+          stateParaGuardar = localState;
+          console.log('[FB-LOGOUT] Usando state de localStorage (más completo):', localKeys, 'vs', memKeys, 'secciones');
+        }
+      } catch (_) {}
+
+      // Solo guardar si hay algo real — proteger contra sobreescribir con estado vacío
+      const hayProgreso = Object.keys(stateParaGuardar).some(sid => {
+        const s = stateParaGuardar[sid];
+        return s && s.graded && Object.keys(s.graded).length > 0;
+      });
+
+      if (hayProgreso) {
+        try {
+          fbToast('Guardando progreso…', 'info');
+          const { doc, setDoc, serverTimestamp } = window.__fb;
+          await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+            state      : stateParaGuardar,
+            attemptLog,
+            updatedAt  : serverTimestamp()
+          });
+          localStorage.setItem('quiz_progress_ts', String(Date.now()));
+          fbToast('✅ Progreso guardado en la nube', 'success');
+        } catch (e) {
+          console.error('[FB-LOGOUT] Error al guardar progreso antes de cerrar sesión:', e);
+          fbToast('⚠️ No se pudo guardar el progreso en la nube', 'error');
+        }
+      } else {
+        console.log('[FB-LOGOUT] state vacío o sin respuestas — no se sobreescribe Firestore');
       }
     }
 
@@ -7975,6 +7998,23 @@ async function fbSyncProgressFromCloud() {
     const localTs = parseInt(localStorage.getItem('quiz_progress_ts') || '0', 10);
 
     if (cloudTs >= localTs) {
+      // Verificar que el state de la nube tenga progreso real antes de sobreescribir
+      const cloudTieneProgreso = data.state && Object.keys(data.state).some(sid => {
+        const s = data.state[sid];
+        return s && s.graded && Object.keys(s.graded).length > 0;
+      });
+      const localTieneProgreso = Object.keys(state).some(sid => {
+        const s = state[sid];
+        return s && s.graded && Object.keys(s.graded).length > 0;
+      });
+
+      // No sobreescribir progreso local real con estado vacío de la nube
+      if (!cloudTieneProgreso && localTieneProgreso) {
+        fbToast('📱 Progreso local preservado (nube vacía)', 'info');
+        console.warn('[FB-SYNC] Nube tiene state vacío pero local tiene progreso — preservando local');
+        return;
+      }
+
       // La nube es más reciente (o igual) → usar la nube
       state      = data.state;
       attemptLog = data.attemptLog || [];
@@ -9757,10 +9797,12 @@ function fbSaveProgressToCloud() {
   // fbLogout ya está definido arriba en el IIFE; lo envolvemos
   const _fbLogoutOriginal = window.fbLogout;
   window.fbLogout = async function fbLogoutConModulos() {
-    // 1. Cancelar debounce y guardar inmediatamente
+    // 1. Si hay un guardado de progreso pendiente en debounce, ejecutarlo AHORA
+    //    (no simplemente cancelarlo — eso perdería el último progreso)
     if (_fbSaveDebounceTimer) {
       clearTimeout(_fbSaveDebounceTimer);
       _fbSaveDebounceTimer = null;
+      // El guardado definitivo lo hará fbLogout() original en el paso 7
     }
     // 2. Detener sesión única
     if (_fbSessionUnsubscribeLocal) {
