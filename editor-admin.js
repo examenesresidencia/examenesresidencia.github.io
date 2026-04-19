@@ -1,835 +1,1090 @@
-// ════════════════════════════════════════════════════════════════
-// editor-admin.js  — v1
-// ────────────────────────────────────────────────────────────────
-// Módulo independiente: Modal de edición de preguntas (Admin)
-// Editor WYSIWYG con contenteditable para la explicación:
-//   • Negrita, cursiva, subrayado visibles mientras se edita
-//   • Imágenes renderizadas dentro del editor (no como código)
-//   • Alineación: izquierda, centrado, derecha, justificado
-//   • Listas de viñetas y numeradas
-//   • Subíndice y superíndice
-//   • Ctrl+B / I / U nativos + Ctrl+A y Ctrl+Z del navegador
-//   • Scroll suave con scrollbar estilizada en la caja de edición
-//   • Bloqueo del scroll de fondo al abrir el modal
-//
-// Depende de las siguientes variables/funciones en window:
-//   window.__fb, window._fbDb, window._currentUser
-//   window.fbIsAdmin(), window.fbToast(), window.fbInjectAuthStyles()
-//   window.preguntasPorSeccion, window._seccionesYaCargadas
-//   window._bumpContentVersion(), window.cargarSeccion()
-//   window.generarCuestionario(), window.GITHUB_IMAGES_BASE
-//   window._scrollOnNextRender, window.STORAGE_KEY
+<!DOCTYPE html>
 
-(function () {
-  'use strict';
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Choice de Residencias Médicas</title>
+<link href="styles.css" rel="stylesheet"/>
 
-  // ── Helpers ───────────────────────────────────────────────────
-  function fbIsAdmin()          { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
-  function fbToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
-  function fbInjectAuthStyles() { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
-  function fbShowEditErr(id, msg) {
-    const el = document.getElementById(id);
-    if (el) { el.textContent = msg; el.classList.add('visible'); }
-  }
 
-  // ── Bloquear / desbloquear scroll de fondo ────────────────────
-  let _scrollY = 0;
-  function bloquearScrollFondo() {
-    _scrollY = window.scrollY;
-    document.body.style.position  = 'fixed';
-    document.body.style.top       = `-${_scrollY}px`;
-    document.body.style.width     = '100%';
-    document.body.style.overflowY = 'scroll';
-  }
-  function desbloquearScrollFondo() {
-    document.body.style.position  = '';
-    document.body.style.top       = '';
-    document.body.style.width     = '';
-    document.body.style.overflowY = '';
-    window.scrollTo({ top: _scrollY, behavior: 'instant' });
-  }
-
-  // ── Estilos (inyectados una sola vez) ─────────────────────────
-  function inyectarEstilos() {
-    if (document.getElementById('meq-styles-v2')) return;
-    const st = document.createElement('style');
-    st.id = 'meq-styles-v2';
-    st.textContent = `
-
-      /* ── Toolbar ── */
-      .meq-expl-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        background: linear-gradient(135deg, #0d2137, #0a1628);
-        border: 1px solid rgba(56,189,248,0.18);
-        border-bottom: none;
-        border-radius: 8px 8px 0 0;
-        padding: 6px 10px;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .meq-expl-label {
-        color: #94a3b8;
-        font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        white-space: nowrap;
-      }
-      .meq-toolbar-grupos {
-        display: flex;
-        gap: 3px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .meq-sep {
-        width: 1px;
-        height: 20px;
-        background: rgba(255,255,255,0.12);
-        margin: 0 3px;
-        flex-shrink: 0;
-      }
-
-      /* ── Botones de formato ── */
-      .meq-btn-fmt {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 28px;
-        height: 26px;
-        background: rgba(255,255,255,0.06);
-        border: 1.5px solid rgba(255,255,255,0.13);
-        color: #cbd5e1;
-        border-radius: 5px;
-        font-size: 0.82rem;
-        cursor: pointer;
-        transition: background 0.14s, border-color 0.14s, color 0.14s, transform 0.14s;
-        padding: 0 5px;
-        line-height: 1;
-        white-space: nowrap;
-        flex-shrink: 0;
-      }
-      .meq-btn-fmt:hover {
-        background: rgba(255,255,255,0.15);
-        border-color: rgba(255,255,255,0.32);
-        color: #f1f5f9;
-        transform: translateY(-1px);
-      }
-      .meq-btn-fmt.activo {
-        background: rgba(8,145,178,0.22);
-        border-color: rgba(8,145,178,0.6);
-        color: #38bdf8;
-      }
-
-      /* ── Botón imagen ── */
-      .meq-btn-img {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        background: rgba(56,189,248,0.10);
-        border: 1.5px solid rgba(56,189,248,0.32);
-        color: #38bdf8;
-        border-radius: 6px;
-        font-size: 0.74rem;
-        font-weight: 700;
-        padding: 4px 9px;
-        cursor: pointer;
-        transition: all 0.16s;
-        white-space: nowrap;
-        flex-shrink: 0;
-      }
-      .meq-btn-img:hover {
-        background: rgba(56,189,248,0.22);
-        border-color: rgba(56,189,248,0.65);
-        transform: translateY(-1px);
-      }
-
-      /* ── Editor WYSIWYG (contenteditable) ── */
-      #meq-editor-wysiwyg {
-        min-height: 220px;
-        max-height: 400px;
-        overflow-y: auto;
-        overflow-x: hidden;
-        background: #0a1628;
-        border: 1.5px solid rgba(56,189,248,0.18);
-        border-top: none;
-        border-radius: 0 0 8px 8px;
-        padding: 12px 14px;
-        color: #e2e8f0;
-        font-size: 0.88rem;
-        line-height: 1.7;
-        outline: none;
-        word-break: break-word;
-        box-sizing: border-box;
-        scroll-behavior: smooth;
-        scrollbar-width: thin;
-        scrollbar-color: rgba(56,189,248,0.35) rgba(255,255,255,0.04);
-      }
-      #meq-editor-wysiwyg:focus {
-        border-color: rgba(8,145,178,0.55);
-        box-shadow: 0 0 0 2px rgba(8,145,178,0.12);
-      }
-      #meq-editor-wysiwyg::-webkit-scrollbar        { width: 6px; }
-      #meq-editor-wysiwyg::-webkit-scrollbar-track  { background: rgba(255,255,255,0.04); border-radius: 3px; }
-      #meq-editor-wysiwyg::-webkit-scrollbar-thumb  { background: rgba(56,189,248,0.35); border-radius: 3px; }
-      #meq-editor-wysiwyg::-webkit-scrollbar-thumb:hover { background: rgba(56,189,248,0.6); }
-
-      /* Contenido dentro del editor */
-      #meq-editor-wysiwyg img {
-        max-width: 100%;
-        border-radius: 8px;
-        margin: 10px 0;
-        display: block;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
-      }
-      #meq-editor-wysiwyg strong, #meq-editor-wysiwyg b { font-weight: 700; }
-      #meq-editor-wysiwyg em, #meq-editor-wysiwyg i     { font-style: italic; }
-      #meq-editor-wysiwyg u                              { text-decoration: underline; }
-      #meq-editor-wysiwyg sub  { font-size: 0.75em; vertical-align: sub; }
-      #meq-editor-wysiwyg sup  { font-size: 0.75em; vertical-align: super; }
-      #meq-editor-wysiwyg ul   { padding-left: 1.5em; margin: 6px 0; list-style: disc; }
-      #meq-editor-wysiwyg ol   { padding-left: 1.5em; margin: 6px 0; list-style: decimal; }
-      #meq-editor-wysiwyg li   { margin: 2px 0; }
-      #meq-editor-wysiwyg p    { margin: 4px 0; }
-      #meq-editor-wysiwyg div  { margin: 2px 0; }
-
-      /* Placeholder */
-      #meq-editor-wysiwyg:empty::before {
-        content: attr(data-placeholder);
-        color: #334155;
-        pointer-events: none;
-        font-style: italic;
-      }
-
-      /* ── Panel imagen ── */
-      .meq-img-panel {
-        background: #070f1c;
-        border: 1.5px solid rgba(56,189,248,0.22);
-        border-top: none;
-        border-radius: 0 0 8px 8px;
-        padding: 12px 14px;
-        animation: meqPanelIn 0.2s cubic-bezier(0.34,1.2,0.64,1) both;
-      }
-      @keyframes meqPanelIn {
-        from { opacity:0; transform:translateY(-5px); }
-        to   { opacity:1; transform:translateY(0); }
-      }
-      .meq-img-hint {
-        font-size: 0.73rem;
-        color: #64748b;
-        line-height: 1.5;
-        margin-bottom: 10px;
-        display: flex;
-        gap: 6px;
-        align-items: flex-start;
-      }
-      .meq-img-hint svg    { flex-shrink:0; margin-top:2px; color:#38bdf8; }
-      .meq-img-hint strong { color: #94a3b8; }
-      .meq-img-hint em     { color: #fbbf24; font-style: normal; }
-      .meq-input-row {
-        display: flex;
-        align-items: center;
-        background: #0a1628;
-        border: 1.5px solid rgba(56,189,248,0.20);
-        border-radius: 7px;
-        overflow: hidden;
-        margin-bottom: 10px;
-        transition: border-color 0.15s;
-        cursor: pointer;
-      }
-      .meq-input-row:focus-within { border-color: #0891b2; }
-      .meq-prefix {
-        padding: 0 10px;
-        color: #38bdf8;
-        font-size: 0.73rem;
-        font-family: 'Courier New', monospace;
-        font-weight: 700;
-        white-space: nowrap;
-        background: rgba(56,189,248,0.07);
-        border-right: 1px solid rgba(56,189,248,0.16);
-        height: 34px;
-        display: flex;
-        align-items: center;
-        flex-shrink: 0;
-      }
-      .meq-input {
-        flex: 1;
-        background: transparent;
-        border: none;
-        outline: none;
-        color: #e2e8f0;
-        font-size: 0.81rem;
-        font-family: 'Courier New', monospace;
-        padding: 0 10px;
-        height: 34px;
-      }
-      .meq-input::placeholder { color: #334155; }
-      .meq-preview-wrap {
-        background: #0a1628;
-        border: 1px solid rgba(56,189,248,0.14);
-        border-radius: 7px;
-        padding: 10px;
-        margin-bottom: 10px;
-        text-align: center;
-      }
-      .meq-preview-img {
-        max-width: 100%;
-        max-height: 180px;
-        border-radius: 6px;
-        border: 1px solid rgba(56,189,248,0.2);
-        display: block;
-        margin: 0 auto 7px;
-      }
-      .meq-preview-status { font-size: 0.74rem; font-weight: 600; }
-      .meq-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-      .meq-btn-verificar, .meq-btn-insertar {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        border-radius: 7px;
-        font-size: 0.77rem;
-        font-weight: 700;
-        padding: 6px 13px;
-        cursor: pointer;
-        border: none;
-        transition: all 0.16s;
-      }
-      .meq-btn-verificar {
-        background: rgba(56,189,248,0.10);
-        border: 1.5px solid rgba(56,189,248,0.28);
-        color: #38bdf8;
-      }
-      .meq-btn-verificar:hover { background: rgba(56,189,248,0.20); }
-      .meq-btn-insertar {
-        background: linear-gradient(135deg, #0891b2, #0d7490);
-        color: #fff;
-        box-shadow: 0 3px 10px rgba(8,145,178,0.28);
-      }
-      .meq-btn-insertar:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 5px 14px rgba(8,145,178,0.4);
-      }
-      .meq-btn-insertar:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
-    `;
-    document.head.appendChild(st);
-  }
-
-  // ── execCommand helper ────────────────────────────────────────
-  // Asegura el foco en el editor antes de ejecutar cualquier comando
-  function cmd(command, value) {
-    const ed = document.getElementById('meq-editor-wysiwyg');
-    if (ed) ed.focus();
-    document.execCommand(command, false, value !== undefined ? value : null);
-    actualizarEstadoBotones();
-  }
-
-  // ── Actualizar estado visual (activo) de los botones ──────────
-  function actualizarEstadoBotones() {
-    const mapa = {
-      'meq-btn-bold'      : 'bold',
-      'meq-btn-italic'    : 'italic',
-      'meq-btn-underline' : 'underline',
-      'meq-btn-sub'       : 'subscript',
-      'meq-btn-sup'       : 'superscript',
-      'meq-btn-ul'        : 'insertUnorderedList',
-      'meq-btn-ol'        : 'insertOrderedList',
-      'meq-btn-left'      : 'justifyLeft',
-      'meq-btn-center'    : 'justifyCenter',
-      'meq-btn-right'     : 'justifyRight',
-      'meq-btn-justify'   : 'justifyFull',
-    };
-    Object.entries(mapa).forEach(([id, command]) => {
-      const btn = document.getElementById(id);
-      if (!btn) return;
-      try { btn.classList.toggle('activo', document.queryCommandState(command)); } catch (_) {}
-    });
-  }
-
-  // ── Serializar el WYSIWYG a HTML limpio para Firestore ────────
-  function serializarEditor() {
-    const ed = document.getElementById('meq-editor-wysiwyg');
-    if (!ed) return '';
-    let html = ed.innerHTML;
-    // Eliminar BRs residuales al inicio y al final
-    html = html.replace(/^(\s*<br\s*\/?>\s*)+/i, '').replace(/(\s*<br\s*\/?>\s*)+$/i, '').trim();
-    return html;
-  }
-
-  // ── Cargar HTML guardado en el editor ─────────────────────────
-  function cargarEnEditor(html) {
-    const ed = document.getElementById('meq-editor-wysiwyg');
-    if (!ed) return;
-    // Si es texto plano (sin etiquetas), convertir \n a <br>
-    if (html && !/<[a-z][\s\S]*>/i.test(html)) {
-      html = html.replace(/\n/g, '<br>');
-    }
-    ed.innerHTML = html || '';
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // abrirModalEdicionAdmin — función principal
-  // ════════════════════════════════════════════════════════════════
-  function abrirModalEdicionAdmin(seccionId, qIndex) {
-    if (!fbIsAdmin()) return;
-
-    const preguntasPorSeccion = window.preguntasPorSeccion || {};
-    const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
-    if (!preg) return;
-
-    fbInjectAuthStyles();
-    inyectarEstilos();
-
-    document.getElementById('fb-modal-edit-q')?.remove();
-
-    const GITHUB_IMAGES_BASE = window.GITHUB_IMAGES_BASE ||
-      'https://examenesresidencia.github.io/imagenes/';
-
-    // Bloquear scroll de fondo
-    bloquearScrollFondo();
-
-    const opcionesHTML = preg.opciones.map((op, i) => `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
-        <input type="radio" name="edit-correcta" value="${i}"
-          ${preg.correcta.includes(i) ? 'checked' : ''}
-          style="accent-color:#0891b2;width:16px;height:16px;flex-shrink:0;">
-        <textarea class="fb-input edit-opcion" data-idx="${i}"
-          rows="1" style="flex:1;resize:vertical;font-size:0.85rem;padding:6px 10px;"></textarea>
-      </div>`).join('');
-
-    const overlay = document.createElement('div');
-    overlay.id = 'fb-modal-edit-q';
-    overlay.style.cssText = [
-      'position:fixed','inset:0','z-index:99998',
-      'background:rgba(10,22,40,0.88)','backdrop-filter:blur(8px)',
-      '-webkit-backdrop-filter:blur(8px)',
-      'display:flex','align-items:flex-start','justify-content:center',
-      'padding:20px 12px','overflow-y:auto','overflow-x:hidden',
-      'box-sizing:border-box',
-      'font-family:Segoe UI,system-ui,sans-serif'
-    ].join(';');
-
-    overlay.innerHTML = `
-      <div class="fb-card" style="max-width:640px;width:100%;box-sizing:border-box;">
-
-        <!-- Cabecera -->
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-          <h3 style="color:#f1f5f9;margin:0;font-size:1.05rem;">✏️ Editar pregunta ${qIndex + 1}</h3>
-          <button id="edit-q-close" style="background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;">✕</button>
-        </div>
-
-        <!-- Enunciado -->
-        <div class="fb-field">
-          <label class="fb-label">Enunciado</label>
-          <textarea class="fb-input" id="edit-q-enunciado" rows="2"
-            style="resize:vertical;font-size:0.88rem;"></textarea>
-        </div>
-
-        <!-- Opciones -->
-        <div class="fb-field">
-          <label class="fb-label">Opciones — marcá la correcta con el radio ●</label>
-          ${opcionesHTML}
-        </div>
-
-        <!-- Explicación -->
-        <div class="fb-field" style="margin-bottom:4px;">
-
-          <!-- Toolbar -->
-          <div class="meq-expl-toolbar">
-            <span class="meq-expl-label">Explicación</span>
-            <div class="meq-toolbar-grupos">
-
-              <!-- Formato básico -->
-              <button class="meq-btn-fmt" id="meq-btn-bold"      type="button" title="Negrita (Ctrl+B)"><strong>B</strong></button>
-              <button class="meq-btn-fmt" id="meq-btn-italic"    type="button" title="Cursiva (Ctrl+I)"><em style="font-style:italic">I</em></button>
-              <button class="meq-btn-fmt" id="meq-btn-underline" type="button" title="Subrayado (Ctrl+U)"><u>S</u></button>
-              <button class="meq-btn-fmt" id="meq-btn-sub"       type="button" title="Subíndice">X<sub style="font-size:0.6em;line-height:1">₂</sub></button>
-              <button class="meq-btn-fmt" id="meq-btn-sup"       type="button" title="Superíndice">X<sup style="font-size:0.6em;line-height:1">²</sup></button>
-
-              <div class="meq-sep"></div>
-
-              <!-- Alineación -->
-              <button class="meq-btn-fmt" id="meq-btn-left"    type="button" title="Alinear izquierda" style="font-size:0.7rem;">◀≡</button>
-              <button class="meq-btn-fmt" id="meq-btn-center"  type="button" title="Centrar"           style="font-size:0.7rem;">≡≡</button>
-              <button class="meq-btn-fmt" id="meq-btn-right"   type="button" title="Alinear derecha"   style="font-size:0.7rem;">≡▶</button>
-              <button class="meq-btn-fmt" id="meq-btn-justify" type="button" title="Justificar"        style="font-size:0.7rem;">☰</button>
-
-              <div class="meq-sep"></div>
-
-              <!-- Listas -->
-              <button class="meq-btn-fmt" id="meq-btn-ul" type="button" title="Lista de viñetas"  style="font-size:0.68rem;">• ≡</button>
-              <button class="meq-btn-fmt" id="meq-btn-ol" type="button" title="Lista numerada"    style="font-size:0.68rem;">1.≡</button>
-
-              <div class="meq-sep"></div>
-
-              <!-- Imagen -->
-              <button class="meq-btn-img" id="meq-btn-img" type="button" title="Insertar imagen">
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
-                  fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
-                </svg>
-                🖼 Imagen
-              </button>
-            </div>
-          </div>
-
-          <!-- Panel imagen dinámico -->
-          <div id="meq-img-panel-container"></div>
-
-          <!-- Editor WYSIWYG -->
-          <div id="meq-editor-wysiwyg"
-               contenteditable="true"
-               data-placeholder="Escribí la explicación aquí…"
-               spellcheck="false">
-          </div>
-        </div>
-
-        <div class="fb-error" id="edit-q-err" style="margin-bottom:10px;"></div>
-        <button class="fb-btn-primary"   id="edit-q-save">💾 Guardar en Firestore</button>
-        <button class="fb-btn-secondary" id="edit-q-cancel" style="margin-top:8px;">Cancelar</button>
-      </div>`;
-
-    document.body.appendChild(overlay);
-
-    // ── Poblar campos ─────────────────────────────────────────────
-    overlay.querySelector('#edit-q-enunciado').value = preg.pregunta || '';
-    overlay.querySelectorAll('.edit-opcion').forEach((ta, i) => {
-      ta.value = preg.opciones[i] || '';
-    });
-    cargarEnEditor(preg.explicacion || '');
-
-    // ── Cerrar modal ──────────────────────────────────────────────
-    function cerrarModal() {
-      desbloquearScrollFondo();
-      overlay.remove();
-    }
-    document.getElementById('edit-q-close').onclick  = cerrarModal;
-    document.getElementById('edit-q-cancel').onclick = cerrarModal;
-    overlay.addEventListener('click', e => { if (e.target === overlay) cerrarModal(); });
-
-    // ── Ref al editor ─────────────────────────────────────────────
-    const editor = overlay.querySelector('#meq-editor-wysiwyg');
-
-    // Actualizar estado de botones al mover cursor o cambiar selección
-    editor.addEventListener('keyup',   actualizarEstadoBotones);
-    editor.addEventListener('mouseup', actualizarEstadoBotones);
-
-    // ── Atajos de teclado ─────────────────────────────────────────
-    // Ctrl+A y Ctrl+Z funcionan nativamente en contenteditable.
-    // Solo interceptamos B, I, U para evitar que el navegador
-    // use su propio comportamiento en lugar del nuestro.
-    editor.addEventListener('keydown', e => {
-      if (e.ctrlKey || e.metaKey) {
-        switch (e.key.toLowerCase()) {
-          case 'b': e.preventDefault(); cmd('bold');      break;
-          case 'i': e.preventDefault(); cmd('italic');    break;
-          case 'u': e.preventDefault(); cmd('underline'); break;
+<!-- Medidas de seguridad -->
+<style>
+        /* Prevenir selección de texto */
+        * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            -webkit-tap-highlight-color: transparent;
         }
-      }
-    });
-
-    // ── Botones de la toolbar ─────────────────────────────────────
-    overlay.querySelector('#meq-btn-bold').onclick      = () => cmd('bold');
-    overlay.querySelector('#meq-btn-italic').onclick    = () => cmd('italic');
-    overlay.querySelector('#meq-btn-underline').onclick = () => cmd('underline');
-    overlay.querySelector('#meq-btn-sub').onclick       = () => cmd('subscript');
-    overlay.querySelector('#meq-btn-sup').onclick       = () => cmd('superscript');
-    overlay.querySelector('#meq-btn-left').onclick      = () => cmd('justifyLeft');
-    overlay.querySelector('#meq-btn-center').onclick    = () => cmd('justifyCenter');
-    overlay.querySelector('#meq-btn-right').onclick     = () => cmd('justifyRight');
-    overlay.querySelector('#meq-btn-justify').onclick   = () => cmd('justifyFull');
-    overlay.querySelector('#meq-btn-ul').onclick        = () => cmd('insertUnorderedList');
-    overlay.querySelector('#meq-btn-ol').onclick        = () => cmd('insertOrderedList');
-
-    // ── Panel de imagen ───────────────────────────────────────────
-    const btnImg    = overlay.querySelector('#meq-btn-img');
-    const panelCont = overlay.querySelector('#meq-img-panel-container');
-
-    // Guardamos la selección (rango) para insertar la imagen en el lugar correcto
-    let _savedRange = null;
-    function guardarSeleccion() {
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
-        const r = sel.getRangeAt(0);
-        if (editor.contains(r.commonAncestorContainer)) {
-          _savedRange = r.cloneRange();
+        
+        /* Permitir selección solo en inputs */
+        input, textarea {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
         }
-      }
-    }
-    function restaurarSeleccion() {
-      if (!_savedRange) { editor.focus(); return; }
-      editor.focus();
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(_savedRange);
-    }
-    editor.addEventListener('mouseup', guardarSeleccion);
-    editor.addEventListener('keyup',   guardarSeleccion);
-
-    btnImg.addEventListener('click', () => {
-      guardarSeleccion();
-      // Toggle: si ya está abierto lo cierra
-      if (panelCont.querySelector('.meq-img-panel')) {
-        panelCont.innerHTML      = '';
-        btnImg.style.background  = '';
-        btnImg.style.borderColor = '';
-        return;
-      }
-      btnImg.style.background  = 'rgba(56,189,248,0.22)';
-      btnImg.style.borderColor = 'rgba(56,189,248,0.7)';
-
-      const panel = document.createElement('div');
-      panel.className = 'meq-img-panel';
-      panel.innerHTML = `
-        <div class="meq-img-hint">
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <span>
-            <strong>Local:</strong> poné la imagen en <strong>imagenes/</strong>. &nbsp;
-            <strong>Producción:</strong> subila a GitHub Pages en <strong>imagenes/</strong>.
-            Al guardar se usa la URL de <em>GitHub</em>.
-          </span>
-        </div>
-        <div class="meq-input-row" id="meq-file-row" title="Clic para elegir imagen">
-          <div class="meq-prefix">📁 imagenes/</div>
-          <span class="meq-input" id="meq-nombre-display"
-            style="color:#64748b;display:flex;align-items:center;user-select:none;">
-            Clic para buscar imagen…
-          </span>
-          <input type="file"   id="meq-file-input" accept="image/*" style="display:none;" autocomplete="off"/>
-          <input type="hidden" id="meq-nombre" value=""/>
-        </div>
-        <div id="meq-preview-wrap" style="display:none;" class="meq-preview-wrap">
-          <img class="meq-preview-img" id="meq-preview-img" src="" alt="preview"/>
-          <div class="meq-preview-status" id="meq-preview-status"></div>
-        </div>
-        <div class="meq-actions">
-          <button class="meq-btn-verificar" id="meq-btn-verificar" type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-            Verificar
-          </button>
-          <button class="meq-btn-insertar" id="meq-btn-insertar" disabled type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <line x1="5"  y1="12" x2="19" y2="12"/>
-            </svg>
-            Insertar en explicación
-          </button>
-        </div>`;
-      panelCont.appendChild(panel);
-
-      const inputNombre    = panel.querySelector('#meq-nombre');
-      const fileInput      = panel.querySelector('#meq-file-input');
-      const fileRow        = panel.querySelector('#meq-file-row');
-      const nombreDisplay  = panel.querySelector('#meq-nombre-display');
-      const btnVerificar   = panel.querySelector('#meq-btn-verificar');
-      const btnInsertar    = panel.querySelector('#meq-btn-insertar');
-      const previewWrap    = panel.querySelector('#meq-preview-wrap');
-      const previewImg     = panel.querySelector('#meq-preview-img');
-      const previewStatus  = panel.querySelector('#meq-preview-status');
-      let urlVerificada    = '';
-      let nombreVerificado = '';
-
-      fileRow.addEventListener('click', () => fileInput.click());
-
-      // Al seleccionar archivo: preview inmediato con URL local temporal
-      fileInput.addEventListener('change', () => {
-        const file = fileInput.files[0];
-        if (!file) return;
-        inputNombre.value         = file.name;
-        nombreDisplay.textContent = file.name;
-        nombreDisplay.style.color = '#e2e8f0';
-        const localUrl = URL.createObjectURL(file);
-        previewWrap.style.display = 'block';
-        previewImg.src            = localUrl;
-        previewImg.style.display  = 'block';
-        previewStatus.innerHTML   = '📁 Imagen seleccionada — <span style="color:#fbbf24">recordá subirla a imagenes/ en GitHub</span>';
-        previewStatus.style.color = '#34d399';
-        btnInsertar.disabled      = false;
-        urlVerificada             = localUrl;
-        nombreVerificado          = file.name;
-      });
-
-      // Verificar: prueba GitHub Pages primero, luego local
-      btnVerificar.addEventListener('click', () => {
-        const nombre = inputNombre.value.trim();
-        if (!nombre) { inputNombre.style.borderColor = '#ef4444'; return; }
-        inputNombre.style.borderColor = '';
-        const urlGH    = GITHUB_IMAGES_BASE + nombre;
-        const urlLocal = 'imagenes/' + nombre;
-        previewWrap.style.display = 'block';
-        previewStatus.textContent = 'Verificando…';
-        previewStatus.style.color = '#94a3b8';
-        previewImg.style.display  = 'none';
-        btnInsertar.disabled      = true;
-        urlVerificada = ''; nombreVerificado = '';
-
-        function probar(url, esLocal) {
-          const t = new Image();
-          t.onload = () => {
-            previewImg.src            = url;
-            previewImg.style.display  = 'block';
-            previewStatus.innerHTML   = esLocal
-              ? '✅ Encontrada localmente — <span style="color:#fbbf24">recordá subirla a GitHub</span>'
-              : '✅ Encontrada en GitHub Pages — lista para insertar';
-            previewStatus.style.color = '#34d399';
-            btnInsertar.disabled      = false;
-            urlVerificada             = url;
-            nombreVerificado          = nombre;
-          };
-          t.onerror = () => {
-            if (!esLocal) { probar(urlLocal + '?t=' + Date.now(), true); return; }
-            previewImg.style.display  = 'none';
-            previewStatus.textContent = '❌ No encontrada. Verificá el nombre y que esté en imagenes/ o GitHub.';
-            previewStatus.style.color = '#fca5a5';
-            btnInsertar.disabled      = true;
-          };
-          t.src = url;
-        }
-        probar(urlGH + '?t=' + Date.now(), false);
-      });
-
-      // Insertar imagen en el WYSIWYG en la posición del cursor guardada
-      btnInsertar.addEventListener('click', () => {
-        if (!urlVerificada || !nombreVerificado) return;
-        // Siempre guardar con URL de GitHub (aunque se previsualizó en local)
-        const urlFinal = GITHUB_IMAGES_BASE + nombreVerificado;
-        const imgHtml  = `<img src="${urlFinal}" alt="${nombreVerificado}"
-          style="max-width:100%;border-radius:8px;margin:10px 0;display:block;box-shadow:0 2px 10px rgba(0,0,0,0.18);"
-          title="Clic para ampliar">`;
-
-        // Restaurar selección y luego insertar
-        restaurarSeleccion();
-        document.execCommand('insertHTML', false, imgHtml);
-
-        // Cerrar panel
-        panelCont.innerHTML      = '';
-        btnImg.style.background  = '';
-        btnImg.style.borderColor = '';
-
-        const esLocal = urlVerificada.startsWith('blob:') || urlVerificada.startsWith('imagenes/');
-        fbToast(
-          esLocal
-            ? '🖼 Imagen insertada (local). Al guardar se usará la URL de GitHub Pages.'
-            : '🖼 Imagen insertada. Guardá para confirmar.',
-          'success'
-        );
-      });
-    }); // fin btnImg.addEventListener
-
-    // ── Guardar en Firestore ──────────────────────────────────────
-    document.getElementById('edit-q-save').onclick = async () => {
-      const nuevaPreg      = document.getElementById('edit-q-enunciado').value.trim();
-      const nuevaExpl      = serializarEditor();
-      const nuevasOpciones = Array.from(overlay.querySelectorAll('.edit-opcion'))
-                               .map(ta => ta.value.trim());
-      const correctaRadio  = overlay.querySelector('input[name="edit-correcta"]:checked');
-
-      if (!nuevaPreg)     { fbShowEditErr('edit-q-err', 'El enunciado no puede estar vacío.'); return; }
-      if (!correctaRadio) { fbShowEditErr('edit-q-err', 'Seleccioná la opción correcta.'); return; }
-
-      const nuevaCorrecta    = [parseInt(correctaRadio.value, 10)];
-      const correctaAnterior = preg.correcta ? preg.correcta.slice() : [];
-      const cambioRespuesta  = JSON.stringify(nuevaCorrecta.slice().sort()) !== JSON.stringify(correctaAnterior.slice().sort());
-
-      const btn = document.getElementById('edit-q-save');
-      btn.disabled = true; btn.textContent = 'Guardando…';
-
-      preg.pregunta    = nuevaPreg;
-      preg.opciones    = nuevasOpciones;
-      preg.correcta    = nuevaCorrecta;
-      preg.explicacion = nuevaExpl;
-
-      try {
-        const { doc, setDoc, serverTimestamp } = window.__fb;
-        const _fbDb        = window._fbDb;
-        const _currentUser = window._currentUser;
-
-        await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex}`), {
-          seccionId, qIndex,
-          pregunta   : nuevaPreg,
-          opciones   : nuevasOpciones,
-          correcta   : nuevaCorrecta,
-          explicacion: nuevaExpl,
-          updatedAt  : serverTimestamp(),
-          updatedBy  : _currentUser.uid
-        }, { merge: true });
-
-        fbToast('✅ Pregunta guardada en Firestore', 'success');
-
-        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
-        try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
-        if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionId);
-        if (window.preguntasPorSeccion)  delete window.preguntasPorSeccion[seccionId];
-
-        if (typeof window._bumpContentVersion === 'function') {
-          await window._bumpContentVersion(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null);
+        
+        /* Ocultar en impresión */
+        @media print {
+            body {
+                display: none !important;
+            }
         }
 
-        // Guardar la posición de scroll ANTES de desbloquear
-        const scrollAntesSave = _scrollY;
-
-        cerrarModal(); // desbloquea scroll y elimina el overlay
-
-        if ('_scrollOnNextRender' in window) window._scrollOnNextRender = false;
-
-        const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
-        let state = {};
-        try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
-        if (state[seccionId] && state[seccionId].explanationShown) {
-          state[seccionId].explanationShown = {};
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        /* ── Loading shield: oculta el body hasta que Firebase confirme la sesión ── */
+        body.fb-cargando > *:not(#fb-loading-shield):not(#fb-user-bar) {
+            visibility: hidden !important;
+            pointer-events: none !important;
         }
 
-        if (typeof window.cargarSeccion === 'function')       await window.cargarSeccion(seccionId);
-        if (typeof window.generarCuestionario === 'function')  window.generarCuestionario(seccionId);
+        /* ── Barra de usuario (pie de página) ── */
+        #fb-user-bar {
+            display: none; /* oculto hasta que el usuario inicie sesión */
+            position: fixed; bottom: 0; left: 0; right: 0; z-index: 9990;
+            background: rgba(10,22,40,0.95); backdrop-filter: blur(12px);
+            border-top: 1px solid rgba(255,255,255,0.07);
+            padding: 8px 20px; align-items: center;
+            justify-content: space-between; font-size: 0.82rem;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        #fb-user-bar.visible { display: flex; }
+        #fb-user-bar .ub-info { color: #64748b; }
+        #fb-user-bar .ub-email { color: #94a3b8; font-weight: 500; }
+        #fb-user-bar .ub-logout {
+            color: #ef4444; cursor: pointer; font-size: 0.8rem;
+            background: none; border: none; padding: 4px 8px;
+            border-radius: 6px; transition: background 0.15s;
+        }
+        #fb-user-bar .ub-logout:hover { background: rgba(239,68,68,0.12); }
+        #fb-user-bar .ub-ver-progreso {
+            color: #34d399; cursor: pointer; font-size: 0.8rem;
+            background: none; border: 1px solid rgba(52,211,153,0.3);
+            padding: 4px 10px; border-radius: 6px; transition: all 0.15s;
+            font-weight: 500;
+        }
+        #fb-user-bar .ub-ver-progreso:hover { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.6); }
+        #fb-loading-shield {
+            position: fixed;
+            inset: 0;
+            z-index: 99997;
+            background: linear-gradient(135deg, #0a1628 0%, #0d2444 50%, #071220 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #fb-loading-shield .shield-spinner {
+            width: 44px;
+            height: 44px;
+            border: 3px solid rgba(56,189,248,0.18);
+            border-top-color: #38bdf8;
+            border-radius: 50%;
+            animation: shieldSpin 0.7s linear infinite;
+        }
+        @keyframes shieldSpin { to { transform: rotate(360deg); } }
+        #fb-loading-shield.fade-out {
+            transition: opacity 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
 
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            window.scrollTo({ top: scrollAntesSave, behavior: 'instant' });
-          });
+        /* Botón Reiniciar Examen */
+        .btn-reiniciar {
+            background: linear-gradient(135deg, #e67e22 0%, #ca6f1e 100%);
+            color: white;
+            border: none;
+            padding: 11px 22px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 0 8px 20px 0;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .btn-reiniciar:hover {
+            background: linear-gradient(135deg, #ca6f1e 0%, #a85d19 100%);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            transform: translateY(-1px);
+        }
+        .btn-reiniciar:active {
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body class="fb-cargando">
+<!-- Loading shield: visible mientras Firebase verifica la sesión -->
+<div id="fb-loading-shield">
+  <div class="shield-spinner"></div>
+</div>
+<!-- Menú Principal -->
+<div class="menu-principal" id="menu-principal">
+<h1>RESIDENCIAS MÉDICAS</h1>
+<p style="text-align: center; color: white; margin-top: -30px; margin-bottom: 40px; font-size: 1.1rem;">Sistema de Preparación para el Examen de Residencia</p>
+<div class="container">
+<!-- Primera columna: CLÍNICAS -->
+<div class="columna">
+<h2>CLÍNICAS</h2>
+<ul>
+<li onclick="mostrarCuestionario('pediatria')">Pediatría</li>
+<li onclick="mostrarCuestionario('cardiologia')">Cardiología</li>
+<li onclick="mostrarCuestionario('neurologia')">Neurología</li>
+<li onclick="mostrarCuestionario('endocrinologia')">Endocrinología</li>
+<li onclick="mostrarCuestionario('neumonologia')">Neumonología</li>
+<li onclick="mostrarCuestionario('nefrologia')">Nefrología</li>
+<li onclick="mostrarCuestionario('digestivo')">Digestivo</li>
+<li onclick="mostrarCuestionario('hematologia')">Hematología</li>
+<li onclick="mostrarCuestionario('infectologia')">Infectología</li>
+<li onclick="mostrarCuestionario('clinicamedica')">Clínica Médica</li>
+</ul>
+</div>
+<!-- Segunda columna: GINECO-OBSTETRICIA y QUIRÚRGICAS -->
+<div class="columna">
+<h2>GINECO-OBSTETRICIA</h2>
+<ul>
+<li onclick="mostrarCuestionario('ginecologia')">Ginecología</li>
+<li onclick="mostrarCuestionario('obstetricia')">Obstetricia</li>
+</ul>
+<h2 style="margin-top: 30px;">QUIRÚRGICAS</h2>
+<ul>
+<li onclick="mostrarCuestionario('cirugia')">Cirugía</li>
+<li onclick="mostrarCuestionario('traumatologia')">Traumatología</li>
+<li onclick="mostrarCuestionario('urologia')">Urología</li>
+<li onclick="mostrarCuestionario('of')">Oftalmología</li>
+<li onclick="mostrarCuestionario('orl')">ORL</li>
+</ul>
+</div>
+<!-- Tercera columna: OTRAS ESPECIALIDADES -->
+<div class="columna">
+<h2>OTRAS ESPECIALIDADES</h2>
+<ul>
+<li onclick="mostrarCuestionario('dermatologia')">Dermatología</li>
+<li onclick="mostrarCuestionario('psiquiatria')">Psiquiatría</li>
+<li onclick="mostrarCuestionario('reumatologia')">Reumatología</li>
+<li onclick="mostrarCuestionario('toxicologia')">Toxicología</li>
+<li onclick="mostrarCuestionario('medicinalegal')">Medicina Legal</li>
+<li onclick="mostrarCuestionario('saludpublica')">Salud Pública</li>
+<li onclick="mostrarCuestionario('medicinafamiliar')">Medicina Familiar</li>
+</ul>
+</div>
+<!-- Cuarta columna: EXÁMENES -->
+<div class="columna">
+<h2>EXÁMENES</h2>
+<ul>
+<li onclick="mostrarSubmenu('examen-unico-submenu')">EXAMEN ÚNICO</li>
+<li onclick="mostrarSubmenu('examen-uba-submenu')">EXAMEN UBA</li>
+<li onclick="mostrarSubmenu('examen-otros-submenu')">OTROS</li>
+<li onclick="mostrarCuestionario('simulador')">SIMULACRO EXAMEN DE RESIDENCIA</li>
+<li onclick="mostrarBuscador()" style="background:linear-gradient(135deg,#0d7490,#0891b2);color:#fff;font-weight:700;letter-spacing:.03em;">🔍 BUSCADOR GLOBAL</li>
+
+</ul>
+</div>
+</div>
+<div class="info-extra">
+<p>Para sugerencias y correcciones comunicarse por favor con <a href="/cdn-cgi/l/email-protection#fa9c9b88979b9995c8999b8ec999929593999fba9d979b9396d4999597"><span class="__cf_email__" data-cfemail="422423302f23212d7021233671212a2d2b212702252f232b2e6c212d2f">[email protected]</span></a></p>
+<p>Última actualización: 21/09/2025</p>
+</div>
+</div>
+<!-- Submenú de Examen OTROS -->
+<div class="menu-principal" id="examen-otros-submenu" style="display: none;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>OTROS</h1>
+<div class="container">
+<div class="columna">
+<ul>
+<li onclick="mostrarCuestionario('compilado1')">Compilado 1</li>
+<li onclick="mostrarCuestionario('compilado2')">Compilado 2</li>
+<li onclick="mostrarCuestionario('compilado3')">Compilado 3</li>
+<li onclick="mostrarCuestionario('compilado4')">Compilado 4</li>
+<li onclick="mostrarCuestionario('compilado5')">Compilado 5</li>
+<li onclick="mostrarCuestionario('compilado6')">Compilado 6</li>
+<li onclick="mostrarCuestionario('compilado7')">Compilado 7</li>
+<li onclick="mostrarCuestionario('compilado8')">Compilado 8</li>
+<li onclick="mostrarCuestionario('compilado9')">Compilado 9</li>
+<li onclick="mostrarCuestionario('compilado10')">Compilado 10</li>
+</ul>
+</div>
+</div>
+</div>
+<!-- Submenú de Examen Único -->
+<div class="menu-principal" id="examen-unico-submenu" style="display: none;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>EXAMEN ÚNICO</h1>
+<div class="container">
+<div class="columna">
+<h2>Seleccione el año</h2>
+<ul>
+<li onclick="mostrarCuestionario('unico2025')">2025</li>
+<li onclick="mostrarCuestionario('unico2024')">2024</li>
+<li onclick="mostrarCuestionario('unico2023')">2023</li>
+<li onclick="mostrarCuestionario('unico2022')">2022</li>
+<li onclick="mostrarCuestionario('unico2021')">2021</li>
+<li onclick="mostrarCuestionario('unico2020')">2020</li>
+<li onclick="mostrarCuestionario('unico2019')">2019</li>
+<li onclick="mostrarCuestionario('unico2018')">2018</li>
+<li onclick="mostrarCuestionario('unico2017')">2017</li>
+<li onclick="mostrarCuestionario('unico2016')">2016</li>
+</ul>
+</div>
+</div>
+</div>
+<!-- Submenú de Examen UBA -->
+<div class="menu-principal" id="examen-uba-submenu" style="display: none;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>EXAMEN UBA</h1>
+<div class="container">
+<div class="columna">
+<h2>Seleccione el año</h2>
+<ul>
+<li onclick="mostrarCuestionario('uba2016')">2016</li>
+<li onclick="mostrarCuestionario('uba2017')">2017</li>
+<li onclick="mostrarCuestionario('uba2018')">2018</li>
+<li onclick="mostrarCuestionario('uba2019')">2019</li>
+</ul>
+</div>
+</div>
+</div>
+
+<!-- TODOS LOS CUESTIONARIOS -->
+<!-- Cuestionario de Pediatría -->
+<div class="pagina-cuestionario" id="pediatria">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Pediatría</h1>
+<div id="cuestionario-pediatria"></div>
+<button id="mostrar-total-pediatria">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-pediatria"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('pediatria')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Infectología -->
+<div class="pagina-cuestionario" id="infectologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Infectología</h1>
+<div id="cuestionario-infectologia"></div>
+<button id="mostrar-total-infectologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-infectologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('infectologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Medicina Legal -->
+<div class="pagina-cuestionario" id="medicinalegal">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Medicina Legal</h1>
+<div id="cuestionario-medicinalegal"></div>
+<button id="mostrar-total-medicinalegal">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-medicinalegal"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('medicinalegal')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Ginecología  -->
+<div class="pagina-cuestionario" id="ginecologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Ginecología </h1>
+<div id="cuestionario-ginecologia"></div>
+<button id="mostrar-total-ginecologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-ginecologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('ginecologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Obstetricia -->
+<div class="pagina-cuestionario" id="obstetricia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Obstetricia </h1>
+<div id="cuestionario-obstetricia"></div>
+<button id="mostrar-total-obstetricia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-obstetricia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('obstetricia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Cardiología -->
+<div class="pagina-cuestionario" id="cardiologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Cardiología </h1>
+<div id="cuestionario-cardiologia"></div>
+<button id="mostrar-total-cardiologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-cardiologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('cardiologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Endocrinología -->
+<div class="pagina-cuestionario" id="endocrinologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Endocrinología</h1>
+<div id="cuestionario-endocrinologia"></div>
+<button id="mostrar-total-endocrinologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-endocrinologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('endocrinologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Neumonología -->
+<div class="pagina-cuestionario" id="neumonologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Neumonología </h1>
+<div id="cuestionario-neumonologia"></div>
+<button id="mostrar-total-neumonologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-neumonologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('neumonologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Neurología  -->
+<div class="pagina-cuestionario" id="neurologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Neurología </h1>
+<div id="cuestionario-neurologia"></div>
+<button id="mostrar-total-neurologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-neurologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('neurologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Nefrología -->
+<div class="pagina-cuestionario" id="nefrologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Nefrología </h1>
+<div id="cuestionario-nefrologia"></div>
+<button id="mostrar-total-nefrologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-nefrologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('nefrologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Salud Pública -->
+<div class="pagina-cuestionario" id="saludpublica">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Salud Pública</h1>
+<div id="cuestionario-saludpublica"></div>
+<button id="mostrar-total-saludpublica">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-saludpublica"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('saludpublica')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Medicina Familiar -->
+<div class="pagina-cuestionario" id="medicinafamiliar">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Medicina Familiar </h1>
+<div id="cuestionario-medicinafamiliar"></div>
+<button id="mostrar-total-medicinafamiliar">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-medicinafamiliar"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('medicinafamiliar')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Digestivo -->
+<div class="pagina-cuestionario" id="digestivo">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Digestivo</h1>
+<div id="cuestionario-digestivo"></div>
+<button id="mostrar-total-digestivo">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-digestivo"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('digestivo')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Hematología -->
+<div class="pagina-cuestionario" id="hematologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Hematología</h1>
+<div id="cuestionario-hematologia"></div>
+<button id="mostrar-total-hematologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-hematologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('hematologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Clínica Médica -->
+<div class="pagina-cuestionario" id="clinicamedica">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Clínica médica</h1>
+<div id="cuestionario-clinicamedica"></div>
+<button id="mostrar-total-clinicamedica">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-clinicamedica"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('clinicamedica')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Cirugía -->
+<div class="pagina-cuestionario" id="cirugia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Cirugía</h1>
+<div id="cuestionario-cirugia"></div>
+<button id="mostrar-total-cirugia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-cirugia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('cirugia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de ORL -->
+<div class="pagina-cuestionario" id="orl">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>ORL</h1>
+<div id="cuestionario-orl"></div>
+<button id="mostrar-total-orl">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-orl"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('orl')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de OF -->
+<div class="pagina-cuestionario" id="of">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Oftalmología </h1>
+<div id="cuestionario-of"></div>
+<button id="mostrar-total-of">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-of"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('of')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Urología  -->
+<div class="pagina-cuestionario" id="urologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Urología </h1>
+<div id="cuestionario-urologia"></div>
+<button id="mostrar-total-urologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-urologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('urologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Dermatología  -->
+<div class="pagina-cuestionario" id="dermatologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Dermatología </h1>
+<div id="cuestionario-dermatologia"></div>
+<button id="mostrar-total-dermatologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-dermatologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('dermatologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Reumatología -->
+<div class="pagina-cuestionario" id="reumatologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Reumatología </h1>
+<div id="cuestionario-reumatologia"></div>
+<button id="mostrar-total-reumatologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-reumatologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('reumatologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Psiquiatría -->
+<div class="pagina-cuestionario" id="psiquiatria">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Psiquiatría</h1>
+<div id="cuestionario-psiquiatria"></div>
+<button id="mostrar-total-psiquiatria">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-psiquiatria"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('psiquiatria')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Toxicología -->
+<div class="pagina-cuestionario" id="toxicologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Toxicología</h1>
+<div id="cuestionario-toxicologia"></div>
+<button id="mostrar-total-toxicologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-toxicologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('toxicologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Traumatología -->
+<div class="pagina-cuestionario" id="traumatologia">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Traumatología</h1>
+<div id="cuestionario-traumatologia"></div>
+<button id="mostrar-total-traumatologia">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-traumatologia"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('traumatologia')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2016 -->
+<div class="pagina-cuestionario" id="unico2016">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2016</h1>
+<div id="cuestionario-unico2016"></div>
+<button id="mostrar-total-unico2016">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2016"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2016')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2017 -->
+<div class="pagina-cuestionario" id="unico2017">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2017</h1>
+<div id="cuestionario-unico2017"></div>
+<button id="mostrar-total-unico2017">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2017"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2017')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2018 -->
+<div class="pagina-cuestionario" id="unico2018">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2016</h1>
+<div id="cuestionario-unico2018"></div>
+<button id="mostrar-total-unico2018">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2018"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2018')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2019 -->
+<div class="pagina-cuestionario" id="unico2019">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2019</h1>
+<div id="cuestionario-unico2019"></div>
+<button id="mostrar-total-unico2019">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2019"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2019')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2020 -->
+<div class="pagina-cuestionario" id="unico2020">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2020</h1>
+<div id="cuestionario-unico2020"></div>
+<button id="mostrar-total-unico2020">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2020"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2020')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2021 -->
+<div class="pagina-cuestionario" id="unico2021">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2021</h1>
+<div id="cuestionario-unico2021"></div>
+<button id="mostrar-total-unico2021">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2021"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2021')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2022 -->
+<div class="pagina-cuestionario" id="unico2022">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2022</h1>
+<div id="cuestionario-unico2022"></div>
+<button id="mostrar-total-unico2022">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2022"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2022')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2023 -->
+<div class="pagina-cuestionario" id="unico2023">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2023</h1>
+<div id="cuestionario-unico2023"></div>
+<button id="mostrar-total-unico2023">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2023"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2023')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2024 -->
+<div class="pagina-cuestionario" id="unico2024">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2024</h1>
+<div id="cuestionario-unico2024"></div>
+<button id="mostrar-total-unico2024">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2024"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2024')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen único 2025 -->
+<div class="pagina-cuestionario" id="unico2025">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2025</h1>
+<div id="cuestionario-unico2025"></div>
+<button id="mostrar-total-unico2025">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2025"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2025')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionarios EXAMEN UBA -->
+<!-- Cuestionario de Examen UBA 2016 -->
+<div class="pagina-cuestionario" id="uba2016">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>EXAMEN UBA 2016</h1>
+<div id="cuestionario-uba2016"></div>
+<button id="mostrar-total-uba2016">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-uba2016"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('uba2016')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen UBA 2017 -->
+<div class="pagina-cuestionario" id="uba2017">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>EXAMEN UBA 2017</h1>
+<div id="cuestionario-uba2017"></div>
+<button id="mostrar-total-uba2017">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-uba2017"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('uba2017')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen UBA 2018 -->
+<div class="pagina-cuestionario" id="uba2018">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>EXAMEN UBA 2018</h1>
+<div id="cuestionario-uba2018"></div>
+<button id="mostrar-total-uba2018">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-uba2018"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('uba2018')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+<!-- Cuestionario de Examen UBA 2019 -->
+<div class="pagina-cuestionario" id="uba2019">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>EXAMEN UBA 2019</h1>
+<div id="cuestionario-uba2019"></div>
+<button id="mostrar-total-uba2019">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-uba2019"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-uba-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('uba2019')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+
+<!-- OTROS -->
+<!-- COMPILADOS 1 al 10 -->
+<!-- Compilado 1 -->
+<div class="pagina-cuestionario" id="compilado1">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 1</h1>
+    <div id="cuestionario-compilado1"></div>
+    <button id="mostrar-total-compilado1">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado1"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado1')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 2 -->
+<div class="pagina-cuestionario" id="compilado2">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 2</h1>
+    <div id="cuestionario-compilado2"></div>
+    <button id="mostrar-total-compilado2">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado2"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado2')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 3 -->
+<div class="pagina-cuestionario" id="compilado3">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 3</h1>
+    <div id="cuestionario-compilado3"></div>
+    <button id="mostrar-total-compilado3">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado3"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado3')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 4 -->
+<div class="pagina-cuestionario" id="compilado4">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 4</h1>
+    <div id="cuestionario-compilado4"></div>
+    <button id="mostrar-total-compilado4">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado4"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado4')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 5 -->
+<div class="pagina-cuestionario" id="compilado5">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 5</h1>
+    <div id="cuestionario-compilado5"></div>
+    <button id="mostrar-total-compilado5">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado5"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado5')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 6 -->
+<div class="pagina-cuestionario" id="compilado6">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 6</h1>
+    <div id="cuestionario-compilado6"></div>
+    <button id="mostrar-total-compilado6">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado6"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado6')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 7 -->
+<div class="pagina-cuestionario" id="compilado7">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 7</h1>
+    <div id="cuestionario-compilado7"></div>
+    <button id="mostrar-total-compilado7">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado7"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado7')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 8 -->
+<div class="pagina-cuestionario" id="compilado8">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 8</h1>
+    <div id="cuestionario-compilado8"></div>
+    <button id="mostrar-total-compilado8">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado8"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado8')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 9 -->
+<div class="pagina-cuestionario" id="compilado9">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 9</h1>
+    <div id="cuestionario-compilado9"></div>
+    <button id="mostrar-total-compilado9">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado9"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado9')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+<!-- Compilado 10 -->
+<div class="pagina-cuestionario" id="compilado10">
+    <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>COMPILADO 10</h1>
+    <div id="cuestionario-compilado10"></div>
+    <button id="mostrar-total-compilado10">Mostrar Puntuación Total</button>
+    <div class="resultado-final" id="resultado-total-compilado10"></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+        <button class="btn-volver" onclick="volverAlSubmenu('examen-otros-submenu')">← Volver a OTROS</button>
+        <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+        <button class="btn-reiniciar" onclick="reiniciarExamen('compilado10')">🔄 Reiniciar Examen</button>
+    </div>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- SIMULACRO-->
+<div class="pagina-cuestionario" id="simulador">
+<button class="btn-volver" onclick="volverAlMenuSimulacro('simulador')">← Volver al Menú Principal</button>
+<h1>SIMULACRO EXAMEN DE RESIDENCIA</h1>
+<div id="cuestionario-simulador"></div>
+<button id="mostrar-total-simulador">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-simulador"></div>
+<div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;">
+<button class="btn-volver" onclick="volverAlMenuSimulacro('simulador')" style="flex: 1; min-width: 200px; max-width: 300px;">← Volver al Menú Principal</button>
+<button class="btn-responder" id="btn-repetir-simulacro" onclick="repetirSimulacro()" style="flex: 1; min-width: 200px; max-width: 300px;">🔁 Repetir Simulacro</button>
+<button class="btn-responder" id="btn-crear-nuevo-simulacro" onclick="crearNuevoSimulacro()" style="flex: 1; min-width: 200px; max-width: 300px;">🔄 Crear Nuevo Simulacro</button>
+</div>
+<!-- Botón Terminar Simulacro -->
+<div style="margin-top: 32px; padding: 20px 0 8px; border-top: 1px solid #e2e8f0; display: flex; justify-content: center;">
+  <button id="btn-terminar-simulacro" onclick="terminarSimulacro()">
+    <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+    Terminar Simulacro
+  </button>
+</div>
+</div>
+
+<!-- ══════════════ BUSCADOR GLOBAL ══════════════ -->
+<div id="buscador-panel" class="buscador-panel" style="display:none;">
+  <div class="buscador-header">
+    <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+    <h1>🔍 BUSCADOR GLOBAL</h1>
+  </div>
+  <div class="buscador-search-bar">
+    <div class="buscador-input-wrap">
+      <span class="buscador-lupa">🔍</span>
+      <input id="buscador-input" type="text" placeholder="Buscar en todos los exámenes (mín. 2 caracteres)…" autocomplete="off" spellcheck="false">
+      <button id="buscador-clear" class="buscador-clear" title="Limpiar búsqueda">✕</button>
+    </div>
+  </div>
+  <div id="buscador-status" class="buscador-status"></div>
+  <div id="buscador-results" class="buscador-results"></div>
+</div>
+
+<!-- Botón flotante Volver al Buscador (se muestra al navegar desde una tarjeta) -->
+<button id="btn-volver-buscador" class="btn-volver-buscador" style="display:none;" onclick="volverAlBuscador()">← Volver al Buscador</button>
+<!-- Script de Cloudflare para protección de emails -->
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
+
+<!-- FIREBASE SDK: carga módulos ESM y los expone como globals para script.js -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+           signOut, sendPasswordResetEmail, onAuthStateChanged }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, where,
+           onSnapshot, updateDoc, serverTimestamp, orderBy, deleteDoc }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+  window.__firebase_app       = { initializeApp };
+  window.__firebase_auth      = { getAuth, createUserWithEmailAndPassword,
+                                  signInWithEmailAndPassword, signOut,
+                                  sendPasswordResetEmail, onAuthStateChanged };
+  window.__firebase_firestore = { getFirestore, doc, setDoc, getDoc, getDocs,
+                                  collection, query, where, onSnapshot,
+                                  updateDoc, serverTimestamp, orderBy, deleteDoc };
+  window.__firebaseReady = true;
+  document.dispatchEvent(new Event('firebaseReady'));
+</script>
+
+<!-- Base de datos de preguntas -->
+<script>window.preguntasPorSeccion = {};</script>
+<!-- Sistema de preguntas concatenadas -->
+<script src="gestorPreguntasConcatenadas.js"></script>
+<!-- Script principal de la aplicación -->
+<script src="script.js?v=79"></script>
+<!-- Editor admin de preguntas (módulo independiente, depende de script.js) -->
+<script src="editor-admin.js?v=1"></script>
+<!-- Buscador de preguntas duplicadas (módulo independiente, depende de script.js) -->
+<script src="buscador-duplicados.js?v=1"></script>
+<script>
+        // Medidas de seguridad adicionales
+        
+        // 1. Prevenir clic derecho
+        document.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            return false;
         });
 
-      } catch (e) {
-        fbShowEditErr('edit-q-err', 'Error al guardar: ' + e.message);
-        btn.disabled = false; btn.textContent = '💾 Guardar en Firestore';
-      }
-    };
-  }
+        // 2. Prevenir atajos de teclado peligrosos
+        document.addEventListener('keydown', function(e) {
+            // Prevenir F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+S, Ctrl+P
+            if (e.keyCode === 123 || // F12
+                (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) || // DevTools
+                (e.ctrlKey && e.keyCode === 85) || // Ver código fuente
+                (e.ctrlKey && e.keyCode === 83) || // Guardar
+                (e.ctrlKey && e.keyCode === 80) || // Imprimir
+                (e.ctrlKey && e.keyCode === 65)) { // Seleccionar todo
+                e.preventDefault();
+                return false;
+            }
+        });
 
-  // ════════════════════════════════════════════════════════════════
-  // fbInjectEditButtonIfAdmin
-  // ════════════════════════════════════════════════════════════════
-  function fbInjectEditButtonIfAdmin(seccionId, qIndex, botonesDiv) {
-    if (!fbIsAdmin()) return;
-    const btnEdit = document.createElement('button');
-    btnEdit.textContent = '✏️ Editar';
-    btnEdit.style.cssText = [
-      'padding:6px 14px','border-radius:8px',
-      'border:1.5px solid rgba(251,191,36,0.4)',
-      'background:rgba(251,191,36,0.08)',
-      'color:#fbbf24','font-size:13px','cursor:pointer',
-      'font-weight:500','transition:background 0.15s'
-    ].join(';');
-    btnEdit.onmouseover = () => { btnEdit.style.background = 'rgba(251,191,36,0.18)'; };
-    btnEdit.onmouseout  = () => { btnEdit.style.background = 'rgba(251,191,36,0.08)'; };
-    btnEdit.addEventListener('click', () => abrirModalEdicionAdmin(seccionId, qIndex));
-    botonesDiv.appendChild(btnEdit);
-  }
+        // 3. Detectar herramientas de desarrollo — DESACTIVADO PARA DEBUG
+        /* let devtools = {open: false, orientation: null};
+        setInterval(function() {
+            if (window.outerHeight - window.innerHeight > 160 ||
+                window.outerWidth - window.innerWidth > 160) {
+                if (!devtools.open) {
+                    devtools.open = true;
+                    alert('Por favor, cierre las herramientas de desarrollo para continuar.');
+                    window.location.reload();
+                }
+            } else {
+                devtools.open = false;
+            }
+        }, 500); */
 
-  // ── Exponer globalmente ───────────────────────────────────────
-  window.abrirModalEdicionAdmin    = abrirModalEdicionAdmin;
-  window.fbInjectEditButtonIfAdmin = fbInjectEditButtonIfAdmin;
+        // 4. Prevenir drag and drop
+        document.addEventListener('dragstart', function(e) {
+            e.preventDefault();
+            return false;
+        });
 
-})();
+        // 5. Detectar intentos de inspección
+        document.addEventListener('selectstart', function(e) {
+            if (!e.target.matches('input, textarea')) {
+                e.preventDefault();
+                return false;
+            }
+        });
+
+        // 6. Prevenir impresión con CSS y JS
+        window.addEventListener('beforeprint', function(e) {
+            e.preventDefault();
+            alert('La impresión no está permitida en esta aplicación.');
+            return false;
+        });
+
+        
+        // 8. Ofuscar código en consola
+        console.log('%cADVERTENCIA!', 'color: red; font-size: 50px; font-weight: bold;');
+       console.log('%cEsta función del navegador está destinada a desarrolladores.', 'font-size: 20px;');
+    </script>
+<!-- Barra de usuario: existe desde el inicio con CSS ya aplicado -->
+<div id="fb-user-bar"></div>
+</body>
+</html>
