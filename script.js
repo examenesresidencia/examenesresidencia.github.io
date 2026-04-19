@@ -1,4 +1,4 @@
-//PRUEBA 78 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 79 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7978,7 +7978,33 @@ function fbSaveProgressToCloud() {
         }
         saveJSON(STORAGE_KEY, state);
       }
+
+      // Capturar las selecciones en curso (opciones marcadas pero aún no confirmadas)
+      // para restaurarlas después del re-render y que el usuario no las pierda.
+      const _seleccionesEnCurso = {};
+      const _contActual = document.getElementById(`cuestionario-${seccionId}`);
+      if (_contActual && state[seccionId]) {
+        const _s = state[seccionId];
+        const _pregsActuales = window.preguntasPorSeccion?.[seccionId] || [];
+        _pregsActuales.forEach((_, idx) => {
+          if (_s.graded && _s.graded[idx]) return; // ya respondida, la restaura restoreSelectionsAndGrades
+          const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${idx}`));
+          const marcados = inputs.map((inp, i) => inp.checked ? i : null).filter(v => v !== null);
+          if (marcados.length > 0) _seleccionesEnCurso[idx] = marcados;
+        });
+      }
+
       generarCuestionario(seccionId);
+
+      // Restaurar las selecciones en curso después del render
+      if (Object.keys(_seleccionesEnCurso).length > 0) {
+        requestAnimationFrame(() => {
+          Object.entries(_seleccionesEnCurso).forEach(([idx, marcados]) => {
+            const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${idx}`));
+            marcados.forEach(i => { if (inputs[i]) inputs[i].checked = true; });
+          });
+        });
+      }
       // Restaurar scroll después del render (sin desplazar al usuario)
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
