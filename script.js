@@ -1,4 +1,4 @@
-//PRUEBA 72 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 73 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7436,10 +7436,12 @@
             mapa.get(clave).push({
               seccionId,
               docId   : docSnap.id,
-              idx     : data._idx ?? '?',
+              idx     : data._idx ?? null,
               pregunta: data.pregunta || '(sin enunciado)',
               opciones: data.opciones || [],
-              correcta: data.correcta || []
+              correcta: data.correcta || [],
+              // Marcar como posible huérfana si le faltan campos esenciales
+              huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
             });
           });
         } catch (_) { /* sección inexistente en Firestore → saltar */ }
@@ -7561,18 +7563,21 @@
             ${!esExacta && itemIdx > 0
               ? '<span title="Las opciones o la respuesta correcta difieren de la primera copia" style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.3);color:#fbbf24;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;cursor:help;">⚠️ Opciones distintas</span>'
               : ''}
+            ${item.huerfana
+              ? '<span title="Este documento no tiene opciones o respuesta correcta — probablemente nunca apareció en el cuestionario" style="background:rgba(148,163,184,0.15);border:1px solid rgba(148,163,184,0.3);color:#94a3b8;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;cursor:help;">👻 Huérfana</span>'
+              : ''}
             <span style="color:#94a3b8;font-size:0.78rem;white-space:nowrap;">
               📂 <strong style="color:#e2e8f0;">${item.seccionId}</strong>
               · doc: <code style="color:#7dd3fc;font-size:0.75rem;user-select:all;">${item.docId}</code>
-              · posición en Firestore: <strong style="color:#fbbf24;">${item.idx + 1}</strong>
-              <span style="color:#475569;font-size:0.7rem;">(idx ${item.idx})</span>
+              ${item.idx !== null ? `· posición: <strong style="color:#fbbf24;">${item.idx + 1}</strong>` : '· <em style="color:#64748b;">sin índice</em>'}
             </span>
-            <a href="#${item.seccionId}" target="_blank"
-              style="color:#38bdf8;font-size:0.72rem;text-decoration:none;white-space:nowrap;
-              padding:2px 8px;border:1px solid rgba(56,189,248,0.3);border-radius:4px;
-              background:rgba(56,189,248,0.07);" title="Abrir sección en nueva pestaña">
-              🔗 Abrir sección
-            </a>
+            <button class="dup-btn-ir-seccion"
+              data-seccion="${item.seccionId}" data-idx="${item.idx}"
+              style="color:#38bdf8;font-size:0.72rem;background:none;border:1px solid rgba(56,189,248,0.3);
+              border-radius:4px;padding:2px 8px;cursor:pointer;white-space:nowrap;
+              background:rgba(56,189,248,0.07);" title="Ir a esta sección y buscar la pregunta">
+              🔗 Ir a la sección
+            </button>
           </div>
           ${itemIdx > 0 ? `
           <button class="dup-btn-eliminar-uno" data-docid="${item.docId}" data-seccion="${item.seccionId}"
@@ -7609,20 +7614,34 @@
         };
       });
 
+      // Botón "Ir a la sección" — navega y scrollea a la pregunta por _idx
+      card.querySelectorAll('.dup-btn-ir-seccion').forEach(btn => {
+        btn.onclick = () => {
+          const seccionId = btn.dataset.seccion;
+          const idx = parseInt(btn.dataset.idx, 10);
+          _irASeccionYScrollear(seccionId, idx);
+        };
+      });
+
       lista.appendChild(card);
     });
   }
 
   async function _eliminarDuplicadosEnFirestore(items, cardEl, soloDocId = null) {
-    const { deleteDoc, doc } = window.__firebase_firestore || window.__fb;
+    const { deleteDoc, doc } = window.__fb;  // usar siempre window.__fb que tiene las funciones correctas
     const db = _fbDb;
+    if (!db) { fbToast('❌ Firestore no inicializado', 'error'); return; }
+
     let eliminados = 0;
     const errores = [];
 
     for (const item of items) {
       try {
+        const rutaDoc = `preguntas/${item.seccionId}/items/${item.docId}`;
+        console.log('[DUPLICADOS] Eliminando:', rutaDoc);
         await deleteDoc(doc(db, 'preguntas', item.seccionId, 'items', item.docId));
         eliminados++;
+        console.log('[DUPLICADOS] ✅ Eliminado:', rutaDoc);
 
         // Invalidar caché de esa sección
         try { localStorage.removeItem('fb_q_cache_' + item.seccionId); } catch (_) {}
@@ -7630,54 +7649,122 @@
         _seccionesYaCargadas.delete(item.seccionId);
         if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[item.seccionId];
 
-        // Quitar la fila del DOM
+        // Quitar la fila del DOM con animación
         const fila = document.getElementById(`dup-fila-${item.docId}`);
         if (fila) {
-          fila.style.transition = 'opacity 0.3s, max-height 0.3s';
+          fila.style.transition = 'opacity 0.3s';
           fila.style.opacity = '0';
-          fila.style.overflow = 'hidden';
-          fila.style.maxHeight = fila.offsetHeight + 'px';
-          setTimeout(() => {
-            fila.style.maxHeight = '0';
-            fila.style.padding = '0';
-            setTimeout(() => fila.remove(), 300);
-          }, 50);
+          setTimeout(() => fila.remove(), 320);
         }
       } catch (e) {
-        errores.push(`${item.docId}: ${e.message}`);
+        console.error('[DUPLICADOS] ❌ Error eliminando:', item.docId, e);
+        errores.push({ docId: item.docId, seccion: item.seccionId, msg: e.message, code: e.code });
       }
     }
 
-    // Actualizar _dupGruposCache removiendo los docIds eliminados
-    const eliminadosIds = new Set(items.map(i => i.docId));
-    _dupGruposCache = _dupGruposCache.map(g => g.filter(i => !eliminadosIds.has(i.docId))).filter(g => g.length > 1);
+    // Actualizar cache interno removiendo los eliminados con éxito
+    const eliminadosIds = new Set(
+      items.filter((_, i) => !errores.find(e => e.docId === items[i].docId)).map(i => i.docId)
+    );
+    _dupGruposCache = _dupGruposCache
+      .map(g => g.filter(i => !eliminadosIds.has(i.docId)))
+      .filter(g => g.length > 1);
 
-    // Actualizar el resumen
+    // Actualizar contador en el resumen
     const resumen = document.getElementById('dup-resumen');
     if (resumen) {
-      const match = resumen.innerHTML.match(/Grupos con duplicados.*?<strong[^>]*>(\d+)<\/strong>/);
-      if (match) {
-        resumen.innerHTML = resumen.innerHTML.replace(
-          /Grupos con duplicados.*$/,
-          `Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>`
-        );
-      }
+      resumen.innerHTML = resumen.innerHTML.replace(
+        /Grupos con duplicados:.*$/,
+        `Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>`
+      );
     }
 
     if (errores.length === 0) {
       fbToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
       // Si el grupo quedó sin duplicados, colapsar la card
-      if (cardEl) {
-        const filasRestantes = cardEl.querySelectorAll('.dup-btn-eliminar-uno');
-        if (filasRestantes.length === 0) {
+      if (cardEl && eliminados > 0) {
+        const botonesSobrantes = cardEl.querySelectorAll('.dup-btn-eliminar-uno');
+        if (botonesSobrantes.length === 0) {
           cardEl.style.transition = 'opacity 0.4s';
           cardEl.style.opacity = '0';
-          setTimeout(() => cardEl.remove(), 400);
+          setTimeout(() => cardEl.remove(), 420);
         }
       }
     } else {
-      fbToast(`⚠️ Eliminados: ${eliminados}. Errores: ${errores.join(', ')}`, 'error');
+      // Mostrar errores de forma visible dentro del modal
+      const lista = document.getElementById('dup-lista');
+      const errDiv = document.createElement('div');
+      errDiv.style.cssText = 'background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.4);border-radius:10px;padding:14px 18px;margin-bottom:14px;';
+      const esPermisos = errores.some(e => e.code === 'permission-denied');
+      errDiv.innerHTML = `
+        <div style="color:#fca5a5;font-weight:700;font-size:0.88rem;margin-bottom:8px;">
+          ❌ No se pudo${errores.length > 1 ? 'n' : ''} eliminar ${errores.length} documento(s)
+        </div>
+        ${esPermisos ? `
+        <div style="color:#fbbf24;font-size:0.82rem;margin-bottom:8px;line-height:1.6;">
+          ⚠️ <strong>Error de permisos.</strong> Las reglas de Firestore no permiten eliminar desde el cliente.
+          Necesitás agregar esta regla en la consola de Firebase → Firestore → Reglas:<br>
+          <code style="display:block;margin-top:6px;background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;font-size:0.78rem;user-select:all;">
+            match /preguntas/{seccionId}/items/{itemId} {<br>
+            &nbsp;&nbsp;allow delete: if request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';<br>
+            }
+          </code>
+        </div>` : ''}
+        ${errores.map(e => `<div style="color:#94a3b8;font-size:0.76rem;">${e.seccion}/${e.docId}: <em>${e.msg}</em></div>`).join('')}
+      `;
+      lista?.prepend(errDiv);
+      if (eliminados > 0) fbToast(`⚠️ Eliminados ${eliminados}, fallaron ${errores.length}`, 'info');
     }
+  }
+
+  // Navega a la sección indicada y scrollea hasta la pregunta con ese _idx
+  // El _idx de Firestore = posición 0-based en el array de preguntas cargadas
+  // = el puntaje-element con id puntaje-{seccionId}-{idx}
+  function _irASeccionYScrollear(seccionId, idx) {
+    // Cerrar el modal del buscador
+    document.getElementById('fb-modal-duplicados')?.remove();
+
+    // Si ya estamos en esa sección, scrollear directo
+    if (currentSection === seccionId) {
+      _scrollearAPreguntaIdx(seccionId, idx);
+      return;
+    }
+
+    // Navegar a la sección y esperar a que se renderice
+    showSection(seccionId);
+
+    // Esperar a que el cuestionario termine de renderizarse (puede ser asíncrono por chunks)
+    let intentos = 0;
+    const MAX_INTENTOS = 40; // 4 segundos máx
+    const intervalo = setInterval(() => {
+      intentos++;
+      const encontrado = _scrollearAPreguntaIdx(seccionId, idx);
+      if (encontrado || intentos >= MAX_INTENTOS) {
+        clearInterval(intervalo);
+        if (!encontrado && intentos >= MAX_INTENTOS) {
+          fbToast(`⚠️ No se encontró la pregunta (idx ${idx}) en el cuestionario — puede ser una entrada huérfana`, 'info');
+        }
+      }
+    }, 100);
+  }
+
+  // Scrollea al elemento de la pregunta con ese idx original en la sección.
+  // Devuelve true si lo encontró.
+  function _scrollearAPreguntaIdx(seccionId, idx) {
+    if (isNaN(idx) || idx === null) return false;
+    const puntajeEl = document.getElementById(`puntaje-${seccionId}-${idx}`);
+    if (!puntajeEl) return false;
+    const pregDiv = puntajeEl.closest('.pregunta') || puntajeEl;
+    pregDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Resaltar brevemente
+    const orig = pregDiv.style.outline;
+    pregDiv.style.transition = 'outline 0.1s';
+    pregDiv.style.outline = '3px solid #7c3aed';
+    pregDiv.style.borderRadius = '12px';
+    setTimeout(() => {
+      pregDiv.style.outline = orig || '';
+    }, 2000);
+    return true;
   }
 
   function _fbInjectDuplicadosStyles() {
