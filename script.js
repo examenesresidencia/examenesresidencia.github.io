@@ -1,4 +1,4 @@
-//PRUEBA 73 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 74 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -666,6 +666,7 @@
             }
             let preguntas = snap.docs.map(d => {
               const { _idx, ...pregunta } = d.data();
+              pregunta._firestoreIdx = _idx; // preservar para el buscador de duplicados
               return pregunta;
             });
 
@@ -7617,9 +7618,10 @@
       // Botón "Ir a la sección" — navega y scrollea a la pregunta por _idx
       card.querySelectorAll('.dup-btn-ir-seccion').forEach(btn => {
         btn.onclick = () => {
-          const seccionId = btn.dataset.seccion;
-          const idx = parseInt(btn.dataset.idx, 10);
-          _irASeccionYScrollear(seccionId, idx);
+          const seccionId    = btn.dataset.seccion;
+          const firestoreIdx = parseInt(btn.dataset.idx, 10);
+          const enunciado    = items[0].pregunta; // enunciado compartido del grupo
+          _irASeccionYScrollear(seccionId, firestoreIdx, enunciado);
         };
       });
 
@@ -7717,53 +7719,98 @@
     }
   }
 
-  // Navega a la sección indicada y scrollea hasta la pregunta con ese _idx
-  // El _idx de Firestore = posición 0-based en el array de preguntas cargadas
-  // = el puntaje-element con id puntaje-{seccionId}-{idx}
-  function _irASeccionYScrollear(seccionId, idx) {
-    // Cerrar el modal del buscador
-    document.getElementById('fb-modal-duplicados')?.remove();
+  // Navega a la sección y scrollea a la pregunta — sin cerrar el buscador,
+  // sino minimizándolo como panel flotante para poder volver fácilmente.
+  function _irASeccionYScrollear(seccionId, firestoreIdx, enunciado) {
+    // Minimizar el modal a una barra flotante en lugar de cerrarlo (problema 2)
+    const modal = document.getElementById('fb-modal-duplicados');
+    if (modal) {
+      modal.style.display = 'none';
+      // Crear barra flotante de retorno si no existe
+      if (!document.getElementById('dup-barra-retorno')) {
+        const barra = document.createElement('div');
+        barra.id = 'dup-barra-retorno';
+        barra.style.cssText = [
+          'position:fixed','bottom:70px','left:50%','transform:translateX(-50%)',
+          'z-index:300000','background:linear-gradient(135deg,#4c1d95,#6d28d9)',
+          'color:#fff','padding:10px 20px','border-radius:50px',
+          'font-size:0.82rem','font-weight:700','cursor:pointer',
+          'box-shadow:0 4px 20px rgba(124,58,237,0.5)',
+          'display:flex','align-items:center','gap:10px','white-space:nowrap',
+          'border:1px solid rgba(255,255,255,0.2)'
+        ].join(';');
+        barra.innerHTML = '🔁 <span>Volver al buscador de duplicados</span>';
+        barra.onclick = () => {
+          modal.style.display = 'flex';
+          barra.remove();
+        };
+        document.body.appendChild(barra);
+      }
+    }
 
     // Si ya estamos en esa sección, scrollear directo
     if (currentSection === seccionId) {
-      _scrollearAPreguntaIdx(seccionId, idx);
+      _scrollearAPreguntaIdx(seccionId, firestoreIdx, enunciado);
       return;
     }
 
-    // Navegar a la sección y esperar a que se renderice
+    // Navegar a la sección (showSection actualiza currentSection y la URL)
     showSection(seccionId);
 
-    // Esperar a que el cuestionario termine de renderizarse (puede ser asíncrono por chunks)
+    // Esperar a que el cuestionario termine de renderizarse (chunks asíncrono)
     let intentos = 0;
-    const MAX_INTENTOS = 40; // 4 segundos máx
+    const MAX_INTENTOS = 50; // 5 segundos máx
     const intervalo = setInterval(() => {
       intentos++;
-      const encontrado = _scrollearAPreguntaIdx(seccionId, idx);
+      const encontrado = _scrollearAPreguntaIdx(seccionId, firestoreIdx, enunciado);
       if (encontrado || intentos >= MAX_INTENTOS) {
         clearInterval(intervalo);
         if (!encontrado && intentos >= MAX_INTENTOS) {
-          fbToast(`⚠️ No se encontró la pregunta (idx ${idx}) en el cuestionario — puede ser una entrada huérfana`, 'info');
+          fbToast(`⚠️ La pregunta no aparece en el cuestionario — puede ser una entrada huérfana o ya fue eliminada`, 'info');
         }
       }
     }, 100);
   }
 
-  // Scrollea al elemento de la pregunta con ese idx original en la sección.
-  // Devuelve true si lo encontró.
-  function _scrollearAPreguntaIdx(seccionId, idx) {
-    if (isNaN(idx) || idx === null) return false;
-    const puntajeEl = document.getElementById(`puntaje-${seccionId}-${idx}`);
+  // Scrollea a la pregunta de la sección que tiene ese _firestoreIdx o ese enunciado.
+  // Devuelve true si la encontró y scrolleó.
+  function _scrollearAPreguntaIdx(seccionId, firestoreIdx, enunciado) {
+    // Buscar el originalIdx real buscando en preguntasPorSeccion por _firestoreIdx
+    const preguntas = window.preguntasPorSeccion?.[seccionId];
+    let originalIdx = null;
+
+    if (preguntas) {
+      // Primero buscar por _firestoreIdx preservado
+      if (firestoreIdx !== null && firestoreIdx !== undefined && !isNaN(firestoreIdx)) {
+        const encontrado = preguntas.findIndex(p => p._firestoreIdx === firestoreIdx);
+        if (encontrado !== -1) originalIdx = encontrado;
+      }
+      // Fallback: buscar por enunciado exacto
+      if (originalIdx === null && enunciado) {
+        const normalizado = enunciado.toLowerCase().replace(/\s+/g, ' ').trim();
+        const encontrado = preguntas.findIndex(p =>
+          (p.pregunta || '').toLowerCase().replace(/\s+/g, ' ').trim() === normalizado
+        );
+        if (encontrado !== -1) originalIdx = encontrado;
+      }
+    }
+
+    if (originalIdx === null) return false;
+
+    const puntajeEl = document.getElementById(`puntaje-${seccionId}-${originalIdx}`);
     if (!puntajeEl) return false;
+
     const pregDiv = puntajeEl.closest('.pregunta') || puntajeEl;
     pregDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    // Resaltar brevemente
-    const orig = pregDiv.style.outline;
-    pregDiv.style.transition = 'outline 0.1s';
+    // Resaltar brevemente con borde violeta
+    pregDiv.style.transition = 'outline 0.1s, box-shadow 0.1s';
     pregDiv.style.outline = '3px solid #7c3aed';
+    pregDiv.style.boxShadow = '0 0 0 6px rgba(124,58,237,0.15)';
     pregDiv.style.borderRadius = '12px';
     setTimeout(() => {
-      pregDiv.style.outline = orig || '';
-    }, 2000);
+      pregDiv.style.outline = '';
+      pregDiv.style.boxShadow = '';
+    }, 2500);
     return true;
   }
 
