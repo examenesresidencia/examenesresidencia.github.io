@@ -1,4 +1,4 @@
-//PRUEBA 76 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 77 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7393,11 +7393,28 @@
           </button>
         </div>
 
+        <!-- Barra de acciones masivas (oculta hasta que haya selección) -->
+        <div id="dup-barra-masiva" style="display:none;padding:10px 24px;
+          background:rgba(239,68,68,0.1);border-bottom:1px solid rgba(239,68,68,0.25);
+          align-items:center;gap:12px;flex-wrap:wrap;">
+          <span id="dup-sel-count" style="color:#fca5a5;font-size:0.85rem;font-weight:700;flex:1;"></span>
+          <button id="dup-btn-deselect-all" style="padding:6px 14px;border:1px solid rgba(148,163,184,0.3);
+            border-radius:7px;background:rgba(255,255,255,0.06);color:#94a3b8;
+            font-size:0.78rem;font-weight:600;cursor:pointer;white-space:nowrap;">
+            ✕ Deseleccionar todo
+          </button>
+          <button id="dup-btn-eliminar-sel" style="padding:7px 16px;border:none;border-radius:7px;
+            background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;
+            font-size:0.82rem;font-weight:700;cursor:pointer;white-space:nowrap;
+            box-shadow:0 3px 12px rgba(220,38,38,0.4);">
+            🗑 Eliminar seleccionadas
+          </button>
+        </div>
+
         <!-- Nota explicativa -->
-        <div style="padding:10px 24px 0;font-size:0.78rem;color:#64748b;line-height:1.6;border-top:1px solid rgba(255,255,255,0.05);margin-top:4px;">
+        <div style="padding:10px 24px 0;font-size:0.78rem;color:#64748b;line-height:1.6;">
           ℹ️ <strong style="color:#94a3b8;">¿Por qué el número de pregunta no coincide con el cuestionario?</strong>
           El cuestionario aplica deduplicación automática al cargar — si una pregunta ya aparece repetida, omite las copias y recorre la numeración.
-          Por eso la "posición en Firestore" puede no coincidir con el número visible en pantalla.
           Las entradas que ves aquí <em>sí existen en la base de datos</em> y son las que están generando la redundancia.
         </div>
 
@@ -7417,6 +7434,22 @@
     document.getElementById('dup-btn-scan').onclick = () => _escanearDuplicados();
     document.getElementById('dup-filtro-texto').addEventListener('input', _aplicarFiltrosDuplicados);
     document.getElementById('dup-filtro-seccion').addEventListener('change', _aplicarFiltrosDuplicados);
+
+    // ── Barra de acciones masivas ──────────────────────────────────
+    document.getElementById('dup-btn-deselect-all').onclick = () => {
+      document.querySelectorAll('.dup-checkbox:checked').forEach(cb => { cb.checked = false; });
+      _actualizarBarraMasiva();
+    };
+    document.getElementById('dup-btn-eliminar-sel').onclick = async () => {
+      const seleccionados = _obtenerItemsSeleccionados();
+      if (seleccionados.length === 0) return;
+      if (!confirm(`¿Eliminar ${seleccionados.length} pregunta(s) seleccionada(s)?\nEsta acción no se puede deshacer.`)) return;
+      // Agrupar por card para actualizar el DOM correctamente
+      const cardIds = new Set(seleccionados.map(i => i.cardId));
+      await _eliminarDuplicadosEnFirestore(seleccionados, null);
+      // Limpiar checkboxes y ocultar barra
+      _actualizarBarraMasiva();
+    };
 
     // Escanear automáticamente al abrir
     _escanearDuplicados();
@@ -7533,6 +7566,31 @@
   // Exponer función para forzar re-escaneo desde el botón inline del resumen
   window._dupForzarRescan = () => _escanearDuplicados(true);
 
+  function _actualizarBarraMasiva() {
+    const barra    = document.getElementById('dup-barra-masiva');
+    const countEl  = document.getElementById('dup-sel-count');
+    if (!barra || !countEl) return;
+    const checked = document.querySelectorAll('.dup-checkbox:checked');
+    if (checked.length > 0) {
+      barra.style.display = 'flex';
+      countEl.textContent = `${checked.length} pregunta${checked.length > 1 ? 's' : ''} seleccionada${checked.length > 1 ? 's' : ''}`;
+    } else {
+      barra.style.display = 'none';
+    }
+  }
+
+  function _obtenerItemsSeleccionados() {
+    const result = [];
+    document.querySelectorAll('.dup-checkbox:checked').forEach(cb => {
+      result.push({
+        docId    : cb.dataset.docid,
+        seccionId: cb.dataset.seccion,
+        cardId   : cb.dataset.cardid
+      });
+    });
+    return result;
+  }
+
   function _aplicarFiltrosDuplicados() {
     const lista       = document.getElementById('dup-lista');
     const filtroTexto = (document.getElementById('dup-filtro-texto')?.value || '').toLowerCase();
@@ -7557,8 +7615,10 @@
 
     lista.innerHTML = '';
     grupos.forEach((items, grupoIdx) => {
+      const cardId = `dup-card-${grupoIdx}`;
       const card = document.createElement('div');
-      card.style.cssText = 'background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:12px;margin-bottom:16px;overflow:hidden;';
+      card.id = cardId;
+      card.style.cssText = 'background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:12px;margin-bottom:16px;overflow:hidden;transition:opacity 0.3s;';
 
       // Cabecera del grupo
       const header = document.createElement('div');
@@ -7567,7 +7627,7 @@
         <div style="color:#c4b5fd;font-size:0.78rem;font-weight:700;letter-spacing:0.04em;">
           GRUPO ${grupoIdx + 1} — ${items.length} copias con enunciado idéntico
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           <button class="dup-btn-toggle-opciones" style="
             padding:4px 10px;border:1px solid rgba(148,163,184,0.3);border-radius:6px;
             background:rgba(255,255,255,0.06);color:#94a3b8;font-size:0.72rem;font-weight:600;cursor:pointer;">
@@ -7578,6 +7638,12 @@
             background:rgba(239,68,68,0.18);border:1px solid rgba(239,68,68,0.35);
             color:#fca5a5;font-size:0.75rem;font-weight:700;cursor:pointer;">
             🗑 Eliminar todas menos 1
+          </button>
+          <button class="dup-btn-descartar-card" title="Descartar esta tarjeta (no elimina de Firestore)" style="
+            padding:0;width:26px;height:26px;border:1px solid rgba(148,163,184,0.25);border-radius:50%;
+            background:rgba(255,255,255,0.06);color:#64748b;font-size:0.85rem;
+            cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            ✕
           </button>
         </div>`;
       card.appendChild(header);
@@ -7614,12 +7680,16 @@
         fila.id = `dup-fila-${item.docId}`;
         fila.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.04);gap:10px;flex-wrap:wrap;';
 
-        // Verificar si las opciones son idénticas a la primera copia
         const opcionesIguales = JSON.stringify(item.opciones) === JSON.stringify(items[0].opciones);
         const correctaIgual   = JSON.stringify(item.correcta)  === JSON.stringify(items[0].correcta);
         const esExacta = opcionesIguales && correctaIgual;
 
         fila.innerHTML = `
+          ${itemIdx > 0 ? `
+          <input type="checkbox" class="dup-checkbox"
+            data-docid="${item.docId}" data-seccion="${item.seccionId}" data-cardid="${cardId}"
+            style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:#7c3aed;">
+          ` : '<div style="width:16px;flex-shrink:0;"></div>'}
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0;">
             ${itemIdx === 0
               ? '<span style="background:rgba(74,222,128,0.15);border:1px solid rgba(74,222,128,0.3);color:#4ade80;font-size:0.68rem;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;">MANTENER</span>'
@@ -7637,9 +7707,9 @@
             </span>
             <button class="dup-btn-ir-seccion"
               data-seccion="${item.seccionId}" data-idx="${item.idx}"
-              style="color:#38bdf8;font-size:0.72rem;background:none;border:1px solid rgba(56,189,248,0.3);
-              border-radius:4px;padding:2px 8px;cursor:pointer;white-space:nowrap;
-              background:rgba(56,189,248,0.07);" title="Ir a esta sección y buscar la pregunta">
+              style="color:#38bdf8;font-size:0.72rem;background:rgba(56,189,248,0.07);border:1px solid rgba(56,189,248,0.3);
+              border-radius:4px;padding:2px 8px;cursor:pointer;white-space:nowrap;"
+              title="Ir a esta sección y buscar la pregunta">
               🔗 Ir a la sección
             </button>
           </div>
@@ -7656,8 +7726,17 @@
       // Nota aclaratoria
       const nota = document.createElement('div');
       nota.style.cssText = 'padding:6px 16px 8px;color:#475569;font-size:0.72rem;';
-      nota.textContent = 'La primera entrada se marcará como MANTENER. Las demás se pueden eliminar individualmente o todas a la vez.';
+      nota.textContent = 'Usá los checkboxes para seleccionar múltiples y eliminarlas a la vez, o la ✕ para descartar esta tarjeta de la vista.';
       card.appendChild(nota);
+
+      // Botón ✕ descartar tarjeta (solo oculta visualmente, no elimina de Firestore)
+      header.querySelector('.dup-btn-descartar-card').onclick = () => {
+        // Desmarcar checkboxes de esta card antes de ocultarla
+        card.querySelectorAll('.dup-checkbox:checked').forEach(cb => { cb.checked = false; });
+        _actualizarBarraMasiva();
+        card.style.opacity = '0';
+        setTimeout(() => card.remove(), 300);
+      };
 
       // Botón eliminar grupo (mantiene la primera, borra las demás)
       header.querySelector('.dup-btn-eliminar-grupo').onclick = async () => {
@@ -7683,9 +7762,14 @@
         btn.onclick = () => {
           const seccionId    = btn.dataset.seccion;
           const firestoreIdx = parseInt(btn.dataset.idx, 10);
-          const enunciado    = items[0].pregunta; // enunciado compartido del grupo
+          const enunciado    = items[0].pregunta;
           _irASeccionYScrollear(seccionId, firestoreIdx, enunciado);
         };
+      });
+
+      // Listener en checkboxes para actualizar barra masiva
+      card.querySelectorAll('.dup-checkbox').forEach(cb => {
+        cb.addEventListener('change', _actualizarBarraMasiva);
       });
 
       lista.appendChild(card);
