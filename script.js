@@ -1,4 +1,4 @@
-//PRUEBA 74 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 75 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -7401,23 +7401,50 @@
 
   // Datos del último escaneo (para filtrar sin re-escanear)
   let _dupGruposCache = [];
+  const _DUP_CACHE_KEY = 'fb_dup_scan_cache_v1';
+  const _DUP_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 horas
 
-  async function _escanearDuplicados() {
+  async function _escanearDuplicados(forzar = false) {
     const lista   = document.getElementById('dup-lista');
     const resumen = document.getElementById('dup-resumen');
     const btnScan = document.getElementById('dup-btn-scan');
     if (!lista || !resumen) return;
 
-    btnScan.disabled  = true;
+    // ── Intentar desde caché localStorage primero ──────────────────
+    if (!forzar) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(_DUP_CACHE_KEY) || 'null');
+        if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL) {
+          _dupGruposCache = cached.grupos;
+          const edad = Math.round((Date.now() - cached.ts) / 60000);
+          resumen.innerHTML = `
+            Escaneadas: <strong style="color:#f1f5f9">${cached.seccionesEscaneadas}</strong> secciones ·
+            <strong style="color:#f1f5f9">${cached.totalPreguntas.toLocaleString()}</strong> preguntas totales ·
+            Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>
+            <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
+              📦 Desde caché (hace ${edad} min) — 
+              <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
+                🔄 Forzar nuevo escaneo
+              </button>
+            </span>`;
+          _aplicarFiltrosDuplicados();
+          console.log(`[DUP-SCAN] Usando caché (${edad} min de antigüedad, ${_dupGruposCache.length} grupos)`);
+          return;
+        }
+      } catch (_) { /* caché corrupto → ignorar */ }
+    }
+
+    btnScan.disabled    = true;
     btnScan.textContent = '⏳ Escaneando…';
-    lista.innerHTML   = '<div style="text-align:center;padding:40px;color:#94a3b8;">Cargando todas las secciones desde Firestore…</div>';
+    lista.innerHTML     = `<div style="text-align:center;padding:40px;color:#94a3b8;">
+      Leyendo Firestore… esto consume lecturas, usá el caché cuando sea posible.
+    </div>`;
     resumen.textContent = '';
 
     try {
-      const { collection, getDocs, query, orderBy, deleteDoc, doc } = window.__firebase_firestore || window.__fb;
+      const { collection, getDocs, query, orderBy } = window.__firebase_firestore || window.__fb;
       const db = _fbDb;
 
-      // Mapa: clave_normalizada → [{seccionId, docId, idx, pregunta}]
       const mapa = new Map();
       let totalPreguntas = 0;
       let seccionesEscaneadas = 0;
@@ -7441,25 +7468,35 @@
               pregunta: data.pregunta || '(sin enunciado)',
               opciones: data.opciones || [],
               correcta: data.correcta || [],
-              // Marcar como posible huérfana si le faltan campos esenciales
               huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
             });
           });
-        } catch (_) { /* sección inexistente en Firestore → saltar */ }
+        } catch (_) { /* sección inexistente → saltar */ }
       }
 
-      // Filtrar solo grupos con más de 1 entrada
+      // Filtrar grupos con más de 1 entrada
       _dupGruposCache = [];
-      mapa.forEach((items, _clave) => {
+      mapa.forEach((items) => {
         if (items.length > 1) _dupGruposCache.push(items);
       });
-      // Ordenar por cantidad de duplicados desc
       _dupGruposCache.sort((a, b) => b.length - a.length);
+
+      // Guardar en caché localStorage
+      try {
+        localStorage.setItem(_DUP_CACHE_KEY, JSON.stringify({
+          ts: Date.now(),
+          grupos: _dupGruposCache,
+          totalPreguntas,
+          seccionesEscaneadas
+        }));
+        console.log(`[DUP-SCAN] Caché guardada: ${_dupGruposCache.length} grupos, ${totalPreguntas} preguntas`);
+      } catch (_) { /* quota localStorage → ignorar */ }
 
       resumen.innerHTML = `
         Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
         <strong style="color:#f1f5f9">${totalPreguntas.toLocaleString()}</strong> preguntas totales ·
-        Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>`;
+        Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>
+        <span style="color:#4ade80;font-size:0.75rem;margin-left:8px;">✅ Caché actualizada — válida por 6 hs</span>`;
 
       _aplicarFiltrosDuplicados();
 
@@ -7469,6 +7506,9 @@
       if (btnScan) { btnScan.disabled = false; btnScan.textContent = '🔍 Escanear'; }
     }
   }
+
+  // Exponer función para forzar re-escaneo desde el botón inline del resumen
+  window._dupForzarRescan = () => _escanearDuplicados(true);
 
   function _aplicarFiltrosDuplicados() {
     const lista       = document.getElementById('dup-lista');
@@ -7683,6 +7723,8 @@
 
     if (errores.length === 0) {
       fbToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
+      // Invalidar caché del escaneo para que el próximo "Escanear" lea datos frescos
+      try { localStorage.removeItem(_DUP_CACHE_KEY); } catch (_) {}
       // Si el grupo quedó sin duplicados, colapsar la card
       if (cardEl && eliminados > 0) {
         const botonesSobrantes = cardEl.querySelectorAll('.dup-btn-eliminar-uno');
