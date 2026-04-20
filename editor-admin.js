@@ -1,32 +1,17 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V1
+// editor-admin.js  — V2
 // ────────────────────────────────────────────────────────────────
-// Módulo independiente: Modal de edición de preguntas (Admin)
-// Editor WYSIWYG con contenteditable para la explicación:
-//   • Negrita, cursiva, subrayado visibles mientras se edita
-//   • Imágenes renderizadas dentro del editor (no como código)
-//   • Alineación: izquierda, centrado, derecha, justificado
-//   • Listas de viñetas y numeradas
-//   • Subíndice y superíndice
-//   • Ctrl+B / I / U nativos + Ctrl+A y Ctrl+Z del navegador
-//   • Scroll suave con scrollbar estilizada en la caja de edición
-//   • Bloqueo del scroll de fondo al abrir el modal
-//
-// Depende de las siguientes variables/funciones en window:
-//   window.__fb, window._fbDb, window._currentUser
-//   window.fbIsAdmin(), window.fbToast(), window.fbInjectAuthStyles()
-//   window.preguntasPorSeccion, window._seccionesYaCargadas
-//   window._bumpContentVersion(), window.cargarSeccion()
-//   window.generarCuestionario(), window.GITHUB_IMAGES_BASE
-//   window._scrollOnNextRender, window.STORAGE_KEY
+
 
 (function () {
   'use strict';
 
   // ── Helpers ───────────────────────────────────────────────────
-  function fbIsAdmin()          { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
-  function fbToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
-  function fbInjectAuthStyles() { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
+  // Delegamos en las funciones exportadas por script.js a window.
+  // Nombres internos con prefijo "_meq" para evitar colisión/recursión.
+  function _meqIsAdmin()          { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
+  function _meqToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
+  function _meqInjectAuthStyles() { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
   function fbShowEditErr(id, msg) {
     const el = document.getElementById(id);
     if (el) { el.textContent = msg; el.classList.add('visible'); }
@@ -371,13 +356,13 @@
   // abrirModalEdicionAdmin — función principal
   // ════════════════════════════════════════════════════════════════
   function abrirModalEdicionAdmin(seccionId, qIndex) {
-    if (!fbIsAdmin()) return;
+    if (!_meqIsAdmin()) return;
 
     const preguntasPorSeccion = window.preguntasPorSeccion || {};
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
     if (!preg) return;
 
-    fbInjectAuthStyles();
+    _meqInjectAuthStyles();
     inyectarEstilos();
 
     document.getElementById('fb-modal-edit-q')?.remove();
@@ -719,7 +704,7 @@
         btnImg.style.borderColor = '';
 
         const esLocal = urlVerificada.startsWith('blob:') || urlVerificada.startsWith('imagenes/');
-        fbToast(
+        _meqToast(
           esLocal
             ? '🖼 Imagen insertada (local). Al guardar se usará la URL de GitHub Pages.'
             : '🖼 Imagen insertada. Guardá para confirmar.',
@@ -766,7 +751,7 @@
           updatedBy  : _currentUser.uid
         }, { merge: true });
 
-        fbToast('✅ Pregunta guardada en Firestore', 'success');
+        _meqToast('✅ Pregunta guardada en Firestore', 'success');
 
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
         try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
@@ -812,7 +797,7 @@
   // fbInjectEditButtonIfAdmin
   // ════════════════════════════════════════════════════════════════
   function fbInjectEditButtonIfAdmin(seccionId, qIndex, botonesDiv) {
-    if (!fbIsAdmin()) return;
+    if (!_meqIsAdmin()) return;
     const btnEdit = document.createElement('button');
     btnEdit.textContent = '✏️ Editar';
     btnEdit.style.cssText = [
