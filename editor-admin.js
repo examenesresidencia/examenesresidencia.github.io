@@ -1,17 +1,14 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V2
+// editor-admin.js  — V3
 // ────────────────────────────────────────────────────────────────
-
 
 (function () {
   'use strict';
 
   // ── Helpers ───────────────────────────────────────────────────
-  // Delegamos en las funciones exportadas por script.js a window.
-  // Nombres internos con prefijo "_meq" para evitar colisión/recursión.
-  function _meqIsAdmin()          { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
-  function _meqToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
-  function _meqInjectAuthStyles() { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
+  function fbIsAdmin()          { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
+  function fbToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
+  function fbInjectAuthStyles() { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
   function fbShowEditErr(id, msg) {
     const el = document.getElementById(id);
     if (el) { el.textContent = msg; el.classList.add('visible'); }
@@ -356,13 +353,13 @@
   // abrirModalEdicionAdmin — función principal
   // ════════════════════════════════════════════════════════════════
   function abrirModalEdicionAdmin(seccionId, qIndex) {
-    if (!_meqIsAdmin()) return;
+    if (!fbIsAdmin()) return;
 
     const preguntasPorSeccion = window.preguntasPorSeccion || {};
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
     if (!preg) return;
 
-    _meqInjectAuthStyles();
+    fbInjectAuthStyles();
     inyectarEstilos();
 
     document.getElementById('fb-modal-edit-q')?.remove();
@@ -544,11 +541,20 @@
       }
     }
     function restaurarSeleccion() {
-      if (!_savedRange) { editor.focus(); return; }
       editor.focus();
       const sel = window.getSelection();
       sel.removeAllRanges();
-      sel.addRange(_savedRange);
+      if (_savedRange) {
+        // Hay una posición guardada del cursor → restaurarla
+        sel.addRange(_savedRange);
+      } else {
+        // No hay posición guardada → colocar cursor al FINAL del contenido
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        range.collapse(false); // false = colapsar al final
+        sel.addRange(range);
+        _savedRange = range.cloneRange(); // guardar para futuros usos
+      }
     }
     editor.addEventListener('mouseup', guardarSeleccion);
     editor.addEventListener('keyup',   guardarSeleccion);
@@ -704,7 +710,7 @@
         btnImg.style.borderColor = '';
 
         const esLocal = urlVerificada.startsWith('blob:') || urlVerificada.startsWith('imagenes/');
-        _meqToast(
+        fbToast(
           esLocal
             ? '🖼 Imagen insertada (local). Al guardar se usará la URL de GitHub Pages.'
             : '🖼 Imagen insertada. Guardá para confirmar.',
@@ -751,7 +757,7 @@
           updatedBy  : _currentUser.uid
         }, { merge: true });
 
-        _meqToast('✅ Pregunta guardada en Firestore', 'success');
+        fbToast('✅ Pregunta guardada en Firestore', 'success');
 
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
         try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
@@ -797,7 +803,7 @@
   // fbInjectEditButtonIfAdmin
   // ════════════════════════════════════════════════════════════════
   function fbInjectEditButtonIfAdmin(seccionId, qIndex, botonesDiv) {
-    if (!_meqIsAdmin()) return;
+    if (!fbIsAdmin()) return;
     const btnEdit = document.createElement('button');
     btnEdit.textContent = '✏️ Editar';
     btnEdit.style.cssText = [
