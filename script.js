@@ -1,4 +1,4 @@
-//PRUEBA 81 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 82 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -8329,22 +8329,14 @@ function fbSaveProgressToCloud() {
     );
   }
 
-  // ── Logout silencioso: para cuando este dispositivo fue desplazado por otro ──
-  // NO guarda state en Firestore porque el otro dispositivo es ahora el autorizado.
-  // Solo cierra la sesión de Auth y limpia el estado local.
+  // Logout silencioso: NO guarda en Firestore porque el otro dispositivo
+  // ya es el autorizado. Solo cierra Auth y limpia el estado local.
   async function _fbLogoutSilencioso() {
     try {
-      // Cancelar listeners antes de cerrar
       if (_progressUnsubscribe) { _progressUnsubscribe(); _progressUnsubscribe = null; }
-      if (typeof _fbStopHeartbeat === 'function') _fbStopHeartbeat();
-      if (typeof _fbSessionUnsubscribeLocal !== 'undefined' && _fbSessionUnsubscribeLocal) {
-        _fbSessionUnsubscribeLocal();
-        _fbSessionUnsubscribeLocal = null;
-      }
       const { fbSignOut } = window.__fb;
       await fbSignOut(_fbAuth);
     } catch (_) {}
-    // Limpiar DOM y estado local (igual que fbLogout pero sin guardar en Firestore)
     document.getElementById('fb-user-bar')?.remove();
     document.getElementById('li-admin-btn')?.remove();
     document.getElementById('li-edit-respuestas')?.remove();
@@ -8362,7 +8354,6 @@ function fbSaveProgressToCloud() {
     window._fbCurrentUserData = null;
     _currentUser = null;
     _currentUserData = null;
-    fbShowAuthScreen('login');
   }
 
   function _fbMostrarModalSesionDuplicada() {
@@ -8735,5 +8726,28 @@ function fbSaveProgressToCloud() {
   window._fbStopHeartbeat    = _fbStopHeartbeat;
   window._inactReset         = _inactReset;
   window._inactStop          = _inactStop;
+
+  // ── Exports para módulos externos (editor-admin.js, buscador-duplicados.js) ──
+  window.fbToast            = fbToast;
+  window.fbInjectAuthStyles = fbInjectAuthStyles;
+  window.fbIsAdmin = function () {
+    return !!(_currentUserData && _currentUserData.role === 'admin');
+  };
+  // Getters dinámicos: siempre devuelven el valor actual aunque Firebase
+  // todavía no haya inicializado cuando se cargan los módulos externos.
+  Object.defineProperty(window, '_fbDb', {
+    get: function () { return _fbDb; },
+    configurable: true
+  });
+  Object.defineProperty(window, '_currentUser', {
+    get: function () { return _currentUser; },
+    configurable: true
+  });
+  window._bumpContentVersion = _bumpContentVersion;
+  window._seccionesYaCargadas = _seccionesYaCargadas;
+  window.STORAGE_KEY          = STORAGE_KEY;
+  window.GITHUB_IMAGES_BASE   = GITHUB_IMAGES_BASE;
+  window.cargarSeccion        = cargarSeccion;
+  window.generarCuestionario  = generarCuestionario;
 
 })();
