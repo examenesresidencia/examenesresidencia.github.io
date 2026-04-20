@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V8
+// buscador-duplicados.js- V9
 // ────────────────────────────────────────────────────────────────
 
 
@@ -252,10 +252,10 @@
               seccionId,
               docId   : docSnap.id,
               idx     : data._idx ?? null,
+              // Solo guardamos lo mínimo para identificar y eliminar — reduce peso del caché
               pregunta: data.pregunta || '(sin enunciado)',
-              opciones: data.opciones || [],
-              correcta: data.correcta || [],
               huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
+              // opciones y correcta se omiten del caché para no exceder los 5MB de localStorage
             });
           });
         } catch (errSec) {
@@ -318,7 +318,12 @@
           seccionesEscaneadas
         }));
         console.log(`[DUP-SCAN] Caché guardada: ${_dupGruposCache.length} grupos, ${totalPreguntas} preguntas`);
-      } catch (_) { /* quota localStorage → ignorar */ }
+      } catch (storageErr) {
+        console.warn('[DUP-SCAN] No se pudo guardar caché en localStorage:', storageErr.message);
+        // Mostrar aviso en el resumen para que el admin sepa que no hay caché
+        const resumenEl = document.getElementById('dup-resumen');
+        if (resumenEl) resumenEl.innerHTML += ' <span style="color:#fbbf24;font-size:0.75rem;">⚠️ Caché no guardada (localStorage lleno) — se releerá Firestore la próxima vez</span>';
+      }
 
       resumen.innerHTML = `
         Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
