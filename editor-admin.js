@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V5
+// editor-admin.js  — V6
 // ────────────────────────────────────────────────────────────────
 
 
@@ -455,6 +455,15 @@
                 </svg>
                 🖼 Imagen
               </button>
+
+              <div class="meq-sep"></div>
+
+              <!-- Botón vacunas -->
+              <button class="meq-btn-fmt" id="meq-btn-vacunas" type="button"
+                title="Insertar botón 'VER MÁS SOBRE VACUNAS' en la explicación"
+                style="background:rgba(56,189,248,0.08);border-color:rgba(56,189,248,0.3);color:#38bdf8;padding:0 8px;">
+                💉 Ver vacunas
+              </button>
             </div>
           </div>
 
@@ -525,6 +534,22 @@
     overlay.querySelector('#meq-btn-justify').onclick   = () => cmd('justifyFull');
     overlay.querySelector('#meq-btn-ul').onclick        = () => cmd('insertUnorderedList');
     overlay.querySelector('#meq-btn-ol').onclick        = () => cmd('insertOrderedList');
+
+    // ── Botón 💉 Vacunas ──────────────────────────────────────────
+    overlay.querySelector('#meq-btn-vacunas').addEventListener('click', function(e) {
+      e.preventDefault();
+      // Enfocar editor y restaurar selección si la hay
+      editor.focus();
+      const sel = window.getSelection();
+      if (_savedRange) {
+        sel.removeAllRanges();
+        sel.addRange(_savedRange);
+      }
+      // Insertar marcador HTML del botón de vacunas al final de la explicación
+      const marcador = `<br><a href="#vacunas2026" data-vacunas-btn="1" style="display:inline-flex;align-items:center;gap:7px;margin-top:14px;padding:9px 18px;border-radius:10px;border:1.5px solid #0891b2;background:rgba(56,189,248,0.08);color:#0891b2;font-size:0.85rem;font-weight:600;text-decoration:none;cursor:pointer;">💉 VER MÁS SOBRE VACUNAS</a>`;
+      document.execCommand('insertHTML', false, marcador);
+      _eaToast('💉 Botón "VER MÁS SOBRE VACUNAS" insertado', 'success');
+    });
 
     // ── Panel de imagen ───────────────────────────────────────────
     const btnImg    = overlay.querySelector('#meq-btn-img');
@@ -818,8 +843,39 @@
     botonesDiv.appendChild(btnEdit);
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // fbInjectVacunasButtonIfAdmin
+  // Inyecta el botón "VER MÁS SOBRE VACUNAS" a la derecha de la imagen
+  // en el contenedor de la explicación (llamado desde script.js).
+  // Para TODOS los usuarios (no solo admin): el botón es visible para todos.
+  // ════════════════════════════════════════════════════════════════
+  function fbInjectVacunasButtonIfAdmin(seccionId, explicacionDiv) {
+    // No duplicar
+    if (explicacionDiv.querySelector('[data-vacunas-btn-live]')) return;
+
+    // Activar clicks en marcadores data-vacunas-btn que vengan del WYSIWYG guardado
+    explicacionDiv.querySelectorAll('[data-vacunas-btn]').forEach(function(a) {
+      a.removeAttribute('href');
+      a.style.cursor = 'pointer';
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof window.mostrarVacunas2026DesdeCuestionario === 'function') {
+          window.mostrarVacunas2026DesdeCuestionario(seccionId);
+        } else if (typeof window.mostrarVacunas2026 === 'function') {
+          window.mostrarVacunas2026();
+        }
+      });
+      a.setAttribute('data-vacunas-btn-live', '1');
+    });
+
+    // Si no había marcador guardado, no inyectamos nada automáticamente.
+    // El admin lo inserta manualmente con el botón 💉 de la toolbar.
+  }
+
   // ── Exponer globalmente ───────────────────────────────────────
-  window.abrirModalEdicionAdmin    = abrirModalEdicionAdmin;
-  window.fbInjectEditButtonIfAdmin = fbInjectEditButtonIfAdmin;
+  window.abrirModalEdicionAdmin       = abrirModalEdicionAdmin;
+  window.fbInjectEditButtonIfAdmin    = fbInjectEditButtonIfAdmin;
+  window.fbInjectVacunasButtonIfAdmin = fbInjectVacunasButtonIfAdmin;
 
 })();
