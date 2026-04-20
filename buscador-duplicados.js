@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V6
+// buscador-duplicados.js- V7
 // ────────────────────────────────────────────────────────────────
 
 
@@ -170,7 +170,8 @@
     if (!forzar) {
       try {
         const cached = JSON.parse(localStorage.getItem(_DUP_CACHE_KEY) || 'null');
-        if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL) {
+        // Invalidar caché si se guardó con 0 secciones (escaneo fallido anterior)
+        if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL && cached.seccionesEscaneadas > 0) {
           _dupGruposCache = cached.grupos;
           const edad = Math.round((Date.now() - cached.ts) / 60000);
           resumen.innerHTML = `
@@ -208,7 +209,7 @@
         </div>`;
         return;
       }
-      const { collection, getDocs, query, orderBy } = _fsModule;
+      const { collection, getDocs } = _fsModule;
       const db = window._fbDb;
       if (!db) {
         lista.innerHTML = `<div style="color:#f87171;padding:20px;">
@@ -226,7 +227,7 @@
       for (const seccionId of TODAS_LAS_SECCIONES) {
         try {
           const itemsRef = collection(db, 'preguntas', seccionId, 'items');
-          const snap = await getDocs(query(itemsRef, orderBy('_idx')));
+          const snap = await getDocs(itemsRef);  // sin orderBy → no requiere índice en Firestore
           if (snap.empty) continue;
           seccionesEscaneadas++;
           snap.forEach(docSnap => {
