@@ -1,4 +1,4 @@
-//PRUEBA 85 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 86 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN6
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -6517,7 +6517,7 @@
             signOut: fbSignOut,
             sendPasswordResetEmail }  = window.__firebase_auth;
     const { getFirestore, doc, setDoc,
-            getDoc, collection, query,
+            getDoc, getDocs, collection, query,
             where, onSnapshot, updateDoc,
             serverTimestamp, orderBy,
             deleteDoc }               = window.__firebase_firestore;
@@ -6532,7 +6532,7 @@
     });
     _fbAuth = getAuth(_fbApp);
     _fbDb        = getFirestore(_fbApp);
-    window._fbDb = _fbDb;   // exponer globalmente para buscador-duplicados.js y editor-admin.js
+    window._fbDb = _fbDb;  // exponer globalmente para buscador-duplicados.js
 
     // Guardar helpers en closure
     window.__fb = {
@@ -6541,7 +6541,7 @@
       fbSignOut,
       sendPasswordResetEmail,
       onAuthStateChanged,
-      doc, setDoc, getDoc, collection,
+      doc, setDoc, getDoc, getDocs, collection,
       query, where, onSnapshot, updateDoc,
       serverTimestamp, orderBy, deleteDoc
     };
