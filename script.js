@@ -7932,9 +7932,9 @@ function fbSaveProgressToCloud() {
 
   // ── Invalida caché de una sección y recarga en segundo plano ──
   async function _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta) {
-    // 🔒 Si la sección está siendo cargada ahora mismo, no interrumpir
-    if (_seccionesEnCarga.has(seccionId)) {
-      console.log('[CONTENT-SYNC] Ignorando invalidación: carga ya en progreso para', seccionId);
+    // 🔒 Si la sección está siendo cargada o ya fue cargada en esta sesión, no interrumpir
+    if (_seccionesEnCarga.has(seccionId) || _seccionesYaCargadas.has(seccionId)) {
+      console.log('[CONTENT-SYNC] Ignorando invalidación: sección ya cargada o en progreso para', seccionId);
       return;
     }
     // 1. Limpiar caché local de esa sección
