@@ -27,6 +27,16 @@
             -ms-user-select: text;
             user-select: text;
         }
+
+        /* Usuarios con permiso de copia (admin + email autorizado) */
+        body.can-select,
+        body.can-select * {
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+            user-select: text !important;
+            -webkit-touch-callout: default !important;
+        }
         
         /* Ocultar en impresión */
         @media print {
@@ -1012,10 +1022,8 @@
 
 <!-- Base de datos de preguntas -->
 <script>window.preguntasPorSeccion = {};</script>
-<!-- Sistema de preguntas concatenadas -->
-<script src="gestorPreguntasConcatenadas.js"></script>
 <!-- Script principal de la aplicación -->
-<script src="script.js?v=93"></script>
+<script src="script.js?v=94"></script>
 <!-- Editor admin de preguntas (módulo independiente, depende de script.js) -->
 <script src="editor-admin.js?v=5"></script>
 <!-- Buscador de preguntas duplicadas (módulo independiente, depende de script.js) -->
@@ -1025,19 +1033,22 @@
         
         // 1. Prevenir clic derecho
         document.addEventListener('contextmenu', function(e) {
+            if (document.body.classList.contains('can-select')) return; // admin/autorizado
             e.preventDefault();
             return false;
         });
 
         // 2. Prevenir atajos de teclado peligrosos
         document.addEventListener('keydown', function(e) {
-            // Prevenir F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+S, Ctrl+P
+            // Admin tiene todos los atajos habilitados (DevTools, F12, Ctrl+U, etc.)
+            if (document.body.classList.contains('can-select')) return;
+            // Prevenir F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+S, Ctrl+P, Ctrl+A
             if (e.keyCode === 123 || // F12
                 (e.ctrlKey && e.shiftKey && (e.keyCode === 73 || e.keyCode === 74)) || // DevTools
                 (e.ctrlKey && e.keyCode === 85) || // Ver código fuente
                 (e.ctrlKey && e.keyCode === 83) || // Guardar
                 (e.ctrlKey && e.keyCode === 80) || // Imprimir
-                (e.ctrlKey && e.keyCode === 65)) { // Seleccionar todo
+                (e.ctrlKey && e.keyCode === 65)) {  // Seleccionar todo
                 e.preventDefault();
                 return false;
             }
@@ -1060,16 +1071,42 @@
 
         // 4. Prevenir drag and drop
         document.addEventListener('dragstart', function(e) {
+            if (document.body.classList.contains('can-select')) return; // admin/autorizado
             e.preventDefault();
             return false;
         });
 
         // 5. Detectar intentos de inspección
         document.addEventListener('selectstart', function(e) {
+            if (document.body.classList.contains('can-select')) return; // admin/autorizado
             if (!e.target.matches('input, textarea')) {
                 e.preventDefault();
                 return false;
             }
+        });
+
+        // 0. Gestión del permiso de copia de texto
+        // Se activa para: admin y el email autorizado específico.
+        // Se ejecuta cuando script.js dispara 'fb:usuarioAprobadoActivo' (usuario ya cargado).
+        const COPY_ALLOWED_EMAIL = 'soloquimicayaruqui@gmail.com';
+
+        function _actualizarPermisosCopia() {
+            const userData = window._fbCurrentUserData || null;
+            const user     = window._currentUser       || null;
+            const esAdmin  = userData && userData.role === 'admin';
+            const esEmail  = user && user.email && user.email.toLowerCase() === COPY_ALLOWED_EMAIL;
+            if (esAdmin || esEmail) {
+                document.body.classList.add('can-select');
+            } else {
+                document.body.classList.remove('can-select');
+            }
+        }
+
+        document.addEventListener('fb:usuarioAprobadoActivo', _actualizarPermisosCopia);
+
+        // También limpiar al cerrar sesión
+        document.addEventListener('fb:sesionCerrada', function() {
+            document.body.classList.remove('can-select');
         });
 
         // 6. Prevenir impresión con CSS y JS
