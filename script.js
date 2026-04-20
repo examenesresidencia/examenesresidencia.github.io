@@ -1,4 +1,4 @@
-//PRUEBA 83 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 84 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -6531,7 +6531,8 @@
       appId            : "1:1047294253435:web:8beefa92f3960e323745de"
     });
     _fbAuth = getAuth(_fbApp);
-    _fbDb   = getFirestore(_fbApp);
+    _fbDb        = getFirestore(_fbApp);
+    window._fbDb = _fbDb;   // exponer globalmente para buscador-duplicados.js y editor-admin.js
 
     // Guardar helpers en closure
     window.__fb = {
