@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V4
+// editor-admin.js  — V5
 // ────────────────────────────────────────────────────────────────
 
 
@@ -548,7 +548,6 @@
       if (_savedRange) {
         sel.addRange(_savedRange);
       } else {
-        // Sin posición guardada → colocar cursor al FINAL del contenido
         const r = document.createRange();
         r.selectNodeContents(editor);
         r.collapse(false);
