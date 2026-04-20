@@ -1,4 +1,4 @@
-//PRUEBA 86 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN6
+//PRUEBA 87 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -990,8 +990,10 @@
     // totalConocidas = cuántos índices de pregunta ya están registrados en alguna lista
     const totalConocidas = Math.max(answeredLen + unansweredLen, maxGradedIdx);
     if (preguntasLen > totalConocidas) {
+      // Insertar preguntas nuevas en posición aleatoria para mantener orden azaroso
       for (let i = totalConocidas; i < preguntasLen; i++) {
-        state[seccionId].unansweredOrder.push(i);
+        const pos = Math.floor(Math.random() * (state[seccionId].unansweredOrder.length + 1));
+        state[seccionId].unansweredOrder.splice(pos, 0, i);
       }
       // Solo guardar localmente si NO estamos en medio de una sincronización desde la nube,
       // para evitar pisar el state correcto con datos incompletos.
