@@ -211,6 +211,39 @@
   }, true); // true = fase de captura
   // ======== Claves de almacenamiento ========
   const STORAGE_KEY = "quiz_state_v3";
+
+  // ════════════════════════════════════════════════════════════════
+  // DEBUG PANEL TEMPORAL — borrar después de diagnosticar
+  // ════════════════════════════════════════════════════════════════
+  function _debugLog(msg) {
+    console.log('[DEBUG]', msg);
+    let panel = document.getElementById('_debug_panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = '_debug_panel';
+      panel.style.cssText = `
+        position:fixed; bottom:60px; left:8px; right:8px; z-index:999999;
+        background:rgba(0,0,0,0.88); color:#0f0; font-family:monospace;
+        font-size:11px; padding:8px 10px; border-radius:10px;
+        max-height:200px; overflow-y:auto; line-height:1.6;
+        border:1px solid #0f0;
+      `;
+      const btnCerrar = document.createElement('button');
+      btnCerrar.textContent = '✕ cerrar';
+      btnCerrar.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:1px solid #0f0;color:#0f0;font-size:10px;cursor:pointer;border-radius:4px;padding:2px 6px;';
+      btnCerrar.onclick = () => panel.remove();
+      panel.appendChild(btnCerrar);
+      document.body.appendChild(panel);
+    }
+    const line = document.createElement('div');
+    const time = new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    line.textContent = time + ' → ' + msg;
+    panel.appendChild(line);
+    panel.scrollTop = panel.scrollHeight;
+  }
+  window._debugLog = _debugLog;
+
+
   const ATTEMPT_LOG_KEY = "quiz_attempt_log_v1";
   const SCROLL_POSITION_KEY = "quiz_scroll_position_v1";
   const TIMER_STORAGE_KEY = "simulacro_timer_v1";
@@ -605,12 +638,15 @@
     if (_seccionesYaCargadas.has(seccionId) ||
         (window.preguntasPorSeccion?.[seccionId]?.length > 0)) {
       _seccionesYaCargadas.add(seccionId);
+      _debugLog('⚡ Ya cargada en memoria: ' + seccionId + ' → ' + (window.preguntasPorSeccion?.[seccionId]?.length || 0) + ' pregs');
       return Promise.resolve();
     }
 
     // ── Intentar desde caché localStorage primero ──────────────────
+    _debugLog('cargarSeccion("' + seccionId + '") iniciada');
     try {
       const cached = JSON.parse(localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId) || 'null');
+      _debugLog('caché encontrado: ' + (cached ? cached.preguntas?.length + ' pregs, ts=' + new Date(cached.ts).toLocaleTimeString() : 'null'));
       if (cached && cached.preguntas && cached.preguntas.length > 5 && cached.ts &&
           (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
@@ -636,12 +672,14 @@
 
         window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
+        _debugLog('✅ Caché OK: ' + seccionId + ' → ' + preguntasLimpias.length + ' pregs');
         console.log('📦 Caché local:', seccionId, '→', preguntasLimpias.length, 'preguntas');
         return Promise.resolve();
       }
     } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
 
     // ── Cargar desde Firestore ──────────────────────────────────────
+    _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
     _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
     return new Promise((resolve) => {
       function intentarCarga() {
@@ -759,10 +797,12 @@
 
             _seccionesYaCargadas.add(seccionId);
             _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar
+            _debugLog('✅ Firestore OK: ' + seccionId + ' → ' + preguntas.length + ' pregs');
             console.log('✅ Firestore→caché:', seccionId, '→', preguntas.length, 'preguntas');
             resolve();
           } catch (e) {
             _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar en error
+            _debugLog('❌ ERROR Firestore: ' + seccionId + ' — ' + e.message);
             console.error('❌ Error cargando desde Firestore:', seccionId, e);
             resolve();
           }
