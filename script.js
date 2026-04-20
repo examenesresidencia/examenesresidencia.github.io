@@ -1,5 +1,8 @@
-//PRUEBA 93 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
+//PRUEBA 94 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix: panel de debug movido a Admin como switch ON/OFF (apagado por defecto)
+// NUEVO: permiso de selección/copia de texto para admin y email autorizado
+// Fix: panel admin sin estilos al recargar página con sesión activa
+// Fix: módulo exportar/importar progreso eliminado
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
 // Fix: explicaciones se cierran al iniciar sesión, cerrar sesión, recargar, volver al menú
@@ -213,10 +216,14 @@
   const STORAGE_KEY = "quiz_state_v3";
 
   // ════════════════════════════════════════════════════════════════
-  // DEBUG PANEL TEMPORAL — borrar después de diagnosticar
+  // DEBUG PANEL — controlado desde el panel Admin (switch ON/OFF)
+  // Por defecto siempre APAGADO. Al cerrar el panel vuelve a ocultarse.
   // ════════════════════════════════════════════════════════════════
+  let _debugPanelEnabled = false; // apagado por defecto
+
   function _debugLog(msg) {
     console.log('[DEBUG]', msg);
+    if (!_debugPanelEnabled) return; // no mostrar si el switch está off
     let panel = document.getElementById('_debug_panel');
     if (!panel) {
       panel = document.createElement('div');
@@ -229,18 +236,39 @@
         border:1px solid #0f0;
       `;
       const btnCerrar = document.createElement('button');
-      btnCerrar.textContent = '✕ cerrar';
+      btnCerrar.textContent = '\u2715 cerrar';
       btnCerrar.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:1px solid #0f0;color:#0f0;font-size:10px;cursor:pointer;border-radius:4px;padding:2px 6px;';
-      btnCerrar.onclick = () => panel.remove();
+      btnCerrar.onclick = () => {
+        panel.remove();
+        // Al cerrar la ventana del panel, apagar el switch también
+        _debugPanelEnabled = false;
+        _actualizarBtnDebugEnAdmin();
+      };
       panel.appendChild(btnCerrar);
       document.body.appendChild(panel);
     }
     const line = document.createElement('div');
     const time = new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    line.textContent = time + ' → ' + msg;
+    line.textContent = time + ' \u2192 ' + msg;
     panel.appendChild(line);
     panel.scrollTop = panel.scrollHeight;
   }
+
+  // Actualiza el aspecto del botón switch en el panel admin según estado actual
+  function _actualizarBtnDebugEnAdmin() {
+    const btn = document.getElementById('admin-btn-debug-toggle');
+    if (!btn) return;
+    if (_debugPanelEnabled) {
+      btn.textContent = '\uD83D\uDFE2 Panel de debug: ON';
+      btn.style.background = 'linear-gradient(135deg,#065f46,#047857)';
+      btn.style.boxShadow = '0 4px 14px rgba(5,150,105,0.35)';
+    } else {
+      btn.textContent = '\u26AB Panel de debug: OFF';
+      btn.style.background = 'linear-gradient(135deg,#1e293b,#334155)';
+      btn.style.boxShadow = '0 4px 14px rgba(0,0,0,0.25)';
+    }
+  }
+
   window._debugLog = _debugLog;
 
 
@@ -6141,250 +6169,6 @@
   }
 
 
-
-  // ════════════════════════════════════════════════════════════════
-  // MÓDULO: EXPORTAR / IMPORTAR PROGRESO
-  // ════════════════════════════════════════════════════════════════
-
-  function buildBotonesExportarImportar() {
-
-    if (!document.getElementById('exp-imp-styles')) {
-      const st = document.createElement('style');
-      st.id = 'exp-imp-styles';
-      st.textContent = `
-        #barra-progreso-acciones {
-          position: fixed; left: 16px; bottom: 16px; z-index: 1000;
-          display: none; align-items: center; gap: 8px; flex-wrap: wrap;
-        }
-        #barra-progreso-acciones.visible { display: flex; }
-        .btn-progreso-accion {
-          display: inline-flex; align-items: center; gap: 6px;
-          background: #fff; border: 1.5px solid #e2e8f0; border-radius: 100px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.1); color: #64748b;
-          font-size: 0.78rem; font-weight: 600; padding: 8px 14px;
-          cursor: pointer; transition: all 0.18s ease;
-          letter-spacing: 0.01em; white-space: nowrap;
-        }
-        .btn-progreso-accion:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.15); transform: translateY(-1px); }
-        #btn-exportar-progreso:hover { border-color:#0d7490; color:#0d7490; background:#f0f9ff; }
-        #btn-importar-progreso:hover { border-color:#7c3aed; color:#7c3aed; background:#faf5ff; }
-        .modal-expimp-overlay {
-          position: fixed; inset: 0; z-index: 30000;
-          display: flex; align-items: center; justify-content: center;
-          background: rgba(15,23,42,0.55); backdrop-filter: blur(4px);
-          animation: expimpIn 0.18s ease both;
-        }
-        @keyframes expimpIn { from{opacity:0} to{opacity:1} }
-        .modal-expimp-caja {
-          background: #fff; border-radius: 20px;
-          box-shadow: 0 24px 60px rgba(0,0,0,0.2);
-          padding: 36px 38px 30px; max-width: 440px; width: 92%;
-          text-align: center; animation: expimpCaja 0.3s cubic-bezier(0.34,1.4,0.64,1) both;
-        }
-        @keyframes expimpCaja {
-          from{opacity:0;transform:scale(0.9) translateY(16px)}
-          to{opacity:1;transform:scale(1) translateY(0)}
-        }
-        .modal-expimp-icono  { font-size:2.4rem; margin-bottom:14px; }
-        .modal-expimp-titulo { font-size:1.1rem; font-weight:700; color:#0f172a; margin-bottom:8px; }
-        .modal-expimp-desc   { font-size:0.88rem; color:#475569; line-height:1.6; margin-bottom:6px; }
-        .modal-expimp-stats  {
-          display:inline-flex; align-items:center; gap:8px;
-          background:#f0f9ff; border:1px solid #bae6fd; color:#0369a1;
-          border-radius:100px; padding:6px 16px; font-size:0.82rem; font-weight:600; margin:10px 0 22px;
-        }
-        .modal-expimp-btns { display:flex; gap:10px; justify-content:center; }
-        .modal-expimp-btn-cancelar {
-          flex:1; padding:11px; border-radius:10px; font-size:0.88rem; font-weight:600;
-          border:1.5px solid #e2e8f0; background:#f8fafc; color:#475569; cursor:pointer; transition:all 0.15s;
-        }
-        .modal-expimp-btn-cancelar:hover { background:#e2e8f0; }
-        .modal-expimp-btn-accion {
-          flex:1; padding:11px; border-radius:10px; font-size:0.88rem; font-weight:600;
-          border:none; cursor:pointer; color:#fff; transition:all 0.15s;
-        }
-        .modal-expimp-btn-accion.exportar {
-          background:linear-gradient(135deg,#0d7490,#0891b2); box-shadow:0 4px 12px rgba(13,116,144,0.28);
-        }
-        .modal-expimp-btn-accion.exportar:hover { background:linear-gradient(135deg,#0b6478,#0d7490); transform:translateY(-1px); }
-        .modal-expimp-btn-accion.importar {
-          background:linear-gradient(135deg,#7c3aed,#8b5cf6); box-shadow:0 4px 12px rgba(124,58,237,0.28);
-        }
-        .modal-expimp-btn-accion.importar:hover { background:linear-gradient(135deg,#6d28d9,#7c3aed); transform:translateY(-1px); }
-        .modal-expimp-dropzone {
-          border:2px dashed #cbd5e1; border-radius:12px; padding:28px 20px; margin:16px 0 22px;
-          color:#94a3b8; font-size:0.88rem; cursor:pointer; transition:all 0.18s; background:#f8fafc; display:block;
-        }
-        .modal-expimp-dropzone:hover, .modal-expimp-dropzone.drag-over { border-color:#7c3aed; background:#faf5ff; color:#7c3aed; }
-        .modal-expimp-dropzone .dz-icono { font-size:2rem; margin-bottom:8px; }
-        .modal-expimp-dropzone .dz-texto { font-weight:600; margin-bottom:4px; }
-        .modal-expimp-dropzone .dz-sub   { font-size:0.78rem; color:#94a3b8; }
-        .modal-expimp-aviso {
-          background:#fff7ed; border:1px solid #fed7aa; border-radius:8px;
-          padding:10px 14px; font-size:0.81rem; color:#9a3412; margin-bottom:16px; line-height:1.5; text-align:left;
-        }
-      `;
-      document.head.appendChild(st);
-    }
-
-    const barra = document.createElement('div');
-    barra.id = 'barra-progreso-acciones';
-
-    setTimeout(() => {
-      const btnLimpiar = document.getElementById('btn-limpiar-storage');
-      if (btnLimpiar) {
-        btnLimpiar.style.position = 'static';
-        btnLimpiar.style.left = 'auto';
-        btnLimpiar.style.bottom = 'auto';
-        btnLimpiar.style.boxShadow = 'none';
-        barra.insertBefore(btnLimpiar, barra.firstChild);
-      }
-    }, 0);
-
-    const btnExp = document.createElement('button');
-    btnExp.id = 'btn-exportar-progreso';
-    btnExp.className = 'btn-progreso-accion';
-    btnExp.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-      fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-    </svg> Exportar progreso`;
-    barra.appendChild(btnExp);
-
-    const btnImp = document.createElement('button');
-    btnImp.id = 'btn-importar-progreso';
-    btnImp.className = 'btn-progreso-accion';
-    btnImp.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-      fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="7 14 12 9 17 14"/><line x1="12" y1="9" x2="12" y2="21"/>
-    </svg> Importar progreso`;
-    barra.appendChild(btnImp);
-
-    document.body.appendChild(barra);
-
-    function actualizarVisibilidad() {
-      const menu = document.getElementById('menu-principal');
-      barra.classList.toggle('visible', !!(menu && !menu.classList.contains('oculto')));
-    }
-    const menuEl = document.getElementById('menu-principal');
-    if (menuEl) new MutationObserver(actualizarVisibilidad).observe(menuEl, { attributes: true, attributeFilter: ['class'] });
-    actualizarVisibilidad();
-
-    function toast(msg, tipo, dur) { if (typeof mostrarToast === 'function') mostrarToast(msg, tipo, dur); }
-
-    btnExp.addEventListener('click', () => {
-      const estadoActual   = loadJSON(STORAGE_KEY, {});
-      const intentosActual = loadJSON(ATTEMPT_LOG_KEY, []);
-      const nSec           = Object.keys(estadoActual).length;
-      const ov = document.createElement('div');
-      ov.className = 'modal-expimp-overlay';
-      ov.innerHTML = `
-        <div class="modal-expimp-caja">
-          <div class="modal-expimp-icono">📤</div>
-          <div class="modal-expimp-titulo">Exportar progreso</div>
-          <div class="modal-expimp-desc">Se descarga un archivo con todo tu progreso.<br>Mandátelo por <strong>WhatsApp o Gmail</strong> a tu celular.</div>
-          <div class="modal-expimp-stats">📊 Progreso en ${nSec} cuestionario${nSec !== 1 ? 's' : ''}</div>
-          <div class="modal-expimp-btns">
-            <button class="modal-expimp-btn-cancelar">Cancelar</button>
-            <button class="modal-expimp-btn-accion exportar">⬇️ Descargar archivo</button>
-          </div>
-        </div>`;
-      document.body.appendChild(ov);
-      ov.querySelector('.modal-expimp-btn-cancelar').addEventListener('click', () => ov.remove());
-      ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-      ov.querySelector('.modal-expimp-btn-accion').addEventListener('click', () => {
-        const payload = {
-          version: 'progreso_v1', exportado: new Date().toISOString(),
-          dispositivo: /Mobi|Android/i.test(navigator.userAgent) ? 'celular' : 'pc',
-          [STORAGE_KEY]: estadoActual, [ATTEMPT_LOG_KEY]: intentosActual,
-        };
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-        const url  = URL.createObjectURL(blob);
-        const fecha = new Date().toLocaleDateString('es-AR').replace(/\//g, '-');
-        const a = document.createElement('a');
-        a.href = url; a.download = `progreso_residencias_${fecha}.json`;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a); URL.revokeObjectURL(url);
-        ov.remove(); toast('Progreso exportado correctamente ✓', 'exito');
-      });
-    });
-
-    btnImp.addEventListener('click', () => {
-      const ov = document.createElement('div');
-      ov.className = 'modal-expimp-overlay';
-      ov.innerHTML = `
-        <div class="modal-expimp-caja">
-          <div class="modal-expimp-icono">📥</div>
-          <div class="modal-expimp-titulo">Importar progreso</div>
-          <div class="modal-expimp-desc">Seleccioná el archivo <strong>.json</strong> exportado desde el otro dispositivo.</div>
-          <div class="modal-expimp-aviso">⚠️ <strong>Atención:</strong> va a <strong>reemplazar</strong> el progreso actual. Exportá primero si querés conservarlo.</div>
-          <label class="modal-expimp-dropzone" id="expimp-dropzone">
-            <div class="dz-icono">📂</div>
-            <div class="dz-texto">Tocá aquí para elegir el archivo</div>
-            <div class="dz-sub">Archivo .json exportado desde Residencias Médicas</div>
-            <input type="file" accept=".json,application/json" style="display:none" id="expimp-file-input">
-          </label>
-          <div class="modal-expimp-btns"><button class="modal-expimp-btn-cancelar">Cancelar</button></div>
-        </div>`;
-      document.body.appendChild(ov);
-      ov.querySelector('.modal-expimp-btn-cancelar').addEventListener('click', () => ov.remove());
-      ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-      const dz = ov.querySelector('#expimp-dropzone');
-      const fi = ov.querySelector('#expimp-file-input');
-      dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
-      dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-      dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); if (e.dataTransfer.files[0]) procesarImport(e.dataTransfer.files[0], ov); });
-      fi.addEventListener('change', e => { if (e.target.files[0]) procesarImport(e.target.files[0], ov); });
-    });
-
-    function procesarImport(file, ov) {
-      if (!file.name.endsWith('.json')) { toast('El archivo debe ser un .json exportado desde este programa.', 'error', 4000); return; }
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const payload = JSON.parse(e.target.result);
-          if (payload.version !== 'progreso_v1') { toast('Archivo inválido.', 'error', 4000); return; }
-          const estadoImp   = payload[STORAGE_KEY]     || {};
-          const intentosImp = payload[ATTEMPT_LOG_KEY] || [];
-          const fechaExp    = new Date(payload.exportado).toLocaleString('es-AR');
-          const dispLabel   = payload.dispositivo === 'celular' ? '📱 celular' : '💻 PC';
-          const nSec        = Object.keys(estadoImp).length;
-          ov.remove();
-          const ov2 = document.createElement('div');
-          ov2.className = 'modal-expimp-overlay';
-          ov2.innerHTML = `
-            <div class="modal-expimp-caja">
-              <div class="modal-expimp-icono">📋</div>
-              <div class="modal-expimp-titulo">¿Importar este progreso?</div>
-              <div class="modal-expimp-desc">Exportado el <strong>${fechaExp}</strong> desde <strong>${dispLabel}</strong></div>
-              <div class="modal-expimp-stats">📊 ${nSec} cuestionario${nSec !== 1 ? 's' : ''} con progreso</div>
-              <div class="modal-expimp-aviso">⚠️ Esto va a <strong>reemplazar</strong> el progreso actual de este dispositivo.</div>
-              <div class="modal-expimp-btns">
-                <button class="modal-expimp-btn-cancelar">Cancelar</button>
-                <button class="modal-expimp-btn-accion importar">✅ Importar ahora</button>
-              </div>
-            </div>`;
-          document.body.appendChild(ov2);
-          ov2.querySelector('.modal-expimp-btn-cancelar').addEventListener('click', () => ov2.remove());
-          ov2.addEventListener('click', ev => { if (ev.target === ov2) ov2.remove(); });
-          ov2.querySelector('.modal-expimp-btn-accion').addEventListener('click', () => {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(estadoImp));
-            localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(intentosImp));
-            state = estadoImp; attemptLog = intentosImp;
-            ov2.remove(); toast('¡Progreso importado! Recargando...', 'exito', 2500);
-            setTimeout(() => location.reload(), 2000);
-          });
-        } catch { toast('Error al leer el archivo. ¿Está corrompido?', 'error', 4000); }
-      };
-      reader.readAsText(file);
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════
-  // FIN MÓDULO EXPORTAR / IMPORTAR
-  // ════════════════════════════════════════════════════════════════
-
   // ════════════════════════════════════════════════════════════════
   // MÓDULO DE REETIQUETADO
   // Permite cambiar la especialidad de cualquier pregunta de examen único.
@@ -6637,6 +6421,9 @@
                 history.replaceState({ section: null }, 'Menú Principal', '#menu');
                 showMenu();
               }
+              // Inyectar estilos de auth/admin (normalmente los inyecta fbShowAuthScreen,
+              // pero al recargar con sesión activa esa función no se ejecuta)
+              fbInjectAuthStyles();
               // Mostrar la barra de usuario siempre, inmediatamente
               fbShowUserBar();
               requestAnimationFrame(() => requestAnimationFrame(() => fbUpdateAdminButton()));
@@ -7281,6 +7068,8 @@
     window._fbCurrentUser = null;
     window._fbCurrentUserData = null;
     _modoEditarRespuestas = false;
+    // Notificar al resto de la página que la sesión se cerró (limpia permisos de copia, etc.)
+    document.dispatchEvent(new CustomEvent('fb:sesionCerrada'));
   }
 
   function fbAuthError(code) {
@@ -7369,6 +7158,16 @@
             🔁 Buscar preguntas duplicadas en Firestore
           </button>
         </div>
+        <div style="padding:0 0 4px;">
+          <button id="admin-btn-debug-toggle" style="
+            width:100%;padding:12px 16px;border:none;border-radius:10px;
+            background:linear-gradient(135deg,#1e293b,#334155);
+            color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
+            box-shadow:0 4px 14px rgba(0,0,0,0.25);
+            transition:all 0.2s;letter-spacing:0.02em;">
+            ⚫ Panel de debug: OFF
+          </button>
+        </div>
       </div>
       <div class="admin-section">
         <div class="admin-section-title">Solicitudes pendientes <span id="admin-badge-pending"></span></div>
@@ -7381,6 +7180,15 @@
 
     document.getElementById('fb-admin-close').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('btn-buscar-duplicados').onclick = () => fbAbrirBuscadorDuplicados();
+
+    document.getElementById('admin-btn-debug-toggle').onclick = () => {
+      _debugPanelEnabled = !_debugPanelEnabled;
+      _actualizarBtnDebugEnAdmin();
+      if (!_debugPanelEnabled) {
+        // Apagar: cerrar el panel si estaba abierto
+        document.getElementById('_debug_panel')?.remove();
+      }
+    };
 
     fbListenAdminRequests();
     fbListenAllUsers();
