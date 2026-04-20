@@ -1,6 +1,7 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V4
+// buscador-duplicados.js- V5
 // ────────────────────────────────────────────────────────────────
+
 
 (function () {
   'use strict';
@@ -197,12 +198,29 @@
     resumen.textContent = '';
 
     try {
-      const { collection, getDocs, query, orderBy } = window.__firebase_firestore || window.__fb;
+      // Verificar que Firestore esté disponible
+      const _fsModule = window.__firebase_firestore || window.__fb;
+      if (!_fsModule || typeof _fsModule.collection !== 'function') {
+        lista.innerHTML = `<div style="color:#f87171;padding:20px;">
+          ❌ <strong>Firestore no disponible.</strong><br>
+          Asegurate de estar logueado y de que Firebase se haya inicializado.
+        </div>`;
+        return;
+      }
+      const { collection, getDocs, query, orderBy } = _fsModule;
       const db = window._fbDb;
+      if (!db) {
+        lista.innerHTML = `<div style="color:#f87171;padding:20px;">
+          ❌ <strong>Base de datos no inicializada (_fbDb es null).</strong><br>
+          Intentá cerrar sesión y volver a ingresar.
+        </div>`;
+        return;
+      }
 
       const mapa = new Map();
       let totalPreguntas = 0;
       let seccionesEscaneadas = 0;
+      const erroresSecciones = [];
 
       for (const seccionId of TODAS_LAS_SECCIONES) {
         try {
@@ -226,7 +244,23 @@
               huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
             });
           });
-        } catch (_) { /* sección inexistente → saltar */ }
+        } catch (errSec) {
+          // Distinguir "sección vacía/inexistente" de error real
+          if (errSec.code && errSec.code !== 'not-found') {
+            erroresSecciones.push(`${seccionId}: ${errSec.code} — ${errSec.message}`);
+          }
+        }
+      }
+
+      // Mostrar errores de secciones si los hubo
+      if (erroresSecciones.length > 0) {
+        lista.innerHTML = `<div style="color:#fbbf24;background:rgba(251,191,36,0.08);
+          border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:14px 18px;margin-bottom:14px;">
+          ⚠️ <strong>Errores en ${erroresSecciones.length} sección(es):</strong><br>
+          <code style="font-size:0.75rem;color:#fca5a5;">${erroresSecciones.slice(0,5).join('<br>')}</code>
+          ${erroresSecciones.length > 5 ? `<br>…y ${erroresSecciones.length - 5} más` : ''}
+        </div>`;
+        if (totalPreguntas === 0) return;
       }
 
       // Filtrar grupos con más de 1 entrada
