@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V2
+// buscador-duplicados.js- V3
 // ────────────────────────────────────────────────────────────────
 
 (function () {
@@ -20,12 +20,12 @@
   ];
 
   // ── Helpers locales ────────────────────────────────────────────
-  function _dupToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
-  function _dupInjectAuthStyles() { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
+  function fbToast(m, t)         { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
+  function fbInjectAuthStyles()  { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
 
   // ── Cache del último escaneo ───────────────────────────────────
   let _dupGruposCache = [];
-  const _DUP_CACHE_KEY = 'fb_dup_scan_cache_v1';
+  const _DUP_CACHE_KEY = 'fb_dup_scan_cache_v2';
   const _DUP_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 horas
 
   // ── Normalización de enunciados (para comparación exacta) ──────
@@ -43,7 +43,7 @@
   // fbAbrirBuscadorDuplicados — abre el modal principal
   // ════════════════════════════════════════════════════════════════
   async function fbAbrirBuscadorDuplicados() {
-    _dupInjectAuthStyles();
+    fbInjectAuthStyles();
     _fbInjectDuplicadosStyles();
 
     document.getElementById('fb-modal-duplicados')?.remove();
@@ -481,7 +481,7 @@
   async function _eliminarDuplicadosEnFirestore(items, cardEl, soloDocId = null) {
     const { deleteDoc, doc } = window.__fb;
     const db = window._fbDb;
-    if (!db) { _dupToast('❌ Firestore no inicializado', 'error'); return; }
+    if (!db) { fbToast('❌ Firestore no inicializado', 'error'); return; }
 
     let eliminados = 0;
     const errores = [];
@@ -531,7 +531,7 @@
     }
 
     if (errores.length === 0) {
-      _dupToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
+      fbToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
       try { localStorage.removeItem(_DUP_CACHE_KEY); } catch (_) {}
       if (cardEl && eliminados > 0) {
         const botonesSobrantes = cardEl.querySelectorAll('.dup-btn-eliminar-uno');
@@ -563,7 +563,7 @@
         ${errores.map(e => `<div style="color:#94a3b8;font-size:0.76rem;">${e.seccion}/${e.docId}: <em>${e.msg}</em></div>`).join('')}
       `;
       lista?.prepend(errDiv);
-      if (eliminados > 0) _dupToast(`⚠️ Eliminados ${eliminados}, fallaron ${errores.length}`, 'info');
+      if (eliminados > 0) fbToast(`⚠️ Eliminados ${eliminados}, fallaron ${errores.length}`, 'info');
     }
   }
 
@@ -610,7 +610,7 @@
       if (encontrado || intentos >= MAX_INTENTOS) {
         clearInterval(intervalo);
         if (!encontrado && intentos >= MAX_INTENTOS) {
-          _dupToast('⚠️ La pregunta no aparece en el cuestionario — puede ser una entrada huérfana o ya fue eliminada', 'info');
+          fbToast('⚠️ La pregunta no aparece en el cuestionario — puede ser una entrada huérfana o ya fue eliminada', 'info');
         }
       }
     }, 100);
