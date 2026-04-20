@@ -27,7 +27,7 @@
   // ── Cache del último escaneo ───────────────────────────────────
   let _dupGruposCache = [];
   const _DUP_CACHE_KEY = 'fb_dup_scan_cache_v2';
-  const _DUP_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 horas
+  const _DUP_CACHE_TTL = Infinity;
 
   // ── Normalización de enunciados (para comparación exacta) ──────
   function _normalizarEnunciado(texto) {
