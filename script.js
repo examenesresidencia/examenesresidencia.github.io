@@ -1,4 +1,4 @@
-//PRUEBA 79 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 80 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -8698,5 +8698,43 @@ function fbSaveProgressToCloud() {
   window._fbStopHeartbeat    = _fbStopHeartbeat;
   window._inactReset         = _inactReset;
   window._inactStop          = _inactStop;
+
+  // ── Exports para módulos externos (editor-admin.js, buscador-duplicados.js) ──
+  // fbToast y fbInjectAuthStyles: funciones utilitarias del sistema de auth
+  window.fbToast            = fbToast;
+  window.fbInjectAuthStyles = fbInjectAuthStyles;
+
+  // fbIsAdmin: lee _currentUserData que vive en este closure
+  window.fbIsAdmin = function () {
+    return !!(_currentUserData && _currentUserData.role === 'admin');
+  };
+
+  // _fbDb y _currentUser: expuestos como getters para que siempre reflejen
+  // el valor actual aunque Firebase todavía no haya inicializado al momento
+  // en que los módulos externos se cargan.
+  Object.defineProperty(window, '_fbDb', {
+    get: function () { return _fbDb; },
+    configurable: true
+  });
+  Object.defineProperty(window, '_currentUser', {
+    get: function () { return _currentUser; },
+    configurable: true
+  });
+
+  // _bumpContentVersion: necesaria para que editor-admin.js invalide la versión
+  // de contenido al guardar una pregunta editada.
+  window._bumpContentVersion = _bumpContentVersion;
+
+  // _seccionesYaCargadas: Set compartido — los módulos externos lo invalidan
+  // al borrar/editar preguntas para forzar una recarga desde Firestore.
+  window._seccionesYaCargadas = _seccionesYaCargadas;
+
+  // STORAGE_KEY y GITHUB_IMAGES_BASE: constantes que editor-admin.js necesita
+  window.STORAGE_KEY         = STORAGE_KEY;
+  window.GITHUB_IMAGES_BASE  = GITHUB_IMAGES_BASE;
+
+  // cargarSeccion y generarCuestionario: para refrescar la vista tras editar
+  window.cargarSeccion       = cargarSeccion;
+  window.generarCuestionario = generarCuestionario;
 
 })();
