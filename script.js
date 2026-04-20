@@ -1,4 +1,4 @@
-//PRUEBA 93 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 87 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -211,39 +211,6 @@
   }, true); // true = fase de captura
   // ======== Claves de almacenamiento ========
   const STORAGE_KEY = "quiz_state_v3";
-
-  // ════════════════════════════════════════════════════════════════
-  // DEBUG PANEL TEMPORAL — borrar después de diagnosticar
-  // ════════════════════════════════════════════════════════════════
-  function _debugLog(msg) {
-    console.log('[DEBUG]', msg);
-    let panel = document.getElementById('_debug_panel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = '_debug_panel';
-      panel.style.cssText = `
-        position:fixed; bottom:60px; left:8px; right:8px; z-index:999999;
-        background:rgba(0,0,0,0.88); color:#0f0; font-family:monospace;
-        font-size:11px; padding:8px 10px; border-radius:10px;
-        max-height:200px; overflow-y:auto; line-height:1.6;
-        border:1px solid #0f0;
-      `;
-      const btnCerrar = document.createElement('button');
-      btnCerrar.textContent = '✕ cerrar';
-      btnCerrar.style.cssText = 'position:absolute;top:4px;right:6px;background:none;border:1px solid #0f0;color:#0f0;font-size:10px;cursor:pointer;border-radius:4px;padding:2px 6px;';
-      btnCerrar.onclick = () => panel.remove();
-      panel.appendChild(btnCerrar);
-      document.body.appendChild(panel);
-    }
-    const line = document.createElement('div');
-    const time = new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    line.textContent = time + ' → ' + msg;
-    panel.appendChild(line);
-    panel.scrollTop = panel.scrollHeight;
-  }
-  window._debugLog = _debugLog;
-
-
   const ATTEMPT_LOG_KEY = "quiz_attempt_log_v1";
   const SCROLL_POSITION_KEY = "quiz_scroll_position_v1";
   const TIMER_STORAGE_KEY = "simulacro_timer_v1";
@@ -624,7 +591,6 @@
   })();
 
   const _seccionesYaCargadas = new Set();
-  const _seccionesEnCarga = new Set(); // 🔒 Cargas activas desde Firestore
 
   /**
    * Carga las preguntas de una sección desde Firestore.
@@ -638,16 +604,13 @@
     if (_seccionesYaCargadas.has(seccionId) ||
         (window.preguntasPorSeccion?.[seccionId]?.length > 0)) {
       _seccionesYaCargadas.add(seccionId);
-      _debugLog('⚡ Ya cargada en memoria: ' + seccionId + ' → ' + (window.preguntasPorSeccion?.[seccionId]?.length || 0) + ' pregs');
       return Promise.resolve();
     }
 
     // ── Intentar desde caché localStorage primero ──────────────────
-    _debugLog('cargarSeccion("' + seccionId + '") iniciada');
     try {
       const cached = JSON.parse(localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId) || 'null');
-      _debugLog('caché encontrado: ' + (cached ? cached.preguntas?.length + ' pregs, ts=' + new Date(cached.ts).toLocaleTimeString() : 'null'));
-      if (cached && cached.preguntas && cached.preguntas.length > 5 && cached.ts &&
+      if (cached && cached.preguntas && cached.ts &&
           (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
         // Filtrar clones extrapolados que pudieran haberse guardado en caché en sesiones
@@ -672,15 +635,12 @@
 
         window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
-        _debugLog('✅ Caché OK: ' + seccionId + ' → ' + preguntasLimpias.length + ' pregs');
         console.log('📦 Caché local:', seccionId, '→', preguntasLimpias.length, 'preguntas');
         return Promise.resolve();
       }
     } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
 
     // ── Cargar desde Firestore ──────────────────────────────────────
-    _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
-    _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
     return new Promise((resolve) => {
       function intentarCarga() {
         if (!window.__firebaseReady || !window.__firebase_firestore) {
@@ -773,36 +733,12 @@
                 PREGUNTAS_CACHE_PREFIX + seccionId,
                 JSON.stringify({ ts: Date.now(), preguntas })
               );
-            } catch (_) {
-              // Quota exceeded: eliminar el caché más viejo para hacer espacio y reintentar
-              try {
-                const cacheKeys = Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
-                if (cacheKeys.length > 0) {
-                  cacheKeys.sort((a, b) => {
-                    try {
-                      const ta = JSON.parse(localStorage.getItem(a))?.ts || 0;
-                      const tb = JSON.parse(localStorage.getItem(b))?.ts || 0;
-                      return ta - tb;
-                    } catch { return 0; }
-                  });
-                  localStorage.removeItem(cacheKeys[0]);
-                  console.log('🧹 Caché lleno: se eliminó el más viejo (' + cacheKeys[0] + ') para hacer espacio');
-                }
-                localStorage.setItem(
-                  PREGUNTAS_CACHE_PREFIX + seccionId,
-                  JSON.stringify({ ts: Date.now(), preguntas })
-                );
-              } catch (_2) { /* si aun así falla, continuar sin caché */ }
-            }
+            } catch (_) { /* quota exceeded en localStorage → ignorar */ }
 
             _seccionesYaCargadas.add(seccionId);
-            _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar
-            _debugLog('✅ Firestore OK: ' + seccionId + ' → ' + preguntas.length + ' pregs');
             console.log('✅ Firestore→caché:', seccionId, '→', preguntas.length, 'preguntas');
             resolve();
           } catch (e) {
-            _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar en error
-            _debugLog('❌ ERROR Firestore: ' + seccionId + ' — ' + e.message);
             console.error('❌ Error cargando desde Firestore:', seccionId, e);
             resolve();
           }
@@ -2024,9 +1960,8 @@
 
     // Construir el conjunto de índices aún sin responder
     const unanswered = [];
-    const graded = s.graded || {}; // protección: puede ser undefined al recargar
     for (let i = 0; i < preguntasLen; i++) {
-      if (!graded[i]) unanswered.push(i);
+      if (!s.graded[i]) unanswered.push(i);
     }
 
     // 2) Sin responder: usar el orden guardado si existe (re-render forzado por sync del admin),
@@ -2050,7 +1985,6 @@
     s.unansweredOrder = [];
 
     // Concatenar: respondidas primero (fijas), luego sin responder
-    _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
     return [...answered, ...shuffledUnanswered];
   }
 
@@ -3321,12 +3255,17 @@
     // Se activan después de que Firebase confirme que el usuario es admin.
     window._buildEditoresAdminPendiente = true;
 
-    // NO restaurar la sección aquí: onAuthStateChanged lo hace DESPUÉS de que
-    // Firebase autentica al usuario y sincroniza el progreso desde la nube.
-    // Si lo hacemos acá también, generarCuestionario se llama dos veces en mobile
-    // (una vez sin progreso y otra con progreso), la segunda borra el render de la primera
-    // y el cuestionario queda vaciado con el contador en 0/646.
-    // onAuthStateChanged ya maneja correctamente el hash en la línea ~6574.
+    const hash = window.location.hash.substring(1);
+    // Restaurar la sección indicada en el hash, tanto en navegación normal
+    // como al recargar la página (F5). Si no hay hash válido, mostrar el menú.
+    if (hash && hash !== 'menu') {
+      showSection(hash); // cargarSeccion() maneja el caso de sección inexistente
+      currentSection = hash;
+    } else {
+      history.replaceState({ section: null }, 'Menú Principal', '#menu');
+      sessionStorage.removeItem('quiz_active_section');
+      showMenu();
+    }
   });
 
   // ======== MEDIDAS DE SEGURIDAD ========
@@ -7989,11 +7928,6 @@ function fbSaveProgressToCloud() {
 
   // ── Invalida caché de una sección y recarga en segundo plano ──
   async function _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta) {
-    // 🔒 Si la sección está siendo cargada o ya fue cargada en esta sesión, no interrumpir
-    if (_seccionesEnCarga.has(seccionId) || _seccionesYaCargadas.has(seccionId)) {
-      console.log('[CONTENT-SYNC] Ignorando invalidación: sección ya cargada o en progreso para', seccionId);
-      return;
-    }
     // 1. Limpiar caché local de esa sección
     try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
     try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
@@ -8119,16 +8053,9 @@ function fbSaveProgressToCloud() {
           const hayVersionNueva = versionRemota && String(versionRemota) !== String(versionConocida);
           console.log('[CONTENT-SYNC] Versión remota:', versionRemota, '| conocida:', versionConocida, '| cambio pendiente:', hayVersionNueva);
           if (hayVersionNueva && seccionId) {
-            // FIX: no interrumpir si la sección ya está cargada o siendo renderizada en esta sesión.
-            // En mobile, el snapshot llega mientras generarCuestionario aún está ejecutando
-            // sus lotes con setTimeout, causando una colisión que deja el cuestionario vacío.
-            // Solo invalidar si la sección NO fue cargada todavía en esta sesión.
-            if (_seccionesYaCargadas.has(seccionId) || _seccionesEnCarga.has(seccionId)) {
-              console.log('[CONTENT-SYNC] Primera lectura: sección ya cargada en esta sesión, omitiendo invalidación de', seccionId);
-            } else {
-              console.log('[CONTENT-SYNC] Invalidando caché al inicio para sección:', seccionId);
-              _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
-            }
+            // El cliente arrancó sin conocer esta edición → invalidar caché ahora
+            console.log('[CONTENT-SYNC] Invalidando caché al inicio para sección:', seccionId);
+            _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
           }
           // Guardar versión actual como conocida para la próxima sesión
           try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
