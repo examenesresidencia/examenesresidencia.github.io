@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V5
+// buscador-duplicados.js- V6
 // ────────────────────────────────────────────────────────────────
 
 
@@ -199,7 +199,8 @@
 
     try {
       // Verificar que Firestore esté disponible
-      const _fsModule = window.__firebase_firestore || window.__fb;
+      // Prioridad: window.__fb (expuesto por script.js tras fbInit) → window.__firebase_firestore
+      const _fsModule = window.__fb || window.__firebase_firestore;
       if (!_fsModule || typeof _fsModule.collection !== 'function') {
         lista.innerHTML = `<div style="color:#f87171;padding:20px;">
           ❌ <strong>Firestore no disponible.</strong><br>
@@ -211,8 +212,8 @@
       const db = window._fbDb;
       if (!db) {
         lista.innerHTML = `<div style="color:#f87171;padding:20px;">
-          ❌ <strong>Base de datos no inicializada (_fbDb es null).</strong><br>
-          Intentá cerrar sesión y volver a ingresar.
+          ❌ <strong>Base de datos no inicializada (window._fbDb es null).</strong><br>
+          Iniciá sesión primero — Firebase se inicializa al autenticarse.
         </div>`;
         return;
       }
