@@ -1,4 +1,4 @@
-//PRUEBA 91 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 92 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -8124,9 +8124,16 @@ function fbSaveProgressToCloud() {
           const hayVersionNueva = versionRemota && String(versionRemota) !== String(versionConocida);
           console.log('[CONTENT-SYNC] Versión remota:', versionRemota, '| conocida:', versionConocida, '| cambio pendiente:', hayVersionNueva);
           if (hayVersionNueva && seccionId) {
-            // El cliente arrancó sin conocer esta edición → invalidar caché ahora
-            console.log('[CONTENT-SYNC] Invalidando caché al inicio para sección:', seccionId);
-            _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
+            // FIX: no interrumpir si la sección ya está cargada o siendo renderizada en esta sesión.
+            // En mobile, el snapshot llega mientras generarCuestionario aún está ejecutando
+            // sus lotes con setTimeout, causando una colisión que deja el cuestionario vacío.
+            // Solo invalidar si la sección NO fue cargada todavía en esta sesión.
+            if (_seccionesYaCargadas.has(seccionId) || _seccionesEnCarga.has(seccionId)) {
+              console.log('[CONTENT-SYNC] Primera lectura: sección ya cargada en esta sesión, omitiendo invalidación de', seccionId);
+            } else {
+              console.log('[CONTENT-SYNC] Invalidando caché al inicio para sección:', seccionId);
+              _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
+            }
           }
           // Guardar versión actual como conocida para la próxima sesión
           try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
