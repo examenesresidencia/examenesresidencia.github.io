@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V7
+// buscador-duplicados.js- V8
 // ────────────────────────────────────────────────────────────────
 
 
@@ -223,12 +223,24 @@
       let totalPreguntas = 0;
       let seccionesEscaneadas = 0;
       const erroresSecciones = [];
+      let primeraSeccionConDatos = null;
 
-      for (const seccionId of TODAS_LAS_SECCIONES) {
+      // Mostrar progreso en tiempo real
+      lista.innerHTML = `<div id="dup-progreso" style="text-align:center;padding:20px;color:#94a3b8;font-size:0.85rem;">
+        Leyendo sección 1 de ${TODAS_LAS_SECCIONES.length}…
+      </div>`;
+
+      for (let i = 0; i < TODAS_LAS_SECCIONES.length; i++) {
+        const seccionId = TODAS_LAS_SECCIONES[i];
+        const progresoEl = document.getElementById('dup-progreso');
+        if (progresoEl) progresoEl.textContent = `Leyendo ${seccionId} (${i+1}/${TODAS_LAS_SECCIONES.length})… ${totalPreguntas} preguntas leídas`;
+
         try {
           const itemsRef = collection(db, 'preguntas', seccionId, 'items');
-          const snap = await getDocs(itemsRef);  // sin orderBy → no requiere índice en Firestore
+          const snap = await getDocs(itemsRef);
+          console.log(`[DUP-SCAN] ${seccionId}: ${snap.size} docs`);
           if (snap.empty) continue;
+          if (!primeraSeccionConDatos) primeraSeccionConDatos = seccionId;
           seccionesEscaneadas++;
           snap.forEach(docSnap => {
             totalPreguntas++;
@@ -247,22 +259,47 @@
             });
           });
         } catch (errSec) {
-          // Distinguir "sección vacía/inexistente" de error real
-          if (errSec.code && errSec.code !== 'not-found') {
-            erroresSecciones.push(`${seccionId}: ${errSec.code} — ${errSec.message}`);
-          }
+          console.error(`[DUP-SCAN] Error en ${seccionId}:`, errSec);
+          erroresSecciones.push(`${seccionId}: ${errSec.code || 'error'} — ${errSec.message}`);
         }
       }
 
-      // Mostrar errores de secciones si los hubo
+      // Si no se leyó NADA, mostrar diagnóstico y NO guardar caché
+      if (totalPreguntas === 0) {
+        const tieneErrores = erroresSecciones.length > 0;
+        lista.innerHTML = `<div style="color:#f87171;background:rgba(239,68,68,0.1);
+          border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:18px 20px;">
+          ❌ <strong>No se pudo leer ninguna pregunta de Firestore.</strong><br><br>
+          ${tieneErrores ? `
+          <strong style="color:#fbbf24;">Errores detectados:</strong><br>
+          <code style="font-size:0.75rem;color:#fca5a5;display:block;margin-top:6px;">
+            ${erroresSecciones.slice(0,8).join('<br>')}
+          </code>
+          <br>` : ''}
+          <strong style="color:#94a3b8;font-size:0.82rem;">Posibles causas:</strong>
+          <ul style="color:#94a3b8;font-size:0.8rem;margin-top:6px;padding-left:18px;line-height:1.8;">
+            <li>Las reglas de Firestore no permiten leer como este usuario</li>
+            <li>La colección <code>preguntas/{seccion}/items</code> no existe o está vacía</li>
+            <li>El usuario no tiene rol <code>admin</code> en Firestore</li>
+          </ul>
+          <div style="margin-top:10px;font-size:0.78rem;color:#64748b;">
+            Abrí F12 → Consola para ver el detalle exacto de cada sección.
+          </div>
+        </div>`;
+        resumen.innerHTML = `<span style="color:#f87171;">⚠️ Sin datos — caché no guardada</span>`;
+        return;
+      }
+
+      // Mostrar errores parciales si los hubo (pero sí se leyeron datos)
       if (erroresSecciones.length > 0) {
         lista.innerHTML = `<div style="color:#fbbf24;background:rgba(251,191,36,0.08);
           border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:14px 18px;margin-bottom:14px;">
-          ⚠️ <strong>Errores en ${erroresSecciones.length} sección(es):</strong><br>
+          ⚠️ <strong>Errores en ${erroresSecciones.length} sección(es) — el resto se escaneó OK:</strong><br>
           <code style="font-size:0.75rem;color:#fca5a5;">${erroresSecciones.slice(0,5).join('<br>')}</code>
           ${erroresSecciones.length > 5 ? `<br>…y ${erroresSecciones.length - 5} más` : ''}
         </div>`;
-        if (totalPreguntas === 0) return;
+      } else {
+        lista.innerHTML = '';
       }
 
       // Filtrar grupos con más de 1 entrada
@@ -272,7 +309,7 @@
       });
       _dupGruposCache.sort((a, b) => b.length - a.length);
 
-      // Guardar en caché localStorage
+      // Guardar en caché localStorage SOLO si hay datos reales
       try {
         localStorage.setItem(_DUP_CACHE_KEY, JSON.stringify({
           ts: Date.now(),
@@ -292,7 +329,7 @@
       _aplicarFiltrosDuplicados();
 
     } catch (e) {
-      lista.innerHTML = `<div style="color:#f87171;padding:20px;">❌ Error al escanear: ${e.message}</div>`;
+      lista.innerHTML = `<div style="color:#f87171;padding:20px;">❌ Error al escanear: ${e.message}<br><small style="color:#64748b;">${e.stack || ''}</small></div>`;
     } finally {
       if (btnScan) { btnScan.disabled = false; btnScan.textContent = '🔍 Escanear'; }
     }
