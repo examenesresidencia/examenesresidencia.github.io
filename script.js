@@ -1,4 +1,4 @@
-//PRUEBA 90 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 91 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -2024,8 +2024,9 @@
 
     // Construir el conjunto de índices aún sin responder
     const unanswered = [];
+    const graded = s.graded || {}; // protección: puede ser undefined al recargar
     for (let i = 0; i < preguntasLen; i++) {
-      if (!s.graded[i]) unanswered.push(i);
+      if (!graded[i]) unanswered.push(i);
     }
 
     // 2) Sin responder: usar el orden guardado si existe (re-render forzado por sync del admin),
@@ -2049,6 +2050,7 @@
     s.unansweredOrder = [];
 
     // Concatenar: respondidas primero (fijas), luego sin responder
+    _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
     return [...answered, ...shuffledUnanswered];
   }
 
