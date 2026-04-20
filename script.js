@@ -1,4 +1,4 @@
-//PRUEBA 87 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 89 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -591,6 +591,7 @@
   })();
 
   const _seccionesYaCargadas = new Set();
+  const _seccionesEnCarga = new Set(); // 🔒 Cargas activas desde Firestore
 
   /**
    * Carga las preguntas de una sección desde Firestore.
@@ -641,6 +642,7 @@
     } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
 
     // ── Cargar desde Firestore ──────────────────────────────────────
+    _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
     return new Promise((resolve) => {
       function intentarCarga() {
         if (!window.__firebaseReady || !window.__firebase_firestore) {
@@ -736,9 +738,11 @@
             } catch (_) { /* quota exceeded en localStorage → ignorar */ }
 
             _seccionesYaCargadas.add(seccionId);
+            _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar
             console.log('✅ Firestore→caché:', seccionId, '→', preguntas.length, 'preguntas');
             resolve();
           } catch (e) {
+            _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar en error
             console.error('❌ Error cargando desde Firestore:', seccionId, e);
             resolve();
           }
@@ -7928,6 +7932,11 @@ function fbSaveProgressToCloud() {
 
   // ── Invalida caché de una sección y recarga en segundo plano ──
   async function _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta) {
+    // 🔒 Si la sección está siendo cargada ahora mismo, no interrumpir
+    if (_seccionesEnCarga.has(seccionId)) {
+      console.log('[CONTENT-SYNC] Ignorando invalidación: carga ya en progreso para', seccionId);
+      return;
+    }
     // 1. Limpiar caché local de esa sección
     try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
     try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
