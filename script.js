@@ -1,4 +1,4 @@
-//PRUEBA 89 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 90 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -611,7 +611,7 @@
     // ── Intentar desde caché localStorage primero ──────────────────
     try {
       const cached = JSON.parse(localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId) || 'null');
-      if (cached && cached.preguntas && cached.ts &&
+      if (cached && cached.preguntas && cached.preguntas.length > 5 && cached.ts &&
           (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
         // Filtrar clones extrapolados que pudieran haberse guardado en caché en sesiones
@@ -735,7 +735,27 @@
                 PREGUNTAS_CACHE_PREFIX + seccionId,
                 JSON.stringify({ ts: Date.now(), preguntas })
               );
-            } catch (_) { /* quota exceeded en localStorage → ignorar */ }
+            } catch (_) {
+              // Quota exceeded: eliminar el caché más viejo para hacer espacio y reintentar
+              try {
+                const cacheKeys = Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
+                if (cacheKeys.length > 0) {
+                  cacheKeys.sort((a, b) => {
+                    try {
+                      const ta = JSON.parse(localStorage.getItem(a))?.ts || 0;
+                      const tb = JSON.parse(localStorage.getItem(b))?.ts || 0;
+                      return ta - tb;
+                    } catch { return 0; }
+                  });
+                  localStorage.removeItem(cacheKeys[0]);
+                  console.log('🧹 Caché lleno: se eliminó el más viejo (' + cacheKeys[0] + ') para hacer espacio');
+                }
+                localStorage.setItem(
+                  PREGUNTAS_CACHE_PREFIX + seccionId,
+                  JSON.stringify({ ts: Date.now(), preguntas })
+                );
+              } catch (_2) { /* si aun así falla, continuar sin caché */ }
+            }
 
             _seccionesYaCargadas.add(seccionId);
             _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar
