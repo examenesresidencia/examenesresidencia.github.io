@@ -1,4 +1,4 @@
-//PRUEBA 92 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 93 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -3321,17 +3321,12 @@
     // Se activan después de que Firebase confirme que el usuario es admin.
     window._buildEditoresAdminPendiente = true;
 
-    const hash = window.location.hash.substring(1);
-    // Restaurar la sección indicada en el hash, tanto en navegación normal
-    // como al recargar la página (F5). Si no hay hash válido, mostrar el menú.
-    if (hash && hash !== 'menu') {
-      showSection(hash); // cargarSeccion() maneja el caso de sección inexistente
-      currentSection = hash;
-    } else {
-      history.replaceState({ section: null }, 'Menú Principal', '#menu');
-      sessionStorage.removeItem('quiz_active_section');
-      showMenu();
-    }
+    // NO restaurar la sección aquí: onAuthStateChanged lo hace DESPUÉS de que
+    // Firebase autentica al usuario y sincroniza el progreso desde la nube.
+    // Si lo hacemos acá también, generarCuestionario se llama dos veces en mobile
+    // (una vez sin progreso y otra con progreso), la segunda borra el render de la primera
+    // y el cuestionario queda vaciado con el contador en 0/646.
+    // onAuthStateChanged ya maneja correctamente el hash en la línea ~6574.
   });
 
   // ======== MEDIDAS DE SEGURIDAD ========
