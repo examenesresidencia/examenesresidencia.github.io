@@ -1,4 +1,4 @@
-//PRUEBA 82 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 83 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: al editar desde admin, preservar respuestas/colores del usuario sin resetearlas
 // Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
 // Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
@@ -8329,8 +8329,8 @@ function fbSaveProgressToCloud() {
     );
   }
 
-  // Logout silencioso: NO guarda en Firestore porque el otro dispositivo
-  // ya es el autorizado. Solo cierra Auth y limpia el estado local.
+  // Logout silencioso: NO guarda en Firestore porque el nuevo dispositivo
+  // ya es el autorizado. Solo cierra Auth y limpia estado local.
   async function _fbLogoutSilencioso() {
     try {
       if (_progressUnsubscribe) { _progressUnsubscribe(); _progressUnsubscribe = null; }
@@ -8733,8 +8733,6 @@ function fbSaveProgressToCloud() {
   window.fbIsAdmin = function () {
     return !!(_currentUserData && _currentUserData.role === 'admin');
   };
-  // Getters dinámicos: siempre devuelven el valor actual aunque Firebase
-  // todavía no haya inicializado cuando se cargan los módulos externos.
   Object.defineProperty(window, '_fbDb', {
     get: function () { return _fbDb; },
     configurable: true
@@ -8743,7 +8741,7 @@ function fbSaveProgressToCloud() {
     get: function () { return _currentUser; },
     configurable: true
   });
-  window._bumpContentVersion = _bumpContentVersion;
+  window._bumpContentVersion  = _bumpContentVersion;
   window._seccionesYaCargadas = _seccionesYaCargadas;
   window.STORAGE_KEY          = STORAGE_KEY;
   window.GITHUB_IMAGES_BASE   = GITHUB_IMAGES_BASE;
