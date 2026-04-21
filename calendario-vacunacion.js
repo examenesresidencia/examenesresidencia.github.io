@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// calendario-vacunacion.js  — v9
+// calendario-vacunacion.js  — v10
 // Grid 3 columnas · Toggle independiente · Editor admin completo
 // ════════════════════════════════════════════════════════════════
 (function () {
@@ -735,7 +735,6 @@
     ov.querySelector('.v26-mclose').onclick=()=>ov.remove();
     ov.querySelector('.v26-mcancel').onclick=()=>ov.remove();
     ov.querySelector('.v26-msave').onclick=()=>onGuardar(ov,body);
-    ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
     return ov;
   }
 
