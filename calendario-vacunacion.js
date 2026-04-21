@@ -1,12 +1,11 @@
 // ════════════════════════════════════════════════════════════════
-// calendario-vacunacion.js  — v2
-// Rediseño completo: bug de tarjetas en blanco corregido,
-// diseño profesional con acordeón de una columna por grupo
+// calendario-vacunacion.js  — v3
+// Grid 3 columnas · Toggle independiente · Editor admin completo
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
 
-  const DATA_KEY = 'vacunas2026_data_v2';
+  const DATA_KEY = 'vacunas2026_data_v3';
 
   const GRUPOS_META = [
     { tipo:'VÍRICAS — VIVAS ATENUADAS',          icon:'🦠', color:'#16a34a', bg:'rgba(22,163,74,0.07)',   border:'rgba(22,163,74,0.28)'  },
@@ -131,14 +130,12 @@
   // ESTILOS
   // ════════════════════════════════════════════════════════════════
   function inyectarEstilos(){
-    if(document.getElementById('vac2026-st-v2'))return;
+    if(document.getElementById('vac2026-st-v3'))return;
     const s=document.createElement('style');
-    s.id='vac2026-st-v2';
+    s.id='vac2026-st-v3';
     s.textContent=`
       #vac2026-panel{display:none;min-height:100vh;background:linear-gradient(160deg,#071220 0%,#0d2444 50%,#0a1628 100%);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;color:#e2e8f0;padding-bottom:100px;}
       #vac2026-panel.activo{display:block;}
-
-      /* Header */
       .v26h{position:sticky;top:0;z-index:200;background:rgba(7,18,32,0.97);backdrop-filter:blur(18px);border-bottom:1px solid rgba(255,255,255,0.08);padding:0 24px;}
       .v26h-r1{display:flex;align-items:center;gap:12px;padding:13px 0 10px;flex-wrap:wrap;}
       .v26-back{display:inline-flex;align-items:center;gap:5px;padding:7px 15px;border-radius:8px;border:1px solid rgba(255,255,255,0.14);background:rgba(255,255,255,0.04);color:#94a3b8;font-size:0.83rem;font-weight:500;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit;}
@@ -150,52 +147,47 @@
       .v26-tab{padding:10px 22px;font-size:0.82rem;font-weight:500;color:#64748b;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit;}
       .v26-tab:hover{color:#94a3b8;}
       .v26-tab.on{color:#38bdf8;border-bottom-color:#38bdf8;}
-
-      /* Body */
-      .v26-body{padding:24px;max-width:960px;margin:0 auto;}
+      .v26-body{padding:24px;max-width:1100px;margin:0 auto;}
 
       /* Leyenda */
-      .v26-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px;padding:12px 16px;background:rgba(255,255,255,0.02);border-radius:10px;border:1px solid rgba(255,255,255,0.07);}
+      .v26-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px;padding:11px 16px;background:rgba(255,255,255,0.02);border-radius:10px;border:1px solid rgba(255,255,255,0.07);}
       .v26-leg-item{display:flex;align-items:center;gap:5px;font-size:0.71rem;color:#64748b;}
       .v26-leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 
       /* Grupo */
-      .v26-grupo{margin-bottom:24px;border-radius:14px;overflow:hidden;border:1px solid;}
-      .v26-grupo-hdr{display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid rgba(255,255,255,0.06);}
+      .v26-grupo-wrap{margin-bottom:26px;}
+      .v26-grupo-hdr{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:10px 10px 0 0;border:1px solid;border-bottom:none;}
       .v26-grupo-icon{font-size:1rem;flex-shrink:0;}
-      .v26-grupo-tit{font-size:0.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;flex:1;}
-      .v26-grupo-cnt{font-size:0.68rem;color:#475569;background:rgba(0,0,0,0.2);padding:2px 9px;border-radius:10px;}
+      .v26-grupo-tit{font-size:0.68rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;flex:1;}
+      .v26-grupo-cnt{font-size:0.67rem;color:#475569;background:rgba(0,0,0,0.25);padding:2px 9px;border-radius:10px;}
 
-      /* Acordeón — clave del bug fix:
-         Las filas son flex-direction:column → cada fila ocupa su propio espacio.
-         El detalle se controla con JS (display:block/none inline),
-         NO con CSS de clase padre, evitando que el grid estire filas vecinas. */
-      .v26-lista{display:flex;flex-direction:column;}
-      .v26-vrow{border-bottom:1px solid rgba(255,255,255,0.05);}
-      .v26-vrow:last-child{border-bottom:none;}
+      /* Grid 3 columnas */
+      .v26-grid{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid rgba(255,255,255,0.08);border-radius:0 0 12px 12px;overflow:hidden;}
+      .v26-card{display:flex;flex-direction:column;border-right:1px solid rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.06);}
+      .v26-card:nth-child(3n){border-right:none;}
 
-      .v26-vtrig{display:flex;align-items:center;gap:10px;padding:12px 18px;cursor:pointer;transition:background .13s;user-select:none;-webkit-user-select:none;}
-      .v26-vtrig:hover{background:rgba(255,255,255,0.03);}
-      .v26-vtrig.open{background:rgba(255,255,255,0.04);}
+      /* Trigger */
+      .v26-ctrig{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;transition:background .13s;user-select:none;-webkit-user-select:none;min-height:52px;}
+      .v26-ctrig:hover{background:rgba(255,255,255,0.03);}
+      .v26-ctrig.open{background:rgba(255,255,255,0.04);}
+      .v26-cbadge{font-size:9.5px;font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0;border:1px solid;}
+      .v26-cnom{flex:1;font-size:0.84rem;font-weight:600;color:#e2e8f0;line-height:1.3;}
+      .v26-carr{width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:center;font-size:0.52rem;color:#64748b;flex-shrink:0;transition:transform .22s,background .14s,color .14s;}
+      .v26-ctrig.open .v26-carr{transform:rotate(180deg);background:rgba(56,189,248,0.14);color:#38bdf8;}
 
-      .v26-vbadge{font-size:10px;font-weight:600;padding:2px 9px;border-radius:10px;white-space:nowrap;flex-shrink:0;border:1px solid;}
-      .v26-vnom{flex:1;font-size:0.88rem;font-weight:600;color:#e2e8f0;}
-      .v26-varr{width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:center;font-size:0.58rem;color:#64748b;flex-shrink:0;transition:transform .22s,background .14s,color .14s;}
-      .v26-vtrig.open .v26-varr{transform:rotate(180deg);background:rgba(56,189,248,0.14);color:#38bdf8;}
-
-      /* detalle: display se maneja 100% con JS, sin ninguna regla CSS de display */
-      .v26-vdet{padding:0 18px 16px;animation:v26fi .18s ease both;}
-      @keyframes v26fi{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
-      .v26-vdet-in{border-radius:10px;padding:16px;border:1px solid;background:rgba(0,0,0,0.22);}
-      .v26-vprev{font-size:0.84rem;color:#cbd5e1;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.06);}
-      .v26-vlbl{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#475569;margin-bottom:6px;}
-      .v26-vdosis{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
-      .v26-vdpill{font-size:0.77rem;padding:4px 12px;border-radius:20px;border:1px solid;background:rgba(0,0,0,0.15);white-space:nowrap;}
-      .v26-vnota{font-size:0.79rem;line-height:1.55;padding:10px 13px;border-radius:8px;border-left:3px solid;}
-      .v26-vnota.warn{background:rgba(251,191,36,0.08);border-color:#fbbf24;color:#fde68a;}
-      .v26-vnota.info{background:rgba(56,189,248,0.07);border-color:#38bdf8;color:#bae6fd;}
-      .v26-vnota.ok{background:rgba(52,211,153,0.07);border-color:#34d399;color:#a7f3d0;}
-      .v26-vnota.danger{background:rgba(248,113,113,0.08);border-color:#f87171;color:#fecaca;}
+      /* Detalle */
+      .v26-cdet{padding:0 13px 13px;animation:v26fi .18s ease both;border-top:1px solid rgba(255,255,255,0.05);}
+      @keyframes v26fi{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+      .v26-cdet-in{border-radius:8px;padding:12px;border:1px solid;background:rgba(0,0,0,0.22);margin-top:10px;}
+      .v26-cprev{font-size:0.81rem;color:#cbd5e1;margin-bottom:10px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,0.06);}
+      .v26-clbl{font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#475569;margin-bottom:6px;}
+      .v26-cdosis{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
+      .v26-cdpill{font-size:0.73rem;padding:3px 10px;border-radius:20px;border:1px solid;background:rgba(0,0,0,0.15);white-space:nowrap;}
+      .v26-cnota{font-size:0.76rem;line-height:1.55;padding:8px 11px;border-radius:7px;border-left:3px solid;}
+      .v26-cnota.warn{background:rgba(251,191,36,0.08);border-color:#fbbf24;color:#fde68a;}
+      .v26-cnota.info{background:rgba(56,189,248,0.07);border-color:#38bdf8;color:#bae6fd;}
+      .v26-cnota.ok{background:rgba(52,211,153,0.07);border-color:#34d399;color:#a7f3d0;}
+      .v26-cnota.danger{background:rgba(248,113,113,0.08);border-color:#f87171;color:#fecaca;}
 
       /* Tabla por edad */
       .v26-twrap{overflow-x:auto;border-radius:12px;}
@@ -207,7 +199,7 @@
       .v26-table tbody td:first-child{font-weight:700;color:#e2e8f0;white-space:nowrap;}
 
       /* Intervalos */
-      .v26-int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-bottom:28px;}
+      .v26-int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-bottom:24px;}
       .v26-int-card{border-radius:10px;padding:14px 16px;border:1px solid;}
       .v26-int-card.ok{background:rgba(52,211,153,0.05);border-color:rgba(52,211,153,0.22);}
       .v26-int-card.warn{background:rgba(251,191,36,0.05);border-color:rgba(251,191,36,0.22);}
@@ -218,51 +210,73 @@
       .v26-int-card.ok .v26-int-combo{color:#34d399;}
       .v26-int-card.warn .v26-int-combo{color:#fbbf24;}
       .v26-int-regla{font-size:0.77rem;line-height:1.55;color:#94a3b8;}
-
-      /* Sección título */
       .v26-sec-tit{font-size:0.71rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#64748b;display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.07);}
-
-      /* Mnemotecnia */
       .v26-mnemo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;}
       .v26-mnemo-card{border-radius:10px;padding:14px 16px;background:rgba(251,191,36,0.04);border:1px solid rgba(251,191,36,0.15);}
       .v26-mnemo-tit{font-size:0.81rem;font-weight:700;color:#fcd34d;margin-bottom:7px;}
       .v26-mnemo-txt{font-size:0.77rem;color:#94a3b8;line-height:1.6;white-space:pre-line;}
 
-      /* Botón admin editar */
-      .v26-bedit{display:none;margin-top:10px;padding:4px 11px;border-radius:7px;border:1px solid rgba(251,191,36,0.3);background:rgba(251,191,36,0.06);color:#fbbf24;font-size:0.74rem;cursor:pointer;transition:all .13s;font-family:inherit;}
-      .v26-bedit.v{display:inline-block;}
-      .v26-bedit:hover{background:rgba(251,191,36,0.14);}
+      /* Botones admin */
+      .v26-adm-bar{display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap;}
+      .v26-abtn{display:inline-flex;align-items:center;gap:4px;padding:4px 11px;border-radius:7px;font-size:0.71rem;font-weight:600;cursor:pointer;transition:all .13s;font-family:inherit;border:1px solid;line-height:1.4;}
+      .v26-abtn-edit{background:rgba(56,189,248,0.08);border-color:rgba(56,189,248,0.3);color:#38bdf8;}
+      .v26-abtn-edit:hover{background:rgba(56,189,248,0.2);}
+      .v26-abtn-del{background:rgba(248,113,113,0.07);border-color:rgba(248,113,113,0.28);color:#f87171;}
+      .v26-abtn-del:hover{background:rgba(248,113,113,0.2);}
+      .v26-abtn-add{background:rgba(52,211,153,0.07);border-color:rgba(52,211,153,0.28);color:#34d399;}
+      .v26-abtn-add:hover{background:rgba(52,211,153,0.2);}
+      .v26-abtn-warn{background:rgba(251,191,36,0.07);border-color:rgba(251,191,36,0.28);color:#fbbf24;}
+      .v26-abtn-warn:hover{background:rgba(251,191,36,0.2);}
 
-      /* Botón flotante volver al cuestionario */
+      /* Botón volver */
       #vac2026-btn-volver-quiz{display:none;position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:9900;background:linear-gradient(135deg,#0891b2,#0d7490);color:#fff;border:none;border-radius:24px;padding:12px 26px;font-size:0.88rem;font-weight:600;cursor:pointer;box-shadow:0 4px 22px rgba(8,145,178,0.45);transition:all .18s;white-space:nowrap;font-family:inherit;}
       #vac2026-btn-volver-quiz.vis{display:block;}
-      #vac2026-btn-volver-quiz:hover{background:linear-gradient(135deg,#0d7490,#0e6680);box-shadow:0 6px 28px rgba(8,145,178,0.6);transform:translateX(-50%) translateY(-2px);}
-
-      /* Botón VER MÁS SOBRE VACUNAS en explicaciones */
+      #vac2026-btn-volver-quiz:hover{background:linear-gradient(135deg,#0d7490,#0e6680);transform:translateX(-50%) translateY(-2px);}
       .vac2026-ver-mas-btn{display:inline-flex;align-items:center;gap:7px;margin-top:14px;padding:9px 20px;border-radius:10px;border:1.5px solid rgba(56,189,248,0.45);background:rgba(56,189,248,0.08);color:#38bdf8;font-size:0.85rem;font-weight:600;cursor:pointer;transition:all .16s;white-space:nowrap;font-family:inherit;text-decoration:none;}
-      .vac2026-ver-mas-btn:hover{background:rgba(56,189,248,0.18);border-color:rgba(56,189,248,0.7);transform:translateY(-1px);box-shadow:0 4px 14px rgba(56,189,248,0.2);}
-
-      /* Toolbar editor */
-      .vac2026-inject-toolbar-btn{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:26px;background:rgba(56,189,248,0.08);border:1.5px solid rgba(56,189,248,0.3);color:#38bdf8;border-radius:5px;font-size:0.82rem;cursor:pointer;transition:background .14s,border-color .14s;padding:0 6px;line-height:1;white-space:nowrap;flex-shrink:0;font-family:inherit;}
-      .vac2026-inject-toolbar-btn:hover{background:rgba(56,189,248,0.18);border-color:rgba(56,189,248,0.6);}
+      .vac2026-ver-mas-btn:hover{background:rgba(56,189,248,0.18);border-color:rgba(56,189,248,0.7);}
+      .vac2026-inject-toolbar-btn{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:26px;background:rgba(56,189,248,0.08);border:1.5px solid rgba(56,189,248,0.3);color:#38bdf8;border-radius:5px;font-size:0.82rem;cursor:pointer;padding:0 6px;white-space:nowrap;flex-shrink:0;font-family:inherit;}
 
       /* Modal */
-      .v26-mover{position:fixed;inset:0;z-index:99999;background:rgba(5,10,24,0.9);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;}
-      .v26-modal{background:#0d1f35;border:1px solid rgba(56,189,248,0.22);border-radius:14px;padding:24px;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;}
-      .v26-modal h3{color:#38bdf8;font-size:1rem;margin:0 0 16px;}
-      .v26-modal label{display:block;font-size:0.74rem;color:#64748b;margin-bottom:4px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;}
-      .v26-modal textarea,.v26-modal input[type=text]{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.13);border-radius:8px;color:#e2e8f0;font-size:0.81rem;padding:8px 12px;margin-bottom:12px;resize:vertical;font-family:inherit;box-sizing:border-box;line-height:1.5;}
-      .v26-modal textarea:focus,.v26-modal input[type=text]:focus{outline:none;border-color:rgba(56,189,248,0.5);}
-      .v26-mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:4px;}
-      .v26-mcancel{padding:8px 18px;border-radius:8px;border:1px solid rgba(255,255,255,0.13);background:transparent;color:#94a3b8;font-size:0.82rem;cursor:pointer;font-family:inherit;}
+      .v26-mover{position:fixed;inset:0;z-index:99999;background:rgba(5,10,24,0.93);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;padding:20px;}
+      .v26-modal{background:#0b1c30;border:1px solid rgba(56,189,248,0.2);border-radius:16px;width:100%;max-width:560px;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.65);}
+      .v26-modal-hdr{display:flex;align-items:center;gap:10px;padding:17px 22px 13px;border-bottom:1px solid rgba(255,255,255,0.07);}
+      .v26-modal-hdr h3{color:#38bdf8;font-size:0.93rem;font-weight:700;margin:0;flex:1;}
+      .v26-mclose{background:rgba(255,255,255,0.06);border:none;color:#64748b;width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:0.9rem;display:flex;align-items:center;justify-content:center;transition:all .13s;flex-shrink:0;}
+      .v26-mclose:hover{background:rgba(255,255,255,0.13);color:#e2e8f0;}
+      .v26-modal-body{padding:18px 22px;overflow-y:auto;flex:1;}
+      .v26-modal-ftr{padding:13px 22px;border-top:1px solid rgba(255,255,255,0.07);display:flex;gap:8px;justify-content:flex-end;}
+      .v26-fgroup{margin-bottom:13px;}
+      .v26-flbl{display:block;font-size:0.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#475569;margin-bottom:5px;}
+      .v26-finput,.v26-ftextarea,.v26-fselect{width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.11);border-radius:9px;color:#e2e8f0;font-size:0.82rem;padding:9px 12px;font-family:inherit;box-sizing:border-box;line-height:1.5;transition:border-color .14s;}
+      .v26-finput:focus,.v26-ftextarea:focus,.v26-fselect:focus{outline:none;border-color:rgba(56,189,248,0.5);background:rgba(56,189,248,0.04);}
+      .v26-ftextarea{resize:vertical;min-height:68px;}
+      .v26-fselect{cursor:pointer;}
+      .v26-dosis-editor{display:flex;flex-direction:column;gap:6px;}
+      .v26-dosis-row{display:flex;align-items:center;gap:6px;}
+      .v26-dosis-row .v26-finput{flex:1;}
+      .v26-dosis-del{width:28px;height:28px;border-radius:7px;background:rgba(248,113,113,0.1);border:1px solid rgba(248,113,113,0.24);color:#f87171;cursor:pointer;font-size:0.8rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .13s;}
+      .v26-dosis-del:hover{background:rgba(248,113,113,0.24);}
+      .v26-dosis-add{display:inline-flex;align-items:center;gap:5px;margin-top:5px;padding:5px 13px;border-radius:8px;background:rgba(52,211,153,0.07);border:1px dashed rgba(52,211,153,0.35);color:#34d399;font-size:0.74rem;font-weight:600;cursor:pointer;transition:all .13s;font-family:inherit;}
+      .v26-dosis-add:hover{background:rgba(52,211,153,0.17);}
+      .v26-mcancel{padding:8px 18px;border-radius:8px;border:1px solid rgba(255,255,255,0.13);background:transparent;color:#94a3b8;font-size:0.82rem;cursor:pointer;font-family:inherit;transition:all .13s;}
       .v26-mcancel:hover{background:rgba(255,255,255,0.07);}
-      .v26-msave{padding:8px 18px;border-radius:8px;border:1px solid rgba(52,211,153,0.4);background:rgba(52,211,153,0.1);color:#34d399;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;}
-      .v26-msave:hover{background:rgba(52,211,153,0.2);}
+      .v26-msave{padding:8px 22px;border-radius:8px;border:1px solid rgba(52,211,153,0.4);background:rgba(52,211,153,0.1);color:#34d399;font-size:0.82rem;font-weight:700;cursor:pointer;font-family:inherit;transition:all .13s;}
+      .v26-msave:hover{background:rgba(52,211,153,0.22);}
 
-      @media(max-width:600px){
-        .v26-body{padding:14px;}
-        .v26h{padding:0 14px;}
-        .v26-grupo-hdr,.v26-vtrig,.v26-vdet{padding-left:14px;padding-right:14px;}
+      /* Toast */
+      .v26-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(14px);z-index:999999;background:#0d2444;border:1px solid rgba(52,211,153,0.4);color:#34d399;padding:8px 20px;border-radius:24px;font-size:0.79rem;font-weight:600;font-family:inherit;opacity:0;transition:all .28s;pointer-events:none;white-space:nowrap;}
+      .v26-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+      @media(max-width:780px){
+        .v26-grid{grid-template-columns:repeat(2,1fr);}
+        .v26-card:nth-child(3n){border-right:1px solid rgba(255,255,255,0.06);}
+        .v26-card:nth-child(2n){border-right:none;}
+      }
+      @media(max-width:500px){
+        .v26-grid{grid-template-columns:1fr;}
+        .v26-card{border-right:none!important;}
+        .v26-body{padding:12px;}
+        .v26h{padding:0 12px;}
       }
     `;
     document.head.appendChild(s);
@@ -292,7 +306,8 @@
         <div id="v26-t-c"></div>
         <div id="v26-t-e" style="display:none"></div>
         <div id="v26-t-i" style="display:none"></div>
-      </div>`;
+      </div>
+      <div class="v26-toast" id="v26-toast"></div>`;
     document.body.appendChild(p);
     if(!document.getElementById('vac2026-btn-volver-quiz')){
       const b=document.createElement('button');
@@ -303,8 +318,16 @@
     }
   }
 
+  // Toast
+  function toast(msg){
+    const t=document.getElementById('v26-toast');
+    if(!t)return;
+    t.textContent=msg; t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'),2200);
+  }
+
   // ════════════════════════════════════════════════════════════════
-  // RENDER CLASIFICACIÓN
+  // RENDER CLASIFICACIÓN — GRID 3 COLUMNAS
   // ════════════════════════════════════════════════════════════════
   function renderClasificacion(){
     const data=cargarDatos();
@@ -312,7 +335,6 @@
     if(!cont)return;
     const adm=esAdmin();
 
-    // leyenda
     let html='<div class="v26-legend">';
     data.clasificacion.forEach(sec=>{
       const m=meta(sec.tipo);
@@ -324,39 +346,46 @@
       const m=meta(sec.tipo);
       const col=sec.color||m.color;
       const bg=m.bg; const brd=m.border;
-      html+=`<div class="v26-grupo" style="border-color:${brd}">
-        <div class="v26-grupo-hdr" style="background:${bg}">
-          <span class="v26-grupo-icon">${sec.icon||m.icon}</span>
-          <span class="v26-grupo-tit" style="color:${col}">${sec.tipo}</span>
-          <span class="v26-grupo-cnt">${sec.vacunas.length} vacuna${sec.vacunas.length!==1?'s':''}</span>
-        </div>
-        <div class="v26-lista">`;
+
+      html+=`<div class="v26-grupo-wrap">`;
+      html+=`<div class="v26-grupo-hdr" style="background:${bg};border-color:${brd}">
+        <span class="v26-grupo-icon">${sec.icon||m.icon}</span>
+        <span class="v26-grupo-tit" style="color:${col}">${sec.tipo}</span>
+        <span class="v26-grupo-cnt">${sec.vacunas.length} vacuna${sec.vacunas.length!==1?'s':''}</span>
+        ${adm?`<button class="v26-abtn v26-abtn-add" onclick="window._v26AddVac(${si})">＋ Agregar vacuna</button>`:''}
+      </div>`;
+      html+=`<div class="v26-grid">`;
 
       sec.vacunas.forEach((vac,vi)=>{
         const nicon={warn:'⚠️',info:'ℹ️',ok:'✅',danger:'🔴'}[vac.notaTipo]||'';
         html+=`
-          <div class="v26-vrow">
-            <div class="v26-vtrig" id="vt-${si}-${vi}"
+          <div class="v26-card" id="vc-${si}-${vi}">
+            <div class="v26-ctrig" id="ct-${si}-${vi}"
                  onclick="window._v26Tog(${si},${vi})"
                  role="button" tabindex="0"
                  onkeydown="if(event.key==='Enter'||event.key===' ')window._v26Tog(${si},${vi})">
-              <span class="v26-vbadge" style="color:${col};background:${bg};border-color:${brd}">${vac.badge}</span>
-              <span class="v26-vnom">${vac.nombre}</span>
-              <span class="v26-varr">▾</span>
+              <span class="v26-cbadge" style="color:${col};background:${bg};border-color:${brd}">${vac.badge}</span>
+              <span class="v26-cnom">${vac.nombre}</span>
+              <span class="v26-carr">▾</span>
             </div>
-            <div class="v26-vdet" id="vd-${si}-${vi}" style="display:none">
-              <div class="v26-vdet-in" style="border-color:${brd}">
-                <div class="v26-vprev">${vac.previene}</div>
-                <div class="v26-vlbl">Calendario de dosis</div>
-                <div class="v26-vdosis">${vac.dosis.map(d=>`<span class="v26-vdpill" style="color:${col};border-color:${brd}">${d}</span>`).join('')}</div>
-                <div class="v26-vnota ${vac.notaTipo}"><span style="margin-right:5px">${nicon}</span>${vac.nota}</div>
-                ${adm?`<button class="v26-bedit v" onclick="window._v26EV(${si},${vi})">✏️ Editar</button>`:''}
+            <div class="v26-cdet" id="cd-${si}-${vi}" style="display:none">
+              <div class="v26-cdet-in" style="border-color:${brd}">
+                <div class="v26-cprev">${vac.previene}</div>
+                <div class="v26-clbl">Calendario de dosis</div>
+                <div class="v26-cdosis">${vac.dosis.map(d=>`<span class="v26-cdpill" style="color:${col};border-color:${brd}">${d}</span>`).join('')}</div>
+                <div class="v26-cnota ${vac.notaTipo}"><span style="margin-right:5px">${nicon}</span>${vac.nota}</div>
+                ${adm?`<div class="v26-adm-bar">
+                  <button class="v26-abtn v26-abtn-edit" onclick="window._v26EditVac(${si},${vi})">✏️ Editar</button>
+                  <button class="v26-abtn v26-abtn-del"  onclick="window._v26DelVac(${si},${vi})">🗑 Eliminar</button>
+                </div>`:''}
               </div>
             </div>
           </div>`;
       });
-      html+='</div></div>';
+
+      html+=`</div></div>`;
     });
+
     cont.innerHTML=html;
   }
 
@@ -368,10 +397,22 @@
     const cont=document.getElementById('v26-t-e');
     if(!cont)return;
     const adm=esAdmin();
-    let html=`<div class="v26-twrap"><table class="v26-table"><thead><tr><th>Edad / Grupo</th><th>Vacunas</th><th>Nota</th></tr></thead><tbody>`;
-    data.edadTabla.forEach(r=>{ html+=`<tr><td>${r.edad}</td><td>${r.vacunas}</td><td>${r.nota}</td></tr>`; });
+    let html=`<div class="v26-twrap"><table class="v26-table"><thead><tr><th>Edad / Grupo</th><th>Vacunas</th><th>Nota</th>`;
+    if(adm)html+=`<th style="width:54px;text-align:center"></th>`;
+    html+=`</tr></thead><tbody>`;
+    data.edadTabla.forEach((r,i)=>{
+      html+=`<tr><td>${r.edad}</td><td>${r.vacunas}</td><td>${r.nota}</td>`;
+      if(adm)html+=`<td style="text-align:center;white-space:nowrap">
+        <button class="v26-abtn v26-abtn-edit" style="padding:3px 8px" onclick="window._v26EditEdad(${i})">✏️</button>
+        <button class="v26-abtn v26-abtn-del"  style="padding:3px 8px;margin-top:3px" onclick="window._v26DelEdad(${i})">🗑</button>
+      </td>`;
+      html+=`</tr>`;
+    });
     html+=`</tbody></table></div>`;
-    if(adm)html+=`<button class="v26-bedit v" style="margin-top:14px" onclick="window._v26EE()">✏️ Editar tabla (JSON)</button>`;
+    if(adm)html+=`<div class="v26-adm-bar" style="margin-top:12px">
+      <button class="v26-abtn v26-abtn-add" onclick="window._v26AddEdad()">＋ Agregar fila</button>
+      <button class="v26-abtn v26-abtn-warn" onclick="window._v26EE()">📋 Editar JSON</button>
+    </div>`;
     cont.innerHTML=html;
   }
 
@@ -384,107 +425,280 @@
     if(!cont)return;
     const adm=esAdmin();
     let html=`<div class="v26-sec-tit">⏱ Regla de oro — intervalos entre vacunas</div><div class="v26-int-grid">`;
-    data.intervalos.forEach(r=>{
+    data.intervalos.forEach((r,i)=>{
       const t=r.tipo==='ok'?'ok':'warn';
-      html+=`<div class="v26-int-card ${t}"><div class="v26-int-badge">${t==='ok'?'✅ COMPATIBLE':'⚠️ ATENCIÓN'}</div><div class="v26-int-combo">${r.combinacion}</div><div class="v26-int-regla">${r.regla}</div></div>`;
+      html+=`<div class="v26-int-card ${t}">
+        <div class="v26-int-badge">${t==='ok'?'✅ COMPATIBLE':'⚠️ ATENCIÓN'}</div>
+        <div class="v26-int-combo">${r.combinacion}</div>
+        <div class="v26-int-regla">${r.regla}</div>
+        ${adm?`<div class="v26-adm-bar" style="margin-top:8px">
+          <button class="v26-abtn v26-abtn-edit" onclick="window._v26EditInt(${i})">✏️</button>
+          <button class="v26-abtn v26-abtn-del"  onclick="window._v26DelInt(${i})">🗑</button>
+        </div>`:''}
+      </div>`;
     });
-    html+='</div>';
-    if(adm)html+=`<button class="v26-bedit v" style="margin-bottom:24px" onclick="window._v26EI()">✏️ Editar intervalos (JSON)</button>`;
+    html+=`</div>`;
+    if(adm)html+=`<div class="v26-adm-bar" style="margin-bottom:24px">
+      <button class="v26-abtn v26-abtn-add" onclick="window._v26AddInt()">＋ Agregar intervalo</button>
+    </div>`;
     html+=`<div class="v26-sec-tit">🧠 Reglas mnemotécnicas para estudiar</div><div class="v26-mnemo-grid">`;
     data.mnemotecnia.forEach((m,i)=>{
-      html+=`<div class="v26-mnemo-card"><div class="v26-mnemo-tit">${m.titulo}</div><div class="v26-mnemo-txt">${m.texto}</div>${adm?`<button class="v26-bedit v" onclick="window._v26EM(${i})">✏️ Editar</button>`:''}</div>`;
+      html+=`<div class="v26-mnemo-card">
+        <div class="v26-mnemo-tit">${m.titulo}</div>
+        <div class="v26-mnemo-txt">${m.texto}</div>
+        ${adm?`<div class="v26-adm-bar" style="margin-top:8px">
+          <button class="v26-abtn v26-abtn-edit" onclick="window._v26EditMnemo(${i})">✏️</button>
+          <button class="v26-abtn v26-abtn-del"  onclick="window._v26DelMnemo(${i})">🗑</button>
+        </div>`:''}
+      </div>`;
     });
-    html+='</div>';
+    html+=`</div>`;
+    if(adm)html+=`<div class="v26-adm-bar" style="margin-top:12px">
+      <button class="v26-abtn v26-abtn-add" onclick="window._v26AddMnemo()">＋ Agregar mnemotecnia</button>
+    </div>`;
     cont.innerHTML=html;
   }
 
   function renderTodo(){ renderClasificacion(); renderEdad(); renderIntervalos(); }
 
   // ════════════════════════════════════════════════════════════════
-  // UI GLOBAL
+  // TOGGLE — independiente por tarjeta
+  // ════════════════════════════════════════════════════════════════
+  window._v26Tog=function(si,vi){
+    const det=document.getElementById(`cd-${si}-${vi}`);
+    const trig=document.getElementById(`ct-${si}-${vi}`);
+    if(!det||!trig)return;
+    const open=det.style.display==='block';
+    if(open){ det.style.display='none'; trig.classList.remove('open'); }
+    else { det.style.display='block'; trig.classList.add('open'); setTimeout(()=>trig.scrollIntoView({behavior:'smooth',block:'nearest'}),80); }
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  // TABS
   // ════════════════════════════════════════════════════════════════
   window._v26Tab=function(btn,tid){
     document.querySelectorAll('.v26-tab').forEach(t=>t.classList.remove('on'));
     btn.classList.add('on');
     const map={clasificacion:'v26-t-c',edad:'v26-t-e',intervalos:'v26-t-i'};
-    Object.keys(map).forEach(k=>{
-      const el=document.getElementById(map[k]);
-      if(el)el.style.display=k===tid?'':'none';
-    });
+    Object.keys(map).forEach(k=>{ const el=document.getElementById(map[k]); if(el)el.style.display=k===tid?'':'none'; });
   };
 
-  // ── Toggle acordeón — múltiples filas abiertas simultáneamente ──
-  // Cada fila opera de forma independiente: abre o cierra solo su
-  // propio detalle, sin afectar al resto del panel.
-  window._v26Tog=function(si,vi){
-    const det=document.getElementById(`vd-${si}-${vi}`);
-    const trig=document.getElementById(`vt-${si}-${vi}`);
-    if(!det||!trig)return;
+  // ════════════════════════════════════════════════════════════════
+  // MODAL BASE
+  // ════════════════════════════════════════════════════════════════
+  function abrirModal(titulo, buildBody, onGuardar){
+    const ov=document.createElement('div');
+    ov.className='v26-mover';
+    ov.innerHTML=`<div class="v26-modal">
+      <div class="v26-modal-hdr"><h3>${titulo}</h3><button class="v26-mclose">✕</button></div>
+      <div class="v26-modal-body" id="v26mb"></div>
+      <div class="v26-modal-ftr"><button class="v26-mcancel">Cancelar</button><button class="v26-msave">💾 Guardar</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    const body=ov.querySelector('#v26mb');
+    buildBody(body);
+    ov.querySelector('.v26-mclose').onclick=()=>ov.remove();
+    ov.querySelector('.v26-mcancel').onclick=()=>ov.remove();
+    ov.querySelector('.v26-msave').onclick=()=>onGuardar(ov,body);
+    ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+    return ov;
+  }
 
-    const yaAbierta=det.style.display==='block';
+  function campo(label,id,value,tipo){
+    if(tipo==='textarea')
+      return `<div class="v26-fgroup"><label class="v26-flbl">${label}</label><textarea class="v26-ftextarea" id="${id}">${(value||'').replace(/</g,'&lt;')}</textarea></div>`;
+    if(tipo==='nota-tipo')
+      return `<div class="v26-fgroup"><label class="v26-flbl">${label}</label><select class="v26-fselect" id="${id}">
+        <option value="info"${value==='info'?' selected':''}>ℹ️ Info (azul)</option>
+        <option value="ok"${value==='ok'?' selected':''}>✅ Ok (verde)</option>
+        <option value="warn"${value==='warn'?' selected':''}>⚠️ Advertencia (amarillo)</option>
+        <option value="danger"${value==='danger'?' selected':''}>🔴 Peligro (rojo)</option>
+      </select></div>`;
+    if(tipo==='int-tipo')
+      return `<div class="v26-fgroup"><label class="v26-flbl">${label}</label><select class="v26-fselect" id="${id}">
+        <option value="ok"${value==='ok'?' selected':''}>✅ Compatible</option>
+        <option value="warn"${value==='warn'?' selected':''}>⚠️ Atención</option>
+      </select></div>`;
+    return `<div class="v26-fgroup"><label class="v26-flbl">${label}</label><input class="v26-finput" type="text" id="${id}" value="${(value||'').replace(/"/g,'&quot;').replace(/</g,'&lt;')}"></div>`;
+  }
 
-    if(yaAbierta){
-      // Cerrar solo esta fila
-      det.style.display='none';
-      trig.classList.remove('open');
-    } else {
-      // Abrir solo esta fila
-      det.style.display='block';
-      trig.classList.add('open');
-      setTimeout(()=>{ trig.scrollIntoView({behavior:'smooth',block:'nearest'}); },80);
+  function val(ctx,id){ const el=ctx.querySelector?ctx.querySelector('#'+id):document.getElementById(id); return el?el.value.trim():''; }
+
+  function buildDosisEditor(body,dosis){
+    const wrap=document.createElement('div');
+    wrap.className='v26-fgroup';
+    wrap.innerHTML=`<label class="v26-flbl">Dosis / calendario (pills)</label>
+      <div class="v26-dosis-editor" id="dosis-list"></div>
+      <button type="button" class="v26-dosis-add" id="dosis-add-btn">＋ Agregar dosis</button>`;
+    body.appendChild(wrap);
+    const list=wrap.querySelector('#dosis-list');
+    function addRow(txt){
+      const row=document.createElement('div');
+      row.className='v26-dosis-row';
+      row.innerHTML=`<input class="v26-finput dosis-inp" type="text" value="${(txt||'').replace(/"/g,'&quot;')}" placeholder="Ej: 1ª dosis: 12 meses">
+        <button type="button" class="v26-dosis-del" title="Eliminar dosis">✕</button>`;
+      row.querySelector('.v26-dosis-del').onclick=()=>row.remove();
+      list.appendChild(row);
     }
-  };
+    (dosis||[]).forEach(d=>addRow(d));
+    wrap.querySelector('#dosis-add-btn').onclick=()=>addRow('');
+  }
+  function getDosis(body){ return Array.from(body.querySelectorAll('.dosis-inp')).map(i=>i.value.trim()).filter(Boolean); }
 
-  // ── Edición admin ────────────────────────────────────────────────
-  window._v26EV=function(si,vi){
+  function modalConfirmDelete(titulo,desc,onConfirm){
+    const ov=abrirModal(titulo,
+      function(body){ body.innerHTML=`<p style="color:#94a3b8;font-size:0.84rem;line-height:1.6">${desc}<br><span style="color:#f87171;font-size:0.77rem;margin-top:6px;display:block">Esta acción no se puede deshacer.</span></p>`; },
+      function(o){ onConfirm(); o.remove(); }
+    );
+    setTimeout(()=>{
+      const b=ov.querySelector('.v26-msave');
+      if(b){b.textContent='🗑 Sí, eliminar';b.style.background='rgba(248,113,113,0.15)';b.style.borderColor='rgba(248,113,113,0.5)';b.style.color='#f87171';}
+    },0);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // ADMIN — VACUNAS
+  // ════════════════════════════════════════════════════════════════
+  window._v26EditVac=function(si,vi){
     const data=cargarDatos(); const vac=data.clasificacion[si].vacunas[vi];
-    abrirModal('Editar vacuna',[
-      {label:'Nombre',key:'nombre',val:vac.nombre,type:'text'},
-      {label:'Badge',key:'badge',val:vac.badge,type:'text'},
-      {label:'Previene',key:'previene',val:vac.previene,type:'text'},
-      {label:'Dosis (una por línea)',key:'dosis',val:vac.dosis.join('\n'),type:'textarea',rows:4},
-      {label:'Nota',key:'nota',val:vac.nota,type:'textarea',rows:3},
-      {label:'Tipo (warn/info/ok/danger)',key:'notaTipo',val:vac.notaTipo,type:'text'}
-    ],function(v){
-      vac.nombre=v.nombre; vac.badge=v.badge; vac.previene=v.previene;
-      vac.dosis=v.dosis.split('\n').map(s=>s.trim()).filter(Boolean);
-      vac.nota=v.nota; vac.notaTipo=v.notaTipo;
-      guardarDatos(data); renderClasificacion();
+    abrirModal('✏️ Editar vacuna', function(body){
+      body.innerHTML=campo('Nombre','vnom',vac.nombre)+campo('Badge (tipo)','vbadge',vac.badge)+campo('Previene','vprev',vac.previene);
+      buildDosisEditor(body,vac.dosis);
+      const extra=document.createElement('div');
+      extra.innerHTML=campo('Nota / advertencia','vnota',vac.nota,'textarea')+campo('Color de nota','vntipo',vac.notaTipo,'nota-tipo');
+      body.appendChild(extra);
+    }, function(ov,body){
+      vac.nombre=val(ov,'vnom'); vac.badge=val(ov,'vbadge'); vac.previene=val(ov,'vprev');
+      vac.dosis=getDosis(body); vac.nota=val(ov,'vnota'); vac.notaTipo=val(ov,'vntipo');
+      guardarDatos(data); renderClasificacion(); ov.remove(); toast('✅ Vacuna actualizada');
     });
   };
+
+  window._v26AddVac=function(si){
+    const data=cargarDatos();
+    abrirModal('＋ Nueva vacuna', function(body){
+      body.innerHTML=campo('Nombre','vnom','')+campo('Badge (tipo)','vbadge','')+campo('Previene','vprev','');
+      buildDosisEditor(body,[]);
+      const extra=document.createElement('div');
+      extra.innerHTML=campo('Nota / advertencia','vnota','','textarea')+campo('Color de nota','vntipo','info','nota-tipo');
+      body.appendChild(extra);
+    }, function(ov,body){
+      const n=val(ov,'vnom'); if(!n){alert('El nombre es obligatorio');return;}
+      data.clasificacion[si].vacunas.push({nombre:n,badge:val(ov,'vbadge'),previene:val(ov,'vprev'),dosis:getDosis(body),nota:val(ov,'vnota'),notaTipo:val(ov,'vntipo')});
+      guardarDatos(data); renderClasificacion(); ov.remove(); toast('✅ Vacuna agregada');
+    });
+  };
+
+  window._v26DelVac=function(si,vi){
+    const data=cargarDatos(); const nombre=data.clasificacion[si].vacunas[vi].nombre;
+    modalConfirmDelete('🗑 Eliminar vacuna',`¿Eliminar <strong style="color:#e2e8f0">${nombre}</strong>?`,function(){
+      data.clasificacion[si].vacunas.splice(vi,1); guardarDatos(data); renderClasificacion(); toast('🗑 Vacuna eliminada');
+    });
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  // ADMIN — TABLA EDAD
+  // ════════════════════════════════════════════════════════════════
+  window._v26EditEdad=function(i){
+    const data=cargarDatos(); const r=data.edadTabla[i];
+    abrirModal('✏️ Editar fila', function(body){
+      body.innerHTML=campo('Edad / Grupo','edad',r.edad)+campo('Vacunas','vacunas',r.vacunas)+campo('Nota','nota',r.nota);
+    }, function(ov){
+      data.edadTabla[i]={edad:val(ov,'edad'),vacunas:val(ov,'vacunas'),nota:val(ov,'nota')};
+      guardarDatos(data); renderEdad(); ov.remove(); toast('✅ Fila actualizada');
+    });
+  };
+
+  window._v26AddEdad=function(){
+    const data=cargarDatos();
+    abrirModal('＋ Nueva fila', function(body){
+      body.innerHTML=campo('Edad / Grupo','edad','')+campo('Vacunas','vacunas','')+campo('Nota','nota','—');
+    }, function(ov){
+      const e=val(ov,'edad'); if(!e){alert('La edad es obligatoria');return;}
+      data.edadTabla.push({edad:e,vacunas:val(ov,'vacunas'),nota:val(ov,'nota')});
+      guardarDatos(data); renderEdad(); ov.remove(); toast('✅ Fila agregada');
+    });
+  };
+
+  window._v26DelEdad=function(i){
+    const data=cargarDatos();
+    modalConfirmDelete('🗑 Eliminar fila',`¿Eliminar la fila <strong style="color:#e2e8f0">${data.edadTabla[i].edad}</strong>?`,function(){
+      data.edadTabla.splice(i,1); guardarDatos(data); renderEdad(); toast('🗑 Fila eliminada');
+    });
+  };
+
   window._v26EE=function(){
     const data=cargarDatos();
-    abrirModal('Editar tabla por edad (JSON)',[{label:'Array JSON',key:'json',val:JSON.stringify(data.edadTabla,null,2),type:'textarea',rows:18}],
-      function(v){try{data.edadTabla=JSON.parse(v.json);guardarDatos(data);renderEdad();}catch(e){alert('JSON inválido: '+e.message);}});
-  };
-  window._v26EI=function(){
-    const data=cargarDatos();
-    abrirModal('Editar intervalos (JSON)',[{label:'Array JSON',key:'json',val:JSON.stringify(data.intervalos,null,2),type:'textarea',rows:18}],
-      function(v){try{data.intervalos=JSON.parse(v.json);guardarDatos(data);renderIntervalos();}catch(e){alert('JSON inválido: '+e.message);}});
-  };
-  window._v26EM=function(i){
-    const data=cargarDatos(); const m=data.mnemotecnia[i];
-    abrirModal('Editar mnemotecnia',[
-      {label:'Título',key:'titulo',val:m.titulo,type:'text'},
-      {label:'Texto',key:'texto',val:m.texto,type:'textarea',rows:4}
-    ],function(v){data.mnemotecnia[i].titulo=v.titulo;data.mnemotecnia[i].texto=v.texto;guardarDatos(data);renderIntervalos();});
+    abrirModal('📋 Editar tabla — JSON', function(body){
+      body.innerHTML=campo('Array JSON','json',JSON.stringify(data.edadTabla,null,2),'textarea');
+      body.querySelector('#json').style.minHeight='260px';
+    }, function(ov){
+      try{data.edadTabla=JSON.parse(val(ov,'json'));guardarDatos(data);renderEdad();ov.remove();toast('✅ Tabla actualizada');}
+      catch(e){alert('JSON inválido: '+e.message);}
+    });
   };
 
-  function abrirModal(titulo,campos,onGuardar){
-    const ov=document.createElement('div'); ov.className='v26-mover';
-    let fh='';
-    campos.forEach(c=>{
-      if(c.type==='textarea')fh+=`<label>${c.label}</label><textarea rows="${c.rows||4}" data-key="${c.key}">${c.val.replace(/</g,'&lt;')}</textarea>`;
-      else fh+=`<label>${c.label}</label><input type="text" data-key="${c.key}" value="${c.val.replace(/"/g,'&quot;').replace(/</g,'&lt;')}">`;
+  // ════════════════════════════════════════════════════════════════
+  // ADMIN — INTERVALOS
+  // ════════════════════════════════════════════════════════════════
+  window._v26EditInt=function(i){
+    const data=cargarDatos(); const r=data.intervalos[i];
+    abrirModal('✏️ Editar intervalo', function(body){
+      body.innerHTML=campo('Combinación','combo',r.combinacion)+campo('Regla','regla',r.regla,'textarea')+campo('Tipo','tipo',r.tipo,'int-tipo');
+    }, function(ov){
+      data.intervalos[i]={combinacion:val(ov,'combo'),regla:val(ov,'regla'),tipo:val(ov,'tipo')};
+      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Intervalo actualizado');
     });
-    ov.innerHTML=`<div class="v26-modal"><h3>✏️ ${titulo}</h3>${fh}<div class="v26-mbtns"><button class="v26-mcancel">Cancelar</button><button class="v26-msave">💾 Guardar</button></div></div>`;
-    document.body.appendChild(ov);
-    ov.querySelector('.v26-mcancel').onclick=()=>ov.remove();
-    ov.querySelector('.v26-msave').onclick=()=>{
-      const vals={}; ov.querySelectorAll('[data-key]').forEach(el=>{vals[el.dataset.key]=el.value;}); onGuardar(vals); ov.remove();
-    };
-    ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
-  }
+  };
+
+  window._v26AddInt=function(){
+    const data=cargarDatos();
+    abrirModal('＋ Nuevo intervalo', function(body){
+      body.innerHTML=campo('Combinación','combo','')+campo('Regla','regla','','textarea')+campo('Tipo','tipo','ok','int-tipo');
+    }, function(ov){
+      const c=val(ov,'combo'); if(!c){alert('La combinación es obligatoria');return;}
+      data.intervalos.push({combinacion:c,regla:val(ov,'regla'),tipo:val(ov,'tipo')});
+      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Intervalo agregado');
+    });
+  };
+
+  window._v26DelInt=function(i){
+    const data=cargarDatos();
+    modalConfirmDelete('🗑 Eliminar intervalo',`¿Eliminar <strong style="color:#e2e8f0">${data.intervalos[i].combinacion}</strong>?`,function(){
+      data.intervalos.splice(i,1); guardarDatos(data); renderIntervalos(); toast('🗑 Eliminado');
+    });
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  // ADMIN — MNEMOTECNIA
+  // ════════════════════════════════════════════════════════════════
+  window._v26EditMnemo=function(i){
+    const data=cargarDatos(); const m=data.mnemotecnia[i];
+    abrirModal('✏️ Editar mnemotecnia', function(body){
+      body.innerHTML=campo('Título','titulo',m.titulo)+campo('Texto','texto',m.texto,'textarea');
+    }, function(ov){
+      data.mnemotecnia[i]={titulo:val(ov,'titulo'),texto:val(ov,'texto')};
+      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Actualizado');
+    });
+  };
+
+  window._v26AddMnemo=function(){
+    const data=cargarDatos();
+    abrirModal('＋ Nueva mnemotecnia', function(body){
+      body.innerHTML=campo('Título','titulo','')+campo('Texto','texto','','textarea');
+    }, function(ov){
+      const t=val(ov,'titulo'); if(!t){alert('El título es obligatorio');return;}
+      data.mnemotecnia.push({titulo:t,texto:val(ov,'texto')});
+      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Mnemotecnia agregada');
+    });
+  };
+
+  window._v26DelMnemo=function(i){
+    const data=cargarDatos();
+    modalConfirmDelete('🗑 Eliminar mnemotecnia',`¿Eliminar <strong style="color:#e2e8f0">${data.mnemotecnia[i].titulo}</strong>?`,function(){
+      data.mnemotecnia.splice(i,1); guardarDatos(data); renderIntervalos(); toast('🗑 Eliminada');
+    });
+  };
 
   // ════════════════════════════════════════════════════════════════
   // NAVEGACIÓN
@@ -499,13 +713,10 @@
     const bp=document.getElementById('buscador-panel'); if(bp)bp.style.display='none';
     document.getElementById('vac2026-panel').classList.add('activo');
     window.scrollTo(0,0);
-
-    // Reset al tab de clasificación
     document.querySelectorAll('.v26-tab').forEach(t=>t.classList.remove('on'));
     document.querySelector('.v26-tab[data-tab="clasificacion"]')?.classList.add('on');
     const map={clasificacion:'v26-t-c',edad:'v26-t-e',intervalos:'v26-t-i'};
     Object.keys(map).forEach(k=>{ const el=document.getElementById(map[k]); if(el)el.style.display=k==='clasificacion'?'':'none'; });
-
     const btnV=document.getElementById('vac2026-btn-volver-quiz');
     if(btnV){
       if(opts.desde==='cuestionario'&&opts.origenHash){_origenHash=opts.origenHash;btnV.classList.add('vis');}
