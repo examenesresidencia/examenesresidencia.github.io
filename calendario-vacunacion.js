@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// calendario-vacunacion.js  — v10
+// calendario-vacunacion.js  — v11
 // Grid 3 columnas · Toggle independiente · Editor admin completo
 // ════════════════════════════════════════════════════════════════
 (function () {
@@ -218,8 +218,8 @@
       .v26-ctrig{display:flex;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;transition:background .13s;user-select:none;-webkit-user-select:none;min-height:52px;}
       .v26-ctrig:hover{background:rgba(255,255,255,0.03);}
       .v26-ctrig.open{background:rgba(255,255,255,0.04);}
-      .v26-cbadge{font-size:9.5px;font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0;border:1px solid;}
-      .v26-cnom{flex:1;font-size:0.84rem;font-weight:600;color:#e2e8f0;line-height:1.3;}
+      .v26-cbadge{font-size:9.5px;font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0;border:1px solid;max-width:120px;overflow:hidden;text-overflow:ellipsis;}
+      .v26-cnom{flex:1;font-size:0.84rem;font-weight:600;color:#e2e8f0;line-height:1.3;min-width:0;overflow-wrap:break-word;}
       .v26-carr{width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.07);display:flex;align-items:center;justify-content:center;font-size:0.52rem;color:#64748b;flex-shrink:0;transition:transform .22s,background .14s,color .14s;}
       .v26-ctrig.open .v26-carr{transform:rotate(180deg);background:rgba(56,189,248,0.14);color:#38bdf8;}
 
@@ -230,7 +230,7 @@
       .v26-cprev{font-size:0.81rem;color:#cbd5e1;margin-bottom:10px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,0.06);}
       .v26-clbl{font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#475569;margin-bottom:6px;}
       .v26-cdosis{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
-      .v26-cdpill{font-size:0.73rem;padding:3px 10px;border-radius:20px;border:1px solid;background:rgba(0,0,0,0.15);white-space:nowrap;}
+      .v26-cdpill{font-size:0.73rem;padding:3px 10px;border-radius:20px;border:1px solid;background:rgba(0,0,0,0.15);white-space:normal;word-break:break-word;}
       .v26-cnota{font-size:0.76rem;line-height:1.55;padding:8px 11px;border-radius:7px;border-left:3px solid;}
       .v26-cnota.warn{background:rgba(251,191,36,0.08);border-color:#fbbf24;color:#fde68a;}
       .v26-cnota.info{background:rgba(56,189,248,0.07);border-color:#38bdf8;color:#bae6fd;}
@@ -333,8 +333,34 @@
       @media(max-width:500px){
         .v26-grid{grid-template-columns:1fr;}
         .v26-card{border-right:none!important;}
-        .v26-body{padding:12px;}
-        .v26h{padding:0 12px;}
+        .v26-body{padding:10px 8px;}
+        .v26h{padding:0 10px;}
+        /* Header: allow wrapping on very small screens */
+        .v26h-r1{gap:8px;padding:10px 0 8px;}
+        .v26-ttl{font-size:0.93rem;min-width:0;word-break:break-word;}
+        .v26-sub{display:none;}
+        /* Trigger: allow badge+name to wrap */
+        .v26-ctrig{flex-wrap:wrap;gap:6px;padding:10px 12px;min-height:44px;}
+        .v26-cbadge{white-space:normal;word-break:break-word;max-width:100%;}
+        .v26-cnom{font-size:0.82rem;min-width:0;word-break:break-word;}
+        /* Detail pills: wrap freely */
+        .v26-cdpill{white-space:normal;word-break:break-word;font-size:0.71rem;}
+        .v26-cdosis{gap:4px;}
+        /* Nota text */
+        .v26-cnota{font-size:0.74rem;word-break:break-word;}
+        /* Grupo header */
+        .v26-grupo-tit{font-size:0.63rem;letter-spacing:.06em;word-break:break-word;}
+        /* Intervalos grid: single column */
+        .v26-int-grid{grid-template-columns:1fr;}
+        .v26-mnemo-grid{grid-template-columns:1fr;}
+        /* Table: make it scrollable horizontally with hint */
+        .v26-twrap{-webkit-overflow-scrolling:touch;}
+        /* Legend: smaller */
+        .v26-legend{padding:8px 10px;gap:6px;}
+        .v26-leg-item{font-size:0.67rem;}
+        /* Admin buttons: wrap */
+        .v26-adm-bar{gap:4px;}
+        .v26-abtn{font-size:0.67rem;padding:3px 8px;}
       }
     `;
     document.head.appendChild(s);
