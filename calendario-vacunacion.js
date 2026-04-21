@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// calendario-vacunacion.js  — v8
+// calendario-vacunacion.js  — v9
 // Grid 3 columnas · Toggle independiente · Editor admin completo
 // ════════════════════════════════════════════════════════════════
 (function () {
@@ -125,42 +125,30 @@
   let _datosCache = null;
 
   async function cargarDatos(){
-    // 1. Si ya tenemos caché en memoria, usarla
     if(_datosCache) return _datosCache;
-
-    // 2. Intentar leer de Firestore (fuente de verdad)
     if(window._fbDb && window.__fb){
       try{
         const {doc, getDoc} = window.__fb;
         const snap = await getDoc(doc(window._fbDb, 'meta', 'calendarioVacunacion'));
         if(snap.exists()){
           _datosCache = snap.data();
-          console.log('[VAC2026] ✅ Datos cargados desde Firestore');
-          // Sincronizar localStorage con la versión de la nube
+          console.log('[VAC2026] \u2705 Datos cargados desde Firestore');
           try{ localStorage.setItem(DATA_KEY, JSON.stringify(_datosCache)); }catch(_){}
           return _datosCache;
         } else {
-          console.warn('[VAC2026] ⚠️ El documento meta/calendarioVacunacion no existe en Firestore. Ejecutá window.vac2026MigrarAFirestore() desde la consola (admin).');
+          console.warn('[VAC2026] \u26a0\ufe0f No existe meta/calendarioVacunacion. Ejecuta window.vac2026MigrarAFirestore()');
         }
       }catch(e){
-        console.warn('[VAC2026] No se pudo leer Firestore, usando caché local:', e);
+        console.warn('[VAC2026] No se pudo leer Firestore:', e);
       }
     } else {
-      console.warn('[VAC2026] Firebase no disponible al llamar cargarDatos(). _fbDb=', !!window._fbDb, '__fb=', !!window.__fb);
+      console.warn('[VAC2026] Firebase no disponible. _fbDb=', !!window._fbDb, '__fb=', !!window.__fb);
     }
-
-    // 3. Fallback: localStorage (datos offline de la última lectura exitosa)
     try{
       const s = localStorage.getItem(DATA_KEY);
-      if(s){
-        console.log('[VAC2026] 📦 Usando datos del caché local (localStorage)');
-        _datosCache = JSON.parse(s);
-        return _datosCache;
-      }
+      if(s){ console.log('[VAC2026] \ud83d\udce6 Usando cache local'); _datosCache = JSON.parse(s); return _datosCache; }
     }catch(_){}
-
-    // 4. Último recurso: datos hardcodeados
-    console.warn('[VAC2026] 🔴 Sin Firestore ni caché local — usando DATA_DEFAULT');
+    console.warn('[VAC2026] \ud83d\udd34 Usando DATA_DEFAULT');
     _datosCache = JSON.parse(JSON.stringify(DATA_DEFAULT));
     return _datosCache;
   }
@@ -257,16 +245,16 @@
       .v26-table tbody tr:nth-child(even) td{background:rgba(255,255,255,0.02);}
       .v26-table tbody tr:hover td{background:rgba(56,189,248,0.04);}
       .v26-table tbody td:first-child{font-weight:700;color:#e2e8f0;white-space:nowrap;}
-
       /* Drag & drop filas (solo admin) */
-      .v26-table tbody tr.v26-draggable{cursor:grab;}
-      .v26-table tbody tr.v26-draggable:active{cursor:grabbing;}
-      .v26-table tbody tr.v26-dragging{opacity:0.4;background:rgba(56,189,248,0.06)!important;}
-      .v26-table tbody tr.v26-drag-over td{border-top:2px solid #38bdf8!important;background:rgba(56,189,248,0.08)!important;}
-      .v26-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#475569;font-size:0.85rem;cursor:grab;flex-shrink:0;margin-right:6px;transition:color .13s;}
-      .v26-drag-handle:hover{color:#38bdf8;}
-      .v26-drag-hint{font-size:0.68rem;color:#334155;font-style:italic;margin-top:6px;padding-left:2px;}
-      .v26-saving-row{pointer-events:none;opacity:0.6;}
+      .v26-handle-cell{padding:4px 6px!important;text-align:center;width:28px;}
+      .v26-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;color:#475569;font-size:1rem;cursor:grab;border-radius:4px;transition:color .13s,background .13s;user-select:none;}
+      .v26-drag-handle:hover{color:#38bdf8;background:rgba(56,189,248,0.1);}
+      .v26-table tbody tr.v26-draggable{cursor:default;}
+      .v26-table tbody tr.v26-draggable:focus{outline:2px solid rgba(56,189,248,0.5);outline-offset:-2px;}
+      .v26-table tbody tr.v26-dragging td{opacity:0.35;}
+      #v26-drop-indicator td{padding:0!important;height:3px!important;background:#38bdf8!important;border-radius:2px;}
+      .v26-drag-hint{font-size:0.68rem;color:#334155;font-style:italic;margin-top:7px;padding-left:2px;}
+      #v26-drag-ghost td{padding:7px 12px!important;font-size:0.78rem;}
 
       /* Intervalos */
       .v26-int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-bottom:24px;}
@@ -462,97 +450,204 @@
   // ════════════════════════════════════════════════════════════════
   // RENDER EDAD
   // ════════════════════════════════════════════════════════════════
-  async function renderEdad(){
-    const data=await cargarDatos();
-    const cont=document.getElementById('v26-t-e');
-    if(!cont)return;
-    const adm=esAdmin();
+  // ═══════════════════════════════════════════════════════════════
+  // RENDER EDAD — con drag & drop, flechas de teclado y Ctrl+S
+  // ═══════════════════════════════════════════════════════════════
 
-    let html=`<div class="v26-twrap"><table class="v26-table" id="v26-edad-table"><thead><tr>`;
-    if(adm)html+=`<th style="width:28px;padding:10px 6px"></th>`;
-    html+=`<th>Edad / Grupo</th><th>Vacunas</th><th>Nota</th>`;
-    if(adm)html+=`<th style="width:54px;text-align:center"></th>`;
-    html+=`</tr></thead><tbody>`;
+  let _edadPendiente = false;  // true cuando hay cambios de orden sin guardar
 
-    data.edadTabla.forEach((r,i)=>{
-      html+=`<tr data-idx="${i}" ${adm?'class="v26-draggable" draggable="true"':''}>`;
-      if(adm)html+=`<td style="padding:6px;text-align:center"><span class="v26-drag-handle" title="Arrastrar para reordenar">⠿</span></td>`;
-      html+=`<td>${r.edad}</td><td>${r.vacunas}</td><td>${r.nota}</td>`;
-      if(adm)html+=`<td style="text-align:center;white-space:nowrap">
-        <button class="v26-abtn v26-abtn-edit" style="padding:3px 8px" onclick="window._v26EditEdad(${i})">✏️</button>
-        <button class="v26-abtn v26-abtn-del"  style="padding:3px 8px;margin-top:3px" onclick="window._v26DelEdad(${i})">🗑</button>
-      </td>`;
-      html+=`</tr>`;
-    });
-
-    html+=`</tbody></table></div>`;
-    if(adm)html+=`
-      <div class="v26-drag-hint">⠿ Arrastrá las filas para reordenarlas — el cambio se guarda automáticamente</div>
-      <div class="v26-adm-bar" style="margin-top:10px">
-        <button class="v26-abtn v26-abtn-add" onclick="window._v26AddEdad()">＋ Agregar fila</button>
-        <button class="v26-abtn v26-abtn-warn" onclick="window._v26EE()">📋 Editar JSON</button>
-      </div>`;
-    cont.innerHTML=html;
-
-    // Activar drag & drop solo para admin
-    if(adm) _v26IniciarDragEdad();
+  // Recorre el DOM actual y persiste el nuevo orden en Firestore
+  async function _guardarOrdenEdad(){
+    const tbody = document.querySelector('#v26-edad-table tbody');
+    if(!tbody) return;
+    const data = await cargarDatos();
+    const snapshot = JSON.parse(JSON.stringify(data.edadTabla)); // copia actual
+    const filas = Array.from(tbody.querySelectorAll('tr'));
+    data.edadTabla = filas.map(tr => snapshot[parseInt(tr.dataset.idx)]);
+    await guardarDatos(data);
+    _edadPendiente = false;
+    // Reasignar data-idx para que coincida con el nuevo orden
+    filas.forEach((tr, i) => { tr.dataset.idx = i; });
+    _actualizarBtnGuardar();
+    toast('\u2705 Orden guardado');
   }
 
-  // ════════════════════════════════════════════════════════════════
-  // DRAG & DROP — TABLA POR EDAD
-  // ════════════════════════════════════════════════════════════════
+  function _actualizarBtnGuardar(){
+    const btn = document.getElementById('v26-btn-guardar-orden');
+    if(!btn) return;
+    if(_edadPendiente){
+      btn.style.background  = 'rgba(52,211,153,0.18)';
+      btn.style.borderColor = 'rgba(52,211,153,0.7)';
+      btn.style.color       = '#34d399';
+      btn.title             = 'Hay cambios sin guardar \u2014 clic o Ctrl+S';
+    } else {
+      btn.style.background  = 'rgba(52,211,153,0.06)';
+      btn.style.borderColor = 'rgba(52,211,153,0.25)';
+      btn.style.color       = '#64748b';
+      btn.title             = 'Sin cambios pendientes';
+    }
+  }
+
+  async function renderEdad(){
+    const data = await cargarDatos();
+    const cont = document.getElementById('v26-t-e');
+    if(!cont) return;
+    const adm = esAdmin();
+    _edadPendiente = false;
+
+    let html = `<div class="v26-twrap"><table class="v26-table" id="v26-edad-table"><thead><tr>`;
+    if(adm) html += `<th class="v26-handle-cell"></th>`;
+    html += `<th>Edad / Grupo</th><th>Vacunas</th><th>Nota</th>`;
+    if(adm) html += `<th style="width:80px;text-align:center"></th>`;
+    html += `</tr></thead><tbody>`;
+
+    data.edadTabla.forEach((r, i) => {
+      html += `<tr data-idx="${i}" ${adm ? 'class="v26-draggable" tabindex="0"' : ''}>`;
+      if(adm) html += `<td class="v26-handle-cell"><span class="v26-drag-handle" title="Arrastr\u00e1 para mover \u00b7 \u2191\u2193 con teclado">\u2840</span></td>`;
+      html += `<td>${r.edad}</td><td>${r.vacunas}</td><td>${r.nota}</td>`;
+      if(adm) html += `<td style="text-align:center;white-space:nowrap;vertical-align:middle">
+        <button class="v26-abtn v26-abtn-edit" style="padding:3px 7px" onclick="window._v26EditEdad(${i})">\u270f\ufe0f</button>
+        <button class="v26-abtn v26-abtn-del"  style="padding:3px 7px;margin-top:3px" onclick="window._v26DelEdad(${i})">\ud83d\uddd1</button>
+      </td>`;
+      html += `</tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+    if(adm) html += `
+      <div class="v26-drag-hint">\u2840 Arrastr\u00e1 \u00b7 \u2191\u2193 con teclado \u00b7 Ctrl+S o \ud83d\udcbe para guardar el orden</div>
+      <div class="v26-adm-bar" style="margin-top:10px">
+        <button class="v26-abtn v26-abtn-add"  onclick="window._v26AddEdad()">\uff0b Agregar fila</button>
+        <button class="v26-abtn v26-abtn-warn" onclick="window._v26EE()">\ud83d\udccb Editar JSON</button>
+        <button class="v26-abtn" id="v26-btn-guardar-orden"
+          style="padding:4px 14px;border:1px solid rgba(52,211,153,0.25);background:rgba(52,211,153,0.06);color:#64748b;font-size:0.75rem;cursor:pointer;"
+          onclick="window._v26GuardarOrden()" title="Sin cambios pendientes">\ud83d\udcbe Guardar orden</button>
+      </div>`;
+
+    cont.innerHTML = html;
+    if(adm){
+      _v26IniciarDragEdad();
+      _v26IniciarTecladoEdad();
+      _v26IniciarCtrlS();
+    }
+  }
+
+  // ── Botón guardar y Ctrl+S ───────────────────────────────────
+  window._v26GuardarOrden = async function(){
+    if(!_edadPendiente){ toast('Sin cambios pendientes'); return; }
+    await _guardarOrdenEdad();
+  };
+
+  let _ctrlSListener = null;
+  function _v26IniciarCtrlS(){
+    if(_ctrlSListener) document.removeEventListener('keydown', _ctrlSListener);
+    _ctrlSListener = function(e){
+      const panel = document.getElementById('vac2026-panel');
+      if(!panel || !panel.classList.contains('activo')) return;
+      if(e.ctrlKey && e.key === 's'){
+        e.preventDefault();
+        if(_edadPendiente) _guardarOrdenEdad();
+        else toast('Sin cambios pendientes');
+      }
+    };
+    document.addEventListener('keydown', _ctrlSListener);
+  }
+
+  // ── Drag con mouse ────────────────────────────────────────────
   function _v26IniciarDragEdad(){
     const tbody = document.querySelector('#v26-edad-table tbody');
     if(!tbody) return;
 
-    let dragSrc = null;
+    let dragging  = null;
+    let ghost     = null;
+    let indicator = null;
 
-    tbody.querySelectorAll('tr').forEach(function(row){
-      row.addEventListener('dragstart', function(e){
-        dragSrc = row;
-        row.classList.add('v26-dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', row.dataset.idx);
+    function getFilaDestino(y){
+      const rows = Array.from(tbody.querySelectorAll('tr:not(#v26-drop-indicator)'));
+      for(let i = 0; i < rows.length; i++){
+        const r = rows[i].getBoundingClientRect();
+        if(y < r.top + r.height / 2) return rows[i];
+      }
+      return null;
+    }
+
+    tbody.addEventListener('mousedown', function(e){
+      const handle = e.target.closest('.v26-drag-handle');
+      if(!handle) return;
+      e.preventDefault();
+      dragging = handle.closest('tr');
+
+      const rect = dragging.getBoundingClientRect();
+      ghost = dragging.cloneNode(true);
+      ghost.id = 'v26-drag-ghost';
+      Object.assign(ghost.style, {
+        position:'fixed', left:rect.left+'px', top:(e.clientY - 14)+'px',
+        width:rect.width+'px', zIndex:'99999', opacity:'0.88',
+        pointerEvents:'none', background:'#0d2444',
+        border:'1.5px solid #38bdf8', borderRadius:'6px',
+        boxShadow:'0 8px 32px rgba(0,0,0,0.55)', transition:'none'
       });
+      document.body.appendChild(ghost);
+      dragging.classList.add('v26-dragging');
 
-      row.addEventListener('dragend', function(){
-        row.classList.remove('v26-dragging');
-        tbody.querySelectorAll('tr').forEach(function(r){ r.classList.remove('v26-drag-over'); });
-      });
+      indicator = document.createElement('tr');
+      indicator.id = 'v26-drop-indicator';
+      indicator.innerHTML = '<td colspan="5"></td>';
+    });
 
-      row.addEventListener('dragover', function(e){
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        tbody.querySelectorAll('tr').forEach(function(r){ r.classList.remove('v26-drag-over'); });
-        if(row !== dragSrc) row.classList.add('v26-drag-over');
-      });
+    document.addEventListener('mousemove', function(e){
+      if(!dragging || !ghost) return;
+      ghost.style.top = (e.clientY - 14) + 'px';
+      const dest = getFilaDestino(e.clientY);
+      if(indicator.parentNode) indicator.parentNode.removeChild(indicator);
+      dest ? tbody.insertBefore(indicator, dest) : tbody.appendChild(indicator);
+    });
 
-      row.addEventListener('dragleave', function(){
-        row.classList.remove('v26-drag-over');
-      });
+    document.addEventListener('mouseup', function(e){
+      if(!dragging) return;
+      if(ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+      ghost = null;
+      dragging.classList.remove('v26-dragging');
+      if(indicator.parentNode) indicator.parentNode.removeChild(indicator);
 
-      row.addEventListener('drop', async function(e){
-        e.preventDefault();
-        row.classList.remove('v26-drag-over');
-        if(!dragSrc || dragSrc === row) return;
+      const dest = getFilaDestino(e.clientY);
+      const rows = Array.from(tbody.querySelectorAll('tr:not(#v26-drop-indicator)'));
+      const fromIdx = rows.indexOf(dragging);
+      const toIdx   = dest ? rows.indexOf(dest) : rows.length;
 
-        // Calcular posiciones en el DOM actual
-        const allRows = Array.from(tbody.querySelectorAll('tr'));
-        const fromIdx = allRows.indexOf(dragSrc);
-        const toIdx   = allRows.indexOf(row);
-        if(fromIdx === -1 || toIdx === -1) return;
+      if(fromIdx !== toIdx && fromIdx !== toIdx - 1){
+        dest ? tbody.insertBefore(dragging, dest) : tbody.appendChild(dragging);
+        _edadPendiente = true;
+        _actualizarBtnGuardar();
+        toast('\u2195 Fila movida \u2014 guard\u00e1 con \ud83d\udcbe o Ctrl+S');
+      }
+      dragging = null;
+    });
+  }
 
-        // Reordenar en el array de datos
-        const data = await cargarDatos();
-        const item = data.edadTabla.splice(fromIdx, 1)[0];
-        data.edadTabla.splice(toIdx, 0, item);
-
-        // Guardar en Firestore y re-renderizar
-        tbody.classList.add('v26-saving-row');
-        await guardarDatos(data);
-        await renderEdad();
-        toast('✅ Orden guardado');
-      });
+  // ── Flechas de teclado ────────────────────────────────────────
+  function _v26IniciarTecladoEdad(){
+    const tbody = document.querySelector('#v26-edad-table tbody');
+    if(!tbody) return;
+    tbody.addEventListener('keydown', function(e){
+      if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      const row = e.target.closest('tr');
+      if(!row) return;
+      e.preventDefault();
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const idx  = rows.indexOf(row);
+      if(e.key === 'ArrowUp' && idx > 0){
+        tbody.insertBefore(row, rows[idx - 1]);
+        row.focus();
+        _edadPendiente = true;
+        _actualizarBtnGuardar();
+        toast('\u2191 Fila movida \u2014 guard\u00e1 con \ud83d\udcbe o Ctrl+S');
+      } else if(e.key === 'ArrowDown' && idx < rows.length - 1){
+        tbody.insertBefore(rows[idx + 1], row);
+        row.focus();
+        _edadPendiente = true;
+        _actualizarBtnGuardar();
+        toast('\u2193 Fila movida \u2014 guard\u00e1 con \ud83d\udcbe o Ctrl+S');
+      }
     });
   }
 
@@ -845,34 +940,24 @@
   // ════════════════════════════════════════════════════════════════
   let _origenHash=null;
 
-  // Espera a que window._fbDb y window.__fb estén disponibles (máx. 6 s)
   function _esperarFirebase(){
     return new Promise(function(resolve){
       if(window._fbDb && window.__fb){ resolve(); return; }
-      // Firebase ya disparó 'firebaseReady' en index.html — escuchamos ese evento
-      function onReady(){
-        clearTimeout(tid);
-        // Dar un tick extra para que script.js termine de asignar _fbDb/__fb
-        setTimeout(resolve, 80);
-      }
       var tid = setTimeout(function(){
         document.removeEventListener('firebaseReady', onReady);
-        console.warn('[VAC2026] Firebase no disponible tras 6 s — renderizando con fallback');
+        console.warn('[VAC2026] Firebase no disponible tras 6s — usando fallback');
         resolve();
       }, 6000);
+      function onReady(){ clearTimeout(tid); setTimeout(resolve, 80); }
       document.addEventListener('firebaseReady', onReady, {once:true});
     });
   }
 
   async function mostrarPanel(opts){
     opts=opts||{};
-    // Invalidar caché para forzar lectura fresca de Firestore al abrir el panel
     _datosCache = null;
     inyectarEstilos(); construirPanel();
-
-    // ── Esperar Firebase antes de leer Firestore ──────────────────
     await _esperarFirebase();
-
     await renderTodo();
     document.getElementById('menu-principal')?.classList.add('oculto');
     document.querySelectorAll('.pagina-cuestionario').forEach(p=>p.classList.remove('activa'));
@@ -917,7 +1002,6 @@
   document.addEventListener('DOMContentLoaded',function(){
     if(window.location.hash==='#vacunas2026'){
       inyectarEstilos(); construirPanel();
-      // mostrarPanel() ya incluye _esperarFirebase() internamente
       mostrarPanel({desde:'menu'});
     }
   });
