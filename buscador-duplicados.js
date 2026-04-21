@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V9
+// buscador-duplicados.js- V10
 // ────────────────────────────────────────────────────────────────
 
 
@@ -27,7 +27,7 @@
   // ── Cache del último escaneo ───────────────────────────────────
   let _dupGruposCache = [];
   const _DUP_CACHE_KEY = 'fb_dup_scan_cache_v2';
-  const _DUP_CACHE_TTL = Infinity;
+  const _DUP_CACHE_TTL = Infinity; // "nunca expira"
 
   // ── Normalización de enunciados (para comparación exacta) ──────
   function _normalizarEnunciado(texto) {
@@ -174,12 +174,13 @@
         if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL && cached.seccionesEscaneadas > 0) {
           _dupGruposCache = cached.grupos;
           const edad = Math.round((Date.now() - cached.ts) / 60000);
+          const edadTexto = edad < 60 ? `${edad} min` : `${Math.round(edad / 60)} hs`;
           resumen.innerHTML = `
             Escaneadas: <strong style="color:#f1f5f9">${cached.seccionesEscaneadas}</strong> secciones ·
             <strong style="color:#f1f5f9">${cached.totalPreguntas.toLocaleString()}</strong> preguntas totales ·
             Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>
             <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
-              📦 Desde caché (hace ${edad} min) —
+              📦 Desde caché (hace ${edadTexto}) —
               <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
                 🔄 Forzar nuevo escaneo
               </button>
@@ -329,7 +330,12 @@
         Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
         <strong style="color:#f1f5f9">${totalPreguntas.toLocaleString()}</strong> preguntas totales ·
         Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>
-        <span style="color:#4ade80;font-size:0.75rem;margin-left:8px;">✅ Caché actualizada — válida por 6 hs</span>`;
+        <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
+          ✅ Caché actualizada — sin expiración automática —
+          <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
+            🔄 Forzar nuevo escaneo
+          </button>
+        </span>`;
 
       _aplicarFiltrosDuplicados();
 
@@ -437,13 +443,18 @@
       // Panel de opciones (oculto por defecto)
       const panelOpciones = document.createElement('div');
       panelOpciones.style.cssText = 'display:none;padding:10px 16px;border-bottom:1px solid rgba(255,255,255,0.06);';
-      const opcionesHtml = items[0].opciones.map((op, i) => {
-        const esCorrecta = items[0].correcta.includes(i);
-        return `<div style="padding:3px 0;color:${esCorrecta ? '#4ade80' : '#94a3b8'};font-size:0.78rem;">
-          ${esCorrecta ? '✅' : '○'} ${op}
-        </div>`;
-      }).join('');
-      panelOpciones.innerHTML = `<div style="color:#7dd3fc;font-size:0.72rem;font-weight:700;margin-bottom:6px;letter-spacing:0.04em;">OPCIONES (primera copia):</div>${opcionesHtml}`;
+      const tieneOpciones = Array.isArray(items[0].opciones) && items[0].opciones.length > 0;
+      if (tieneOpciones) {
+        const opcionesHtml = items[0].opciones.map((op, i) => {
+          const esCorrecta = items[0].correcta.includes(i);
+          return `<div style="padding:3px 0;color:${esCorrecta ? '#4ade80' : '#94a3b8'};font-size:0.78rem;">
+            ${esCorrecta ? '✅' : '○'} ${op}
+          </div>`;
+        }).join('');
+        panelOpciones.innerHTML = `<div style="color:#7dd3fc;font-size:0.72rem;font-weight:700;margin-bottom:6px;letter-spacing:0.04em;">OPCIONES (primera copia):</div>${opcionesHtml}`;
+      } else {
+        panelOpciones.innerHTML = `<div style="color:#64748b;font-size:0.78rem;font-style:italic;">Las opciones no están disponibles en caché — forzá un nuevo escaneo para verlas.</div>`;
+      }
       card.appendChild(panelOpciones);
 
       header.querySelector('.dup-btn-toggle-opciones').onclick = (e) => {
@@ -458,8 +469,8 @@
         fila.id = `dup-fila-${item.docId}`;
         fila.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 16px;border-bottom:1px solid rgba(255,255,255,0.04);gap:10px;flex-wrap:wrap;';
 
-        const opcionesIguales = JSON.stringify(item.opciones) === JSON.stringify(items[0].opciones);
-        const correctaIgual   = JSON.stringify(item.correcta)  === JSON.stringify(items[0].correcta);
+        const opcionesIguales = !tieneOpciones || JSON.stringify(item.opciones) === JSON.stringify(items[0].opciones);
+        const correctaIgual   = !tieneOpciones || JSON.stringify(item.correcta)  === JSON.stringify(items[0].correcta);
         const esExacta = opcionesIguales && correctaIgual;
 
         fila.innerHTML = `
