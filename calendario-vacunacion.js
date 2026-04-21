@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// calendario-vacunacion.js  — v3
+// calendario-vacunacion.js  — v4
 // Grid 3 columnas · Toggle independiente · Editor admin completo
 // ════════════════════════════════════════════════════════════════
 (function () {
@@ -121,8 +121,58 @@
     ]
   };
 
-  function cargarDatos(){ try{const s=localStorage.getItem(DATA_KEY);return s?JSON.parse(s):JSON.parse(JSON.stringify(DATA_DEFAULT));}catch(_){return JSON.parse(JSON.stringify(DATA_DEFAULT));} }
-  function guardarDatos(d){ try{localStorage.setItem(DATA_KEY,JSON.stringify(d));}catch(_){} }
+  // ── Caché en memoria para evitar lecturas repetidas a Firestore ──
+  let _datosCache = null;
+
+  async function cargarDatos(){
+    // 1. Si ya tenemos caché en memoria, usarla
+    if(_datosCache) return _datosCache;
+
+    // 2. Intentar leer de Firestore
+    if(window._fbDb && window.__fb){
+      try{
+        const {doc, getDoc} = window.__fb;
+        const snap = await getDoc(doc(window._fbDb, 'meta', 'calendarioVacunacion'));
+        if(snap.exists()){
+          _datosCache = snap.data();
+          // Actualizar localStorage como caché offline
+          try{ localStorage.setItem(DATA_KEY, JSON.stringify(_datosCache)); }catch(_){}
+          return _datosCache;
+        }
+      }catch(e){
+        console.warn('[VAC2026] No se pudo leer Firestore, usando caché local:', e);
+      }
+    }
+
+    // 3. Fallback: localStorage
+    try{
+      const s = localStorage.getItem(DATA_KEY);
+      if(s){ _datosCache = JSON.parse(s); return _datosCache; }
+    }catch(_){}
+
+    // 4. Último recurso: datos por defecto
+    _datosCache = JSON.parse(JSON.stringify(DATA_DEFAULT));
+    return _datosCache;
+  }
+
+  async function guardarDatos(d){
+    // Actualizar caché en memoria
+    _datosCache = d;
+
+    // Guardar en localStorage como caché offline
+    try{ localStorage.setItem(DATA_KEY, JSON.stringify(d)); }catch(_){}
+
+    // Guardar en Firestore (fuente de verdad)
+    if(window._fbDb && window.__fb){
+      try{
+        const {doc, setDoc} = window.__fb;
+        await setDoc(doc(window._fbDb, 'meta', 'calendarioVacunacion'), d);
+      }catch(e){
+        console.error('[VAC2026] Error al guardar en Firestore:', e);
+        toast('⚠️ No se pudo guardar en la nube');
+      }
+    }
+  }
   function esAdmin(){ return typeof window.fbIsAdmin==='function'&&window.fbIsAdmin(); }
   function meta(tipo){ return GRUPOS_META.find(x=>x.tipo===tipo)||{icon:'',color:'#64748b',bg:'rgba(100,116,139,0.06)',border:'rgba(100,116,139,0.2)'}; }
 
@@ -329,8 +379,8 @@
   // ════════════════════════════════════════════════════════════════
   // RENDER CLASIFICACIÓN — GRID 3 COLUMNAS
   // ════════════════════════════════════════════════════════════════
-  function renderClasificacion(){
-    const data=cargarDatos();
+  async function renderClasificacion(){
+    const data=await cargarDatos();
     const cont=document.getElementById('v26-t-c');
     if(!cont)return;
     const adm=esAdmin();
@@ -392,8 +442,8 @@
   // ════════════════════════════════════════════════════════════════
   // RENDER EDAD
   // ════════════════════════════════════════════════════════════════
-  function renderEdad(){
-    const data=cargarDatos();
+  async function renderEdad(){
+    const data=await cargarDatos();
     const cont=document.getElementById('v26-t-e');
     if(!cont)return;
     const adm=esAdmin();
@@ -419,8 +469,8 @@
   // ════════════════════════════════════════════════════════════════
   // RENDER INTERVALOS
   // ════════════════════════════════════════════════════════════════
-  function renderIntervalos(){
-    const data=cargarDatos();
+  async function renderIntervalos(){
+    const data=await cargarDatos();
     const cont=document.getElementById('v26-t-i');
     if(!cont)return;
     const adm=esAdmin();
@@ -459,7 +509,7 @@
     cont.innerHTML=html;
   }
 
-  function renderTodo(){ renderClasificacion(); renderEdad(); renderIntervalos(); }
+  async function renderTodo(){ await renderClasificacion(); await renderEdad(); await renderIntervalos(); }
 
   // ════════════════════════════════════════════════════════════════
   // TOGGLE — independiente por tarjeta
@@ -559,81 +609,81 @@
   // ════════════════════════════════════════════════════════════════
   // ADMIN — VACUNAS
   // ════════════════════════════════════════════════════════════════
-  window._v26EditVac=function(si,vi){
-    const data=cargarDatos(); const vac=data.clasificacion[si].vacunas[vi];
+  window._v26EditVac=async function(si,vi){
+    const data=await cargarDatos(); const vac=data.clasificacion[si].vacunas[vi];
     abrirModal('✏️ Editar vacuna', function(body){
       body.innerHTML=campo('Nombre','vnom',vac.nombre)+campo('Badge (tipo)','vbadge',vac.badge)+campo('Previene','vprev',vac.previene);
       buildDosisEditor(body,vac.dosis);
       const extra=document.createElement('div');
       extra.innerHTML=campo('Nota / advertencia','vnota',vac.nota,'textarea')+campo('Color de nota','vntipo',vac.notaTipo,'nota-tipo');
       body.appendChild(extra);
-    }, function(ov,body){
+    }, async function(ov,body){
       vac.nombre=val(ov,'vnom'); vac.badge=val(ov,'vbadge'); vac.previene=val(ov,'vprev');
       vac.dosis=getDosis(body); vac.nota=val(ov,'vnota'); vac.notaTipo=val(ov,'vntipo');
-      guardarDatos(data); renderClasificacion(); ov.remove(); toast('✅ Vacuna actualizada');
+      await guardarDatos(data); renderClasificacion(); ov.remove(); toast('✅ Vacuna actualizada');
     });
   };
 
-  window._v26AddVac=function(si){
-    const data=cargarDatos();
+  window._v26AddVac=async function(si){
+    const data=await cargarDatos();
     abrirModal('＋ Nueva vacuna', function(body){
       body.innerHTML=campo('Nombre','vnom','')+campo('Badge (tipo)','vbadge','')+campo('Previene','vprev','');
       buildDosisEditor(body,[]);
       const extra=document.createElement('div');
       extra.innerHTML=campo('Nota / advertencia','vnota','','textarea')+campo('Color de nota','vntipo','info','nota-tipo');
       body.appendChild(extra);
-    }, function(ov,body){
+    }, async function(ov,body){
       const n=val(ov,'vnom'); if(!n){alert('El nombre es obligatorio');return;}
       data.clasificacion[si].vacunas.push({nombre:n,badge:val(ov,'vbadge'),previene:val(ov,'vprev'),dosis:getDosis(body),nota:val(ov,'vnota'),notaTipo:val(ov,'vntipo')});
-      guardarDatos(data); renderClasificacion(); ov.remove(); toast('✅ Vacuna agregada');
+      await guardarDatos(data); renderClasificacion(); ov.remove(); toast('✅ Vacuna agregada');
     });
   };
 
-  window._v26DelVac=function(si,vi){
-    const data=cargarDatos(); const nombre=data.clasificacion[si].vacunas[vi].nombre;
-    modalConfirmDelete('🗑 Eliminar vacuna',`¿Eliminar <strong style="color:#e2e8f0">${nombre}</strong>?`,function(){
-      data.clasificacion[si].vacunas.splice(vi,1); guardarDatos(data); renderClasificacion(); toast('🗑 Vacuna eliminada');
+  window._v26DelVac=async function(si,vi){
+    const data=await cargarDatos(); const nombre=data.clasificacion[si].vacunas[vi].nombre;
+    modalConfirmDelete('🗑 Eliminar vacuna',`¿Eliminar <strong style="color:#e2e8f0">${nombre}</strong>?`,async function(){
+      data.clasificacion[si].vacunas.splice(vi,1); await guardarDatos(data); renderClasificacion(); toast('🗑 Vacuna eliminada');
     });
   };
 
   // ════════════════════════════════════════════════════════════════
   // ADMIN — TABLA EDAD
   // ════════════════════════════════════════════════════════════════
-  window._v26EditEdad=function(i){
-    const data=cargarDatos(); const r=data.edadTabla[i];
+  window._v26EditEdad=async function(i){
+    const data=await cargarDatos(); const r=data.edadTabla[i];
     abrirModal('✏️ Editar fila', function(body){
       body.innerHTML=campo('Edad / Grupo','edad',r.edad)+campo('Vacunas','vacunas',r.vacunas)+campo('Nota','nota',r.nota);
-    }, function(ov){
+    }, async function(ov){
       data.edadTabla[i]={edad:val(ov,'edad'),vacunas:val(ov,'vacunas'),nota:val(ov,'nota')};
-      guardarDatos(data); renderEdad(); ov.remove(); toast('✅ Fila actualizada');
+      await guardarDatos(data); renderEdad(); ov.remove(); toast('✅ Fila actualizada');
     });
   };
 
-  window._v26AddEdad=function(){
-    const data=cargarDatos();
+  window._v26AddEdad=async function(){
+    const data=await cargarDatos();
     abrirModal('＋ Nueva fila', function(body){
       body.innerHTML=campo('Edad / Grupo','edad','')+campo('Vacunas','vacunas','')+campo('Nota','nota','—');
-    }, function(ov){
+    }, async function(ov){
       const e=val(ov,'edad'); if(!e){alert('La edad es obligatoria');return;}
       data.edadTabla.push({edad:e,vacunas:val(ov,'vacunas'),nota:val(ov,'nota')});
-      guardarDatos(data); renderEdad(); ov.remove(); toast('✅ Fila agregada');
+      await guardarDatos(data); renderEdad(); ov.remove(); toast('✅ Fila agregada');
     });
   };
 
-  window._v26DelEdad=function(i){
-    const data=cargarDatos();
-    modalConfirmDelete('🗑 Eliminar fila',`¿Eliminar la fila <strong style="color:#e2e8f0">${data.edadTabla[i].edad}</strong>?`,function(){
-      data.edadTabla.splice(i,1); guardarDatos(data); renderEdad(); toast('🗑 Fila eliminada');
+  window._v26DelEdad=async function(i){
+    const data=await cargarDatos();
+    modalConfirmDelete('🗑 Eliminar fila',`¿Eliminar la fila <strong style="color:#e2e8f0">${data.edadTabla[i].edad}</strong>?`,async function(){
+      data.edadTabla.splice(i,1); await guardarDatos(data); renderEdad(); toast('🗑 Fila eliminada');
     });
   };
 
-  window._v26EE=function(){
-    const data=cargarDatos();
+  window._v26EE=async function(){
+    const data=await cargarDatos();
     abrirModal('📋 Editar tabla — JSON', function(body){
       body.innerHTML=campo('Array JSON','json',JSON.stringify(data.edadTabla,null,2),'textarea');
       body.querySelector('#json').style.minHeight='260px';
-    }, function(ov){
-      try{data.edadTabla=JSON.parse(val(ov,'json'));guardarDatos(data);renderEdad();ov.remove();toast('✅ Tabla actualizada');}
+    }, async function(ov){
+      try{data.edadTabla=JSON.parse(val(ov,'json'));await guardarDatos(data);renderEdad();ov.remove();toast('✅ Tabla actualizada');}
       catch(e){alert('JSON inválido: '+e.message);}
     });
   };
@@ -641,62 +691,62 @@
   // ════════════════════════════════════════════════════════════════
   // ADMIN — INTERVALOS
   // ════════════════════════════════════════════════════════════════
-  window._v26EditInt=function(i){
-    const data=cargarDatos(); const r=data.intervalos[i];
+  window._v26EditInt=async function(i){
+    const data=await cargarDatos(); const r=data.intervalos[i];
     abrirModal('✏️ Editar intervalo', function(body){
       body.innerHTML=campo('Combinación','combo',r.combinacion)+campo('Regla','regla',r.regla,'textarea')+campo('Tipo','tipo',r.tipo,'int-tipo');
-    }, function(ov){
+    }, async function(ov){
       data.intervalos[i]={combinacion:val(ov,'combo'),regla:val(ov,'regla'),tipo:val(ov,'tipo')};
-      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Intervalo actualizado');
+      await guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Intervalo actualizado');
     });
   };
 
-  window._v26AddInt=function(){
-    const data=cargarDatos();
+  window._v26AddInt=async function(){
+    const data=await cargarDatos();
     abrirModal('＋ Nuevo intervalo', function(body){
       body.innerHTML=campo('Combinación','combo','')+campo('Regla','regla','','textarea')+campo('Tipo','tipo','ok','int-tipo');
-    }, function(ov){
+    }, async function(ov){
       const c=val(ov,'combo'); if(!c){alert('La combinación es obligatoria');return;}
       data.intervalos.push({combinacion:c,regla:val(ov,'regla'),tipo:val(ov,'tipo')});
-      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Intervalo agregado');
+      await guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Intervalo agregado');
     });
   };
 
-  window._v26DelInt=function(i){
-    const data=cargarDatos();
-    modalConfirmDelete('🗑 Eliminar intervalo',`¿Eliminar <strong style="color:#e2e8f0">${data.intervalos[i].combinacion}</strong>?`,function(){
-      data.intervalos.splice(i,1); guardarDatos(data); renderIntervalos(); toast('🗑 Eliminado');
+  window._v26DelInt=async function(i){
+    const data=await cargarDatos();
+    modalConfirmDelete('🗑 Eliminar intervalo',`¿Eliminar <strong style="color:#e2e8f0">${data.intervalos[i].combinacion}</strong>?`,async function(){
+      data.intervalos.splice(i,1); await guardarDatos(data); renderIntervalos(); toast('🗑 Eliminado');
     });
   };
 
   // ════════════════════════════════════════════════════════════════
   // ADMIN — MNEMOTECNIA
   // ════════════════════════════════════════════════════════════════
-  window._v26EditMnemo=function(i){
-    const data=cargarDatos(); const m=data.mnemotecnia[i];
+  window._v26EditMnemo=async function(i){
+    const data=await cargarDatos(); const m=data.mnemotecnia[i];
     abrirModal('✏️ Editar mnemotecnia', function(body){
       body.innerHTML=campo('Título','titulo',m.titulo)+campo('Texto','texto',m.texto,'textarea');
-    }, function(ov){
+    }, async function(ov){
       data.mnemotecnia[i]={titulo:val(ov,'titulo'),texto:val(ov,'texto')};
-      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Actualizado');
+      await guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Actualizado');
     });
   };
 
-  window._v26AddMnemo=function(){
-    const data=cargarDatos();
+  window._v26AddMnemo=async function(){
+    const data=await cargarDatos();
     abrirModal('＋ Nueva mnemotecnia', function(body){
       body.innerHTML=campo('Título','titulo','')+campo('Texto','texto','','textarea');
-    }, function(ov){
+    }, async function(ov){
       const t=val(ov,'titulo'); if(!t){alert('El título es obligatorio');return;}
       data.mnemotecnia.push({titulo:t,texto:val(ov,'texto')});
-      guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Mnemotecnia agregada');
+      await guardarDatos(data); renderIntervalos(); ov.remove(); toast('✅ Mnemotecnia agregada');
     });
   };
 
-  window._v26DelMnemo=function(i){
-    const data=cargarDatos();
-    modalConfirmDelete('🗑 Eliminar mnemotecnia',`¿Eliminar <strong style="color:#e2e8f0">${data.mnemotecnia[i].titulo}</strong>?`,function(){
-      data.mnemotecnia.splice(i,1); guardarDatos(data); renderIntervalos(); toast('🗑 Eliminada');
+  window._v26DelMnemo=async function(i){
+    const data=await cargarDatos();
+    modalConfirmDelete('🗑 Eliminar mnemotecnia',`¿Eliminar <strong style="color:#e2e8f0">${data.mnemotecnia[i].titulo}</strong>?`,async function(){
+      data.mnemotecnia.splice(i,1); await guardarDatos(data); renderIntervalos(); toast('🗑 Eliminada');
     });
   };
 
@@ -705,9 +755,11 @@
   // ════════════════════════════════════════════════════════════════
   let _origenHash=null;
 
-  function mostrarPanel(opts){
+  async function mostrarPanel(opts){
     opts=opts||{};
-    inyectarEstilos(); construirPanel(); renderTodo();
+    // Invalidar caché para forzar lectura fresca de Firestore al abrir el panel
+    _datosCache = null;
+    inyectarEstilos(); construirPanel(); await renderTodo();
     document.getElementById('menu-principal')?.classList.add('oculto');
     document.querySelectorAll('.pagina-cuestionario').forEach(p=>p.classList.remove('activa'));
     const bp=document.getElementById('buscador-panel'); if(bp)bp.style.display='none';
@@ -749,8 +801,33 @@
   });
 
   document.addEventListener('DOMContentLoaded',function(){
-    if(window.location.hash==='#vacunas2026'){inyectarEstilos();construirPanel();renderTodo();mostrarPanel({desde:'menu'});}
+    if(window.location.hash==='#vacunas2026'){inyectarEstilos();construirPanel();mostrarPanel({desde:'menu'});}
   });
+
+  // ════════════════════════════════════════════════════════════════
+  // MIGRACIÓN: subir DATA_DEFAULT a Firestore (solo admin, una vez)
+  // Llamar desde consola: window.vac2026MigrarAFirestore()
+  // ════════════════════════════════════════════════════════════════
+  window.vac2026MigrarAFirestore = async function(){
+    if(!window._fbDb || !window.__fb){
+      alert('❌ Firebase no está disponible. Asegurate de estar logueado.');
+      return;
+    }
+    if(typeof window.fbIsAdmin !== 'function' || !window.fbIsAdmin()){
+      alert('❌ Solo el admin puede ejecutar esta migración.');
+      return;
+    }
+    try{
+      const {doc, setDoc} = window.__fb;
+      await setDoc(doc(window._fbDb, 'meta', 'calendarioVacunacion'), DATA_DEFAULT);
+      _datosCache = null; // limpiar caché para forzar recarga
+      alert('✅ Datos del calendario migrados a Firestore correctamente.\nYa podés recargar la página.');
+      console.log('[VAC2026] Migración a Firestore completada.');
+    }catch(e){
+      alert('❌ Error al migrar: ' + e.message);
+      console.error('[VAC2026] Error en migración:', e);
+    }
+  };
 
   // ════════════════════════════════════════════════════════════════
   // INTEGRACIÓN CON EXPLICACIONES Y EDITOR ADMIN
