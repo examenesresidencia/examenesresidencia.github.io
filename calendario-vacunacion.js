@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// calendario-vacunacion.js  — v7
+// calendario-vacunacion.js  — v8
 // Grid 3 columnas · Toggle independiente · Editor admin completo
 // ════════════════════════════════════════════════════════════════
 (function () {
@@ -258,6 +258,16 @@
       .v26-table tbody tr:hover td{background:rgba(56,189,248,0.04);}
       .v26-table tbody td:first-child{font-weight:700;color:#e2e8f0;white-space:nowrap;}
 
+      /* Drag & drop filas (solo admin) */
+      .v26-table tbody tr.v26-draggable{cursor:grab;}
+      .v26-table tbody tr.v26-draggable:active{cursor:grabbing;}
+      .v26-table tbody tr.v26-dragging{opacity:0.4;background:rgba(56,189,248,0.06)!important;}
+      .v26-table tbody tr.v26-drag-over td{border-top:2px solid #38bdf8!important;background:rgba(56,189,248,0.08)!important;}
+      .v26-drag-handle{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#475569;font-size:0.85rem;cursor:grab;flex-shrink:0;margin-right:6px;transition:color .13s;}
+      .v26-drag-handle:hover{color:#38bdf8;}
+      .v26-drag-hint{font-size:0.68rem;color:#334155;font-style:italic;margin-top:6px;padding-left:2px;}
+      .v26-saving-row{pointer-events:none;opacity:0.6;}
+
       /* Intervalos */
       .v26-int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-bottom:24px;}
       .v26-int-card{border-radius:10px;padding:14px 16px;border:1px solid;}
@@ -457,23 +467,93 @@
     const cont=document.getElementById('v26-t-e');
     if(!cont)return;
     const adm=esAdmin();
-    let html=`<div class="v26-twrap"><table class="v26-table"><thead><tr><th>Edad / Grupo</th><th>Vacunas</th><th>Nota</th>`;
+
+    let html=`<div class="v26-twrap"><table class="v26-table" id="v26-edad-table"><thead><tr>`;
+    if(adm)html+=`<th style="width:28px;padding:10px 6px"></th>`;
+    html+=`<th>Edad / Grupo</th><th>Vacunas</th><th>Nota</th>`;
     if(adm)html+=`<th style="width:54px;text-align:center"></th>`;
     html+=`</tr></thead><tbody>`;
+
     data.edadTabla.forEach((r,i)=>{
-      html+=`<tr><td>${r.edad}</td><td>${r.vacunas}</td><td>${r.nota}</td>`;
+      html+=`<tr data-idx="${i}" ${adm?'class="v26-draggable" draggable="true"':''}>`;
+      if(adm)html+=`<td style="padding:6px;text-align:center"><span class="v26-drag-handle" title="Arrastrar para reordenar">⠿</span></td>`;
+      html+=`<td>${r.edad}</td><td>${r.vacunas}</td><td>${r.nota}</td>`;
       if(adm)html+=`<td style="text-align:center;white-space:nowrap">
         <button class="v26-abtn v26-abtn-edit" style="padding:3px 8px" onclick="window._v26EditEdad(${i})">✏️</button>
         <button class="v26-abtn v26-abtn-del"  style="padding:3px 8px;margin-top:3px" onclick="window._v26DelEdad(${i})">🗑</button>
       </td>`;
       html+=`</tr>`;
     });
+
     html+=`</tbody></table></div>`;
-    if(adm)html+=`<div class="v26-adm-bar" style="margin-top:12px">
-      <button class="v26-abtn v26-abtn-add" onclick="window._v26AddEdad()">＋ Agregar fila</button>
-      <button class="v26-abtn v26-abtn-warn" onclick="window._v26EE()">📋 Editar JSON</button>
-    </div>`;
+    if(adm)html+=`
+      <div class="v26-drag-hint">⠿ Arrastrá las filas para reordenarlas — el cambio se guarda automáticamente</div>
+      <div class="v26-adm-bar" style="margin-top:10px">
+        <button class="v26-abtn v26-abtn-add" onclick="window._v26AddEdad()">＋ Agregar fila</button>
+        <button class="v26-abtn v26-abtn-warn" onclick="window._v26EE()">📋 Editar JSON</button>
+      </div>`;
     cont.innerHTML=html;
+
+    // Activar drag & drop solo para admin
+    if(adm) _v26IniciarDragEdad();
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // DRAG & DROP — TABLA POR EDAD
+  // ════════════════════════════════════════════════════════════════
+  function _v26IniciarDragEdad(){
+    const tbody = document.querySelector('#v26-edad-table tbody');
+    if(!tbody) return;
+
+    let dragSrc = null;
+
+    tbody.querySelectorAll('tr').forEach(function(row){
+      row.addEventListener('dragstart', function(e){
+        dragSrc = row;
+        row.classList.add('v26-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', row.dataset.idx);
+      });
+
+      row.addEventListener('dragend', function(){
+        row.classList.remove('v26-dragging');
+        tbody.querySelectorAll('tr').forEach(function(r){ r.classList.remove('v26-drag-over'); });
+      });
+
+      row.addEventListener('dragover', function(e){
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        tbody.querySelectorAll('tr').forEach(function(r){ r.classList.remove('v26-drag-over'); });
+        if(row !== dragSrc) row.classList.add('v26-drag-over');
+      });
+
+      row.addEventListener('dragleave', function(){
+        row.classList.remove('v26-drag-over');
+      });
+
+      row.addEventListener('drop', async function(e){
+        e.preventDefault();
+        row.classList.remove('v26-drag-over');
+        if(!dragSrc || dragSrc === row) return;
+
+        // Calcular posiciones en el DOM actual
+        const allRows = Array.from(tbody.querySelectorAll('tr'));
+        const fromIdx = allRows.indexOf(dragSrc);
+        const toIdx   = allRows.indexOf(row);
+        if(fromIdx === -1 || toIdx === -1) return;
+
+        // Reordenar en el array de datos
+        const data = await cargarDatos();
+        const item = data.edadTabla.splice(fromIdx, 1)[0];
+        data.edadTabla.splice(toIdx, 0, item);
+
+        // Guardar en Firestore y re-renderizar
+        tbody.classList.add('v26-saving-row');
+        await guardarDatos(data);
+        await renderEdad();
+        toast('✅ Orden guardado');
+      });
+    });
   }
 
   // ════════════════════════════════════════════════════════════════
