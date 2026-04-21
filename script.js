@@ -1,4 +1,4 @@
-//PRUEBA 95 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 96 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: panel de debug movido a Admin como switch ON/OFF (apagado por defecto)
 // NUEVO: permiso de selección/copia de texto para admin y email autorizado
 // Fix: panel admin sin estilos al recargar página con sesión activa
@@ -3383,6 +3383,8 @@
 
   let devtools = {open: false, orientation: null};
   setInterval(function() {
+      // Admin y usuarios autorizados pueden usar DevTools sin restricciones
+      if (document.body.classList.contains('can-select')) { devtools.open = false; return; }
       if (window.outerHeight - window.innerHeight > 160 || 
           window.outerWidth - window.innerWidth > 160) {
           if (!devtools.open) {
