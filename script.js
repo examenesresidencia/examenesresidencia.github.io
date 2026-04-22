@@ -1,4 +1,4 @@
-//PRUEBA 3 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 4 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
 // Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
 // Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
@@ -8855,6 +8855,12 @@ function fbSaveProgressToCloud() {
     _startContentVersionWatcher();
     // NOTA: quiz_beforeunload_pending se limpia dentro de fbSyncProgressFromCloud
     // (que ya fue llamado antes de disparar este evento), por lo que NO lo limpiamos aquí.
+    setTimeout(() => {
+      Promise.all(COMPILADOS.map(id => cargarSeccion(id))).then(() => {
+        aplicarExtrapolacion();
+        console.log('[COMPILADOS] Todos cargados y extrapolados en background');
+      });
+    }, 3000);
     console.log('[MÓDULOS FB] Sesión única, heartbeat, inactividad y content-sync activos');
   });
 
