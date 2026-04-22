@@ -1,4 +1,15 @@
-//PRUEBA 96 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 1 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
+// Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
+// Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
+// Fix: si local gana el merge, sube inmediatamente a Firestore en vez de esperar al logout
+// Fix: quiz_beforeunload_pending se procesa en fbSyncProgressFromCloud y no se borra antes en el evento
+// Fix: window._contentVersionUnsubscribes → _contentVersionUnsubscribes (usar variable del closure)
+// Fix: progreso no se pierde al cerrar sesión por sesión duplicada en otro dispositivo
+// Fix: _fbLogoutSilencioso ahora guarda debounce pendiente antes del signOut
+// Fix: progreso no se pierde al cerrar sesión por inactividad
+// Fix: _inactCerrar ahora usa window.fbLogout (wrapper completo) en lugar del fbLogout del closure
+// Fix: fbLogoutConModulos fuerza el guardado en Firestore si hay debounce pendiente al cerrar sesión
 // Fix: panel de debug movido a Admin como switch ON/OFF (apagado por defecto)
 // NUEVO: permiso de selección/copia de texto para admin y email autorizado
 // Fix: panel admin sin estilos al recargar página con sesión activa
@@ -345,6 +356,8 @@
 
   // ======== MANEJO DE NAVEGACIÓN DEL NAVEGADOR ========
   let currentSection = null;
+  let _modoEditarRespuestas = false;
+
 
   // ======== Utilidades ========
   function loadJSON(key, fallback) {
@@ -6206,7 +6219,7 @@
   async function guardarReetiquetado(seccionId, qIndex, nuevaEspecialidad, onExito) {
     const disponible = await verificarServidor();
     if (!disponible) {
-      toast('El servidor local no está disponible. ¿Corriste node servidor.js?', 'error', 5000);
+      mostrarToast('El servidor local no está disponible. ¿Corriste node servidor.js?', 'error', 5000);
       return;
     }
 
@@ -6228,17 +6241,17 @@
       });
       const j = await r.json();
       if (j.ok) {
-        toast(`Especialidad guardada en data/${seccionId}.js → ${nuevaEspecialidad} ✓`, 'exito', 3500);
+        mostrarToast(`Especialidad guardada en data/${seccionId}.js → ${nuevaEspecialidad} ✓`, 'exito', 3500);
         if (onExito) onExito();
         generarCuestionario(seccionId);
       } else {
         // Revertir el cambio en memoria si el servidor falló
         preg.etiquetas.especialidad = especialidadAnterior;
-        toast('Error al guardar: ' + (j.error || 'desconocido'), 'error', 5000);
+        mostrarToast('Error al guardar: ' + (j.error || 'desconocido'), 'error', 5000);
       }
     } catch (err) {
       preg.etiquetas.especialidad = especialidadAnterior;
-      toast('No se pudo conectar con el servidor local.', 'error', 5000);
+      mostrarToasttoast('No se pudo conectar con el servidor local.', 'error', 5000);
     }
   }
 
@@ -7067,6 +7080,10 @@
     try { localStorage.removeItem(TIMER_STORAGE_KEY); } catch {}
     try { localStorage.removeItem(SCROLL_POSITION_KEY); } catch {}
     try { localStorage.removeItem(LAST_SECTION_KEY); } catch {}
+    // Limpiar el timestamp de progreso para que el próximo login
+    // no descarte la nube por creer que el local es más reciente.
+    try { localStorage.removeItem('quiz_progress_ts'); } catch {}
+    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch {}
     // Limpiar secciones en memoria (se recargarán desde caché o Firestore en el próximo login)
     _seccionesYaCargadas.clear();
     if (window.preguntasPorSeccion) window.preguntasPorSeccion = {};
@@ -7183,10 +7200,23 @@
       <div class="admin-section">
         <div class="admin-section-title">Todos los usuarios</div>
         <div id="admin-users-list"><div class="admin-empty">Cargando…</div></div>
-      </div>`;
+      </div>
+      <div class="admin-section">
+        <div style="padding:0 0 4px;">
+          <button id="btn-subir-preguntas" style="
+            width:100%;padding:12px 16px;border:none;border-radius:10px;
+            background:linear-gradient(135deg,#0284c7,#0891b2);
+            color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
+            box-shadow:0 4px 14px rgba(8,145,178,0.35);
+            transition:all 0.2s;letter-spacing:0.02em;">
+            📤 Subir preguntas nuevas
+          </button>
+        </div>
+      </div>`
 
     document.getElementById('fb-admin-close').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('btn-buscar-duplicados').onclick = () => fbAbrirBuscadorDuplicados();
+    document.getElementById('btn-subir-preguntas').onclick = () => fbAbrirSubirPreguntas();
 
     document.getElementById('admin-btn-debug-toggle').onclick = () => {
       _debugPanelEnabled = !_debugPanelEnabled;
@@ -7283,52 +7313,91 @@
   // ── Sincronización de progreso con Firestore ─────────────────
 let _fbProgressUnsubscribe = null;
 
+// Cuenta el total de preguntas respondidas en un objeto state
+function _contarRespuestas(s) {
+  if (!s || typeof s !== 'object') return 0;
+  return Object.values(s).reduce((n, sec) => n + Object.keys(sec?.graded || {}).length, 0);
+}
+
 async function fbSyncProgressFromCloud() {
   if (!_currentUser || !_fbDb) {
     fbToast('⚠️ Error interno: Firebase no inicializado', 'error');
     return;
   }
 
-  const { doc, getDoc } = window.__firebase_firestore;
+  const { doc, getDoc, setDoc, serverTimestamp } = window.__firebase_firestore || window.__fb;
   const uid = _currentUser.uid;
 
   try {
     fbToast('☁️ Cargando progreso…', 'info');
     const snap = await getDoc(doc(_fbDb, 'progress', uid));
 
-    if (!snap.exists()) {
-      fbToast('☁️ Primera vez: sin progreso en la nube', 'info');
-      return;
-    }
-
-    const data = snap.data();
-    if (!data.state) {
-      fbToast('☁️ Sin progreso guardado aún', 'info');
-      return;
-    }
-
-    const cloudTs = data.updatedAt?.toMillis?.() || 0;
-    const localTs = parseInt(localStorage.getItem('quiz_progress_ts') || '0', 10);
-
-    if (cloudTs >= localTs) {
-      // Verificar que el state de la nube tenga progreso real antes de sobreescribir
-      const cloudTieneProgreso = data.state && Object.keys(data.state).some(sid => {
-        const s = data.state[sid];
-        return s && s.graded && Object.keys(s.graded).length > 0;
-      });
-      const localTieneProgreso = Object.keys(state).some(sid => {
-        const s = state[sid];
-        return s && s.graded && Object.keys(s.graded).length > 0;
-      });
-
-      // No sobreescribir progreso local real con estado vacío de la nube
-      if (!cloudTieneProgreso && localTieneProgreso) {
-        fbToast('📱 Progreso local preservado (nube vacía)', 'info');
-        console.warn('[FB-SYNC] Nube tiene state vacío pero local tiene progreso — preservando local');
-        return;
+    // ── Caso: no existe documento en la nube ─────────────────────────
+    if (!snap.exists() || !snap.data()?.state) {
+      // Si hay progreso local válido, subirlo a la nube ahora
+      const localAntes = _contarRespuestas(state);
+      if (localAntes > 0) {
+        console.log('[FB-SYNC] Nube vacía pero hay progreso local —', localAntes, 'respuestas — subiendo a la nube');
+        try {
+          await setDoc(doc(_fbDb, 'progress', uid), {
+            state,
+            attemptLog,
+            updatedAt: serverTimestamp()
+          });
+          localStorage.setItem('quiz_progress_ts', String(Date.now()));
+          fbToast('☁️ Progreso local subido a la nube', 'success');
+        } catch (e) {
+          console.error('[FB-SYNC] Error subiendo progreso local a nube vacía:', e.message);
+          fbToast('⚠️ No se pudo subir el progreso a la nube', 'error');
+        }
+      } else {
+        fbToast('☁️ Primera vez: sin progreso guardado aún', 'info');
       }
+      try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
+      return;
+    }
 
-      // La nube es más reciente (o igual) → usar la nube
+    const data     = snap.data();
+    const cloudTs  = data.updatedAt?.toMillis?.() || 0;
+    const localTs  = parseInt(localStorage.getItem('quiz_progress_ts') || '0', 10);
+
+    // ── Contar respuestas de cada fuente ──────────────────────────────
+    const cloudAnswers = _contarRespuestas(data.state);
+    const localAnswers = _contarRespuestas(state);
+
+    // ── Detectar si el usuario cerró la pestaña con respuestas sin sincronizar ──
+    const hayPendienteLocal = localStorage.getItem('quiz_beforeunload_pending') === '1';
+
+    console.log('[FB-SYNC] cloudTs=%d localTs=%d | cloud=%d resps, local=%d resps | pendiente=%s',
+      cloudTs, localTs, cloudAnswers, localAnswers, hayPendienteLocal);
+
+    // ── Regla de merge: usar la fuente MÁS COMPLETA ──────────────────
+    // Criterio 1: si hay flag de beforeunload pendiente Y el local tiene ≥ respuestas que la nube → local gana
+    // Criterio 2: si la nube tiene MÁS respuestas que el local → nube gana (independientemente del timestamp)
+    // Criterio 3: si tienen igual cantidad de respuestas → timestamp decide
+    // En todos los casos: nunca se sobreescribe progreso real con un state vacío.
+
+    let usarNube;
+    if (cloudAnswers === 0 && localAnswers > 0) {
+      // Nube vacía, local tiene datos → preservar local y subir a nube
+      usarNube = false;
+      console.warn('[FB-SYNC] Nube tiene state vacío pero local tiene progreso — preservando local');
+    } else if (hayPendienteLocal && localAnswers >= cloudAnswers) {
+      // El usuario cerró la pestaña con progreso no sincronizado y el local es igual o más completo
+      usarNube = false;
+      console.log('[FB-SYNC] beforeunload_pending: local tiene', localAnswers, 'vs nube', cloudAnswers, '— preservando local');
+    } else if (cloudAnswers > localAnswers) {
+      // La nube tiene más respuestas → siempre ganar, sin importar el timestamp
+      usarNube = true;
+      console.log('[FB-SYNC] Nube más completa (', cloudAnswers, 'vs', localAnswers, ') → usando nube');
+    } else {
+      // Misma cantidad (o local tiene más) → el timestamp desempata
+      usarNube = cloudTs >= localTs;
+      console.log('[FB-SYNC] Misma cantidad de respuestas → timestamp decide → usarNube=', usarNube);
+    }
+
+    if (usarNube) {
+      // ── Aplicar progreso de la nube ───────────────────────────────
       state      = data.state;
       attemptLog = data.attemptLog || [];
       // Cerrar todas las explicaciones al cargar progreso (login/recarga)
@@ -7339,13 +7408,41 @@ async function fbSyncProgressFromCloud() {
       localStorage.setItem(ATTEMPT_LOG_KEY, JSON.stringify(attemptLog));
       localStorage.setItem('quiz_progress_ts', String(cloudTs));
       window._fbCloudUpdatedAt = cloudTs;
-      fbToast('☁️ Progreso cargado desde la nube', 'success');
+      fbToast('☁️ Progreso cargado desde la nube (' + cloudAnswers + ' respuestas)', 'success');
     } else {
-      // El local es más reciente → no sobreescribir, la nube se actualizará al cerrar sesión
-      fbToast('📱 Progreso local más reciente — se sincronizará al cerrar sesión', 'info');
+      // ── El local es la fuente de verdad — subir a la nube ────────
+      // En vez de esperar al logout, subir ahora para no arriesgar otra pérdida
+      if (localAnswers > 0) {
+        console.log('[FB-SYNC] Local gana con', localAnswers, 'respuestas — subiendo a la nube de inmediato');
+        try {
+          window._fbSyncInProgress = true;
+          await setDoc(doc(_fbDb, 'progress', uid), {
+            state,
+            attemptLog,
+            updatedAt: serverTimestamp()
+          });
+          const nuevoTs = Date.now();
+          localStorage.setItem('quiz_progress_ts', String(nuevoTs));
+          window._fbCloudUpdatedAt = nuevoTs;
+          setTimeout(() => { window._fbSyncInProgress = false; }, 200);
+          fbToast('📱 Progreso local subido a la nube (' + localAnswers + ' respuestas)', 'success');
+        } catch (e) {
+          window._fbSyncInProgress = false;
+          console.error('[FB-SYNC] Error subiendo progreso local:', e.message);
+          fbToast('📱 Progreso local más reciente — se sincronizará al cerrar sesión', 'info');
+        }
+      } else {
+        fbToast('📱 Sin cambios locales pendientes', 'info');
+      }
     }
+
+    // Limpiar el flag de pendiente en todos los casos — ya fue procesado
+    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
+
   } catch (e) {
-    fbToast('❌ Error leyendo Firestore: ' + e.code, 'error');
+    console.error('[FB-SYNC] Error en fbSyncProgressFromCloud:', e);
+    fbToast('❌ Error leyendo Firestore: ' + (e.code || e.message), 'error');
+    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
   }
 }
 
@@ -7447,7 +7544,6 @@ function fbSaveProgressToCloud() {
   // No disponible en el simulacro.
   // ════════════════════════════════════════════════════════════════
 
-  let _modoEditarRespuestas = false;
 
   function fbToggleModoEditarRespuestas() {
     if (!fbIsAdmin()) return;
@@ -7730,21 +7826,30 @@ function fbSaveProgressToCloud() {
   //     edición del admin. Con 3 usuarios y 20 ediciones/día = ~63 lecturas/día
   //     sobre 50.000 disponibles. Impacto mínimo.
 
-  let _contentVersionUnsubscribe = null; // función para cancelar el listener
+  let _contentVersionUnsubscribe = null;
+  let _contentVersionUnsubscribes = []; // listeners por sección (subidas incrementales)
 
   // ── Escribe la nueva versión en Firestore al guardar cualquier edición ──
-  async function _bumpContentVersion(seccionId, qIndex, nuevaCorrecta) {
+  async function _bumpContentVersion(seccionId, qIndex, nuevaCorrecta, opciones = {}) {
     if (!window.__fb || !_fbDb) return;
     try {
       const { doc, setDoc, serverTimestamp } = window.__fb;
-      await setDoc(doc(_fbDb, 'meta', 'contentVersion'), {
-        version   : Date.now(),
-        seccionId,                        // sección afectada
-        qIndex    : qIndex ?? null,       // índice de pregunta (null si afecta a toda la sección)
-        nuevaCorrecta: nuevaCorrecta ?? null, // nueva respuesta correcta (para recalificar)
-        updatedAt : serverTimestamp()
+      // Si vienen preguntas nuevas, escribir en documento propio de la sección
+      // meta/contentVersion_{seccionId} — así múltiples subidas no se pisan entre sí
+      const esSubidaNueva = opciones.startIdx !== undefined && opciones.startIdx !== null;
+      const docId = esSubidaNueva
+        ? 'contentVersion_' + seccionId
+        : 'contentVersion';
+      await setDoc(doc(_fbDb, 'meta', docId), {
+        version      : Date.now(),
+        seccionId,
+        qIndex       : qIndex ?? null,
+        nuevaCorrecta: nuevaCorrecta ?? null,
+        startIdx     : opciones.startIdx ?? null, // null = edición normal, número = subida nueva
+        updatedAt    : serverTimestamp()
       });
-      console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId);
+      console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId,
+        esSubidaNueva ? '| subida incremental desde idx:' + opciones.startIdx : '| edición');
     } catch (e) {
       console.warn('[CONTENT-SYNC] Error al actualizar versión:', e.message);
     }
@@ -7901,68 +8006,155 @@ function fbSaveProgressToCloud() {
     console.log('[CONTENT-SYNC] Sección recargada:', seccionId);
   }
 
+// ── Carga incremental: agrega solo preguntas nuevas desde startIdx ──
+  async function _cargarSeccionIncremental(seccionId, startIdx) {
+    if (!window.__firebase_firestore || !_fbDb) return;
+    try {
+      const { collection, getDocs, query, where, orderBy } = window.__firebase_firestore;
+      const itemsRef = collection(_fbDb, 'preguntas', seccionId, 'items');
+      const q = query(itemsRef, where('_idx', '>=', startIdx), orderBy('_idx'));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        console.log('[CONTENT-SYNC] Incremental: sin documentos nuevos desde idx', startIdx, 'en', seccionId);
+        return;
+      }
+
+      const nuevas = snap.docs.map(d => {
+        const { _idx, ...pregunta } = d.data();
+        pregunta._firestoreIdx = _idx;
+        return pregunta;
+      });
+
+      // Agregar al array en memoria
+      if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+      const actuales = window.preguntasPorSeccion[seccionId] || [];
+      window.preguntasPorSeccion[seccionId] = [...actuales, ...nuevas];
+      _seccionesYaCargadas.add(seccionId);
+
+      // Actualizar caché localStorage
+      try {
+        const rawCache = localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId);
+        const cacheActual = rawCache ? JSON.parse(rawCache) : { preguntas: actuales };
+        localStorage.setItem(PREGUNTAS_CACHE_PREFIX + seccionId, JSON.stringify({
+          ts       : Date.now(),
+          preguntas: [...(cacheActual.preguntas || actuales), ...nuevas]
+        }));
+      } catch (_) {}
+
+      // Guardar version conocida de esta sección
+      try {
+        localStorage.setItem(
+          _CONTENT_VERSION_KEY + '_' + seccionId,
+          String(Date.now())
+        );
+      } catch (_) {}
+
+      console.log('[CONTENT-SYNC] Incremental OK:', seccionId,
+        '| +' + nuevas.length + ' preguntas desde idx', startIdx);
+
+      // Si el usuario está viendo esa sección ahora, mostrar toast (no rerenderizar,
+      // las preguntas nuevas aparecerán la próxima vez que entre a la sección)
+      if (currentSection === seccionId) {
+        fbToast('📥 ' + nuevas.length + ' preguntas nuevas añadidas al final', 'info');
+      }
+
+    } catch (e) {
+      console.warn('[CONTENT-SYNC] Error en carga incremental:', e.message);
+    }
+  }
+
   // ── Inicia el listener en tiempo real sobre meta/contentVersion ──
   const _CONTENT_VERSION_KEY = 'fb_content_version_known'; // versión conocida por el cliente
 
   function _startContentVersionWatcher() {
     if (_contentVersionUnsubscribe) return; // ya activo
     if (!window.__firebase_firestore || !_fbDb) {
-      // Firebase aún no está listo, esperar el evento
       document.addEventListener('firebaseReady', _startContentVersionWatcher, { once: true });
       return;
     }
 
     const { doc, onSnapshot } = window.__firebase_firestore;
-    let primeraLectura = true;
 
+    // ── Listener 1: documento único (ediciones del admin — comportamiento actual) ──
+    let primeraLectura = true;
     _contentVersionUnsubscribe = onSnapshot(
       doc(_fbDb, 'meta', 'contentVersion'),
       (snap) => {
         if (!snap.exists()) { primeraLectura = false; return; }
-
-        const data           = snap.data();
-        const versionRemota  = data.version       ?? null;
-        const seccionId      = data.seccionId     ?? null;
-        const qIndex         = data.qIndex        ?? null;
-        const nuevaCorrecta  = data.nuevaCorrecta ?? null;
+        const data          = snap.data();
+        const versionRemota = data.version       ?? null;
+        const seccionId     = data.seccionId     ?? null;
+        const qIndex        = data.qIndex        ?? null;
+        const nuevaCorrecta = data.nuevaCorrecta ?? null;
 
         if (primeraLectura) {
           primeraLectura = false;
-          // Comparar con la versión que el cliente guardó la última vez
           let versionConocida = null;
           try { versionConocida = localStorage.getItem(_CONTENT_VERSION_KEY); } catch (_) {}
           const hayVersionNueva = versionRemota && String(versionRemota) !== String(versionConocida);
           console.log('[CONTENT-SYNC] Versión remota:', versionRemota, '| conocida:', versionConocida, '| cambio pendiente:', hayVersionNueva);
           if (hayVersionNueva && seccionId) {
-            // FIX: no interrumpir si la sección ya está cargada o siendo renderizada en esta sesión.
-            // En mobile, el snapshot llega mientras generarCuestionario aún está ejecutando
-            // sus lotes con setTimeout, causando una colisión que deja el cuestionario vacío.
-            // Solo invalidar si la sección NO fue cargada todavía en esta sesión.
             if (_seccionesYaCargadas.has(seccionId) || _seccionesEnCarga.has(seccionId)) {
-              console.log('[CONTENT-SYNC] Primera lectura: sección ya cargada en esta sesión, omitiendo invalidación de', seccionId);
+              console.log('[CONTENT-SYNC] Primera lectura: sección ya cargada, omitiendo invalidación de', seccionId);
             } else {
               console.log('[CONTENT-SYNC] Invalidando caché al inicio para sección:', seccionId);
               _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
             }
           }
-          // Guardar versión actual como conocida para la próxima sesión
           try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
           return;
         }
 
-        // Cambio en tiempo real (usuario ya tenía la sesión abierta)
-        console.log('[CONTENT-SYNC] Cambio en tiempo real → sección:', seccionId, '| preg:', qIndex);
+        // Cambio en tiempo real
+        console.log('[CONTENT-SYNC] Edición en tiempo real → sección:', seccionId, '| preg:', qIndex);
         try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
-        if (seccionId) {
-          _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
-        }
+        if (seccionId) _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta);
       },
-      (err) => {
-        console.warn('[CONTENT-SYNC] Error en listener:', err.message);
-      }
+      (err) => { console.warn('[CONTENT-SYNC] Error en listener principal:', err.message); }
     );
 
-    console.log('[CONTENT-SYNC] onSnapshot registrado en meta/contentVersion');
+    // ── Listener 2: uno por cada sección que el usuario tiene en caché ──
+    // Solo escucha secciones que el usuario ya descargó — cero lecturas innecesarias
+    _contentVersionUnsubscribes = _contentVersionUnsubscribes || [];
+    const seccionesEnCache = [];
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
+        .forEach(k => seccionesEnCache.push(k.replace(PREGUNTAS_CACHE_PREFIX, '')));
+    } catch (_) {}
+
+    seccionesEnCache.forEach(seccionId => {
+      const unsub = onSnapshot(
+        doc(_fbDb, 'meta', 'contentVersion_' + seccionId),
+        (snap) => {
+          if (!snap.exists()) return;
+          const data       = snap.data();
+          const version    = data.version  ?? null;
+          const startIdx   = data.startIdx ?? null;
+
+          // Versión conocida por sección
+          let versionConocida = null;
+          try { versionConocida = localStorage.getItem(_CONTENT_VERSION_KEY + '_' + seccionId); } catch (_) {}
+          const esNueva = version && String(version) !== String(versionConocida);
+          if (!esNueva) return;
+
+          console.log('[CONTENT-SYNC] Subida nueva detectada → sección:', seccionId, '| startIdx:', startIdx);
+          try { localStorage.setItem(_CONTENT_VERSION_KEY + '_' + seccionId, String(version)); } catch (_) {}
+
+          if (startIdx !== null) {
+            // Carga incremental: solo las preguntas nuevas
+            _cargarSeccionIncremental(seccionId, startIdx);
+          } else {
+            // Fallback: invalidar y recargar todo (no debería ocurrir con subir-preguntas-admin.js)
+            _invalidarYRecargarSeccion(seccionId, null, null);
+          }
+        },
+        (err) => { console.warn('[CONTENT-SYNC] Error en listener de', seccionId, ':', err.message); }
+      );
+      _contentVersionUnsubscribes.push(unsub);
+    });
+
+    console.log('[CONTENT-SYNC] Listeners activos: 1 global +', seccionesEnCache.length, 'por sección');
   }
 
   // ── Detiene el listener (al cerrar sesión) ──
@@ -7970,8 +8162,12 @@ function fbSaveProgressToCloud() {
     if (_contentVersionUnsubscribe) {
       _contentVersionUnsubscribe();
       _contentVersionUnsubscribe = null;
-      console.log('[CONTENT-SYNC] Listener detenido');
     }
+    if (_contentVersionUnsubscribes) {
+      _contentVersionUnsubscribes.forEach(fn => { try { fn(); } catch (_) {} });
+      _contentVersionUnsubscribes = [];
+    }
+    console.log('[CONTENT-SYNC] Todos los listeners detenidos');
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -8026,13 +8222,40 @@ function fbSaveProgressToCloud() {
 
   // Guardar INMEDIATAMENTE al cerrar pestaña/ventana
   window.addEventListener('beforeunload', () => {
+    // No podemos ejecutar operaciones async en beforeunload,
+    // pero sí podemos sellar el estado en localStorage y dejar
+    // una marca para que el próximo login lo suba a Firestore.
+    if (!_currentUser) return; // Sin sesión activa no hay nada que preservar
+
+    // 1. Cancelar el debounce pendiente (lo vamos a manejar nosotros)
     if (_fbSaveDebounceTimer) {
       clearTimeout(_fbSaveDebounceTimer);
       _fbSaveDebounceTimer = null;
     }
-    // Solo podemos hacer operaciones síncronas aquí.
-    // Marcamos que hay un guardado pendiente para el próximo login.
-    try { localStorage.setItem('quiz_beforeunload_pending', '1'); } catch (_) {}
+
+    try {
+      // 2. Sellar el estado más completo disponible en localStorage.
+      //    Comparar state en memoria vs. localStorage y guardar el que tenga más respuestas.
+      const localRaw  = localStorage.getItem(STORAGE_KEY);
+      const localState = localRaw ? JSON.parse(localRaw) : {};
+      const memAnswers   = Object.values(state).reduce((n, s) => n + Object.keys(s?.graded || {}).length, 0);
+      const localAnswers = Object.values(localState).reduce((n, s) => n + Object.keys(s?.graded || {}).length, 0);
+      const bestState = memAnswers >= localAnswers ? state : localState;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(bestState));
+
+      // 3. Avanzar quiz_progress_ts a NOW para que en el próximo login
+      //    la lógica de comparación elija el local sobre la nube
+      //    (la nube se sincronizará desde este local al volver a entrar).
+      const tsAhora = Date.now();
+      localStorage.setItem('quiz_progress_ts', String(tsAhora));
+
+      // 4. Marcar que hay progreso local pendiente de subir a Firestore
+      localStorage.setItem('quiz_beforeunload_pending', '1');
+
+      console.log('[BEFOREUNLOAD] Estado sellado en localStorage —', Object.keys(bestState).length, 'secciones,', Math.max(memAnswers, localAnswers), 'respuestas');
+    } catch (_) {
+      // Si localStorage falla (cuota excedida, etc.) no podemos hacer nada más
+    }
   });
 
   // ════════════════════════════════════════════════════════════════
@@ -8220,9 +8443,26 @@ function fbSaveProgressToCloud() {
     );
   }
 
-  // Logout silencioso: NO guarda en Firestore porque el nuevo dispositivo
-  // ya es el autorizado. Solo cierra Auth y limpia estado local.
+  // Logout silencioso: se usa cuando la sesión fue desplazada por otro dispositivo.
+  // Guardamos en Firestore si había un debounce pendiente (respuestas recientes sin sincronizar)
+  // ANTES de hacer el signOut, para no perder el progreso del usuario en este dispositivo.
   async function _fbLogoutSilencioso() {
+    // Si hay un guardado pendiente por debounce, ejecutarlo ahora mientras _currentUser es válido
+    if (_fbSaveDebounceTimer) {
+      clearTimeout(_fbSaveDebounceTimer);
+      _fbSaveDebounceTimer = null;
+      try { await new Promise(resolve => {
+        const { doc, setDoc, serverTimestamp } = window.__fb;
+        setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+          state,
+          attemptLog,
+          updatedAt: serverTimestamp()
+        }).then(() => {
+          localStorage.setItem('quiz_progress_ts', String(Date.now()));
+          resolve();
+        }).catch(() => resolve()); // no bloquear el logout si falla
+      }); } catch (_) {}
+    }
     try {
       if (_progressUnsubscribe) { _progressUnsubscribe(); _progressUnsubscribe = null; }
       const { fbSignOut } = window.__fb;
@@ -8239,6 +8479,10 @@ function fbSaveProgressToCloud() {
     try { localStorage.removeItem(TIMER_STORAGE_KEY); } catch (_) {}
     try { localStorage.removeItem(SCROLL_POSITION_KEY); } catch (_) {}
     try { localStorage.removeItem(LAST_SECTION_KEY); } catch (_) {}
+    // Limpiar el timestamp de progreso para que el próximo login
+    // no descarte la nube por creer que el local es más reciente.
+    try { localStorage.removeItem('quiz_progress_ts'); } catch (_) {}
+    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
     _seccionesYaCargadas.clear();
     if (window.preguntasPorSeccion) window.preguntasPorSeccion = {};
     window._fbCurrentUser = null;
@@ -8484,7 +8728,9 @@ function fbSaveProgressToCloud() {
     if (!_currentUser) return;
     console.log('[INACTIVIDAD] Cerrando sesión por inactividad (30 min)');
     _inactStop();
-    fbLogout();
+    // Usar window.fbLogout para pasar por fbLogoutConModulos,
+    // que garantiza que el progreso pendiente se guarda antes del signOut.
+    window.fbLogout();
   }
 
   function _fbInjectInactividadStyles() {
@@ -8579,8 +8825,8 @@ function fbSaveProgressToCloud() {
     _inactStart();
     // Iniciar sincronización de contenido en tiempo real (todos los usuarios, incluso admin)
     _startContentVersionWatcher();
-    // Limpiar flag de beforeunload pendiente
-    try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
+    // NOTA: quiz_beforeunload_pending se limpia dentro de fbSyncProgressFromCloud
+    // (que ya fue llamado antes de disparar este evento), por lo que NO lo limpiamos aquí.
     console.log('[MÓDULOS FB] Sesión única, heartbeat, inactividad y content-sync activos');
   });
 
@@ -8593,7 +8839,22 @@ function fbSaveProgressToCloud() {
     if (_fbSaveDebounceTimer) {
       clearTimeout(_fbSaveDebounceTimer);
       _fbSaveDebounceTimer = null;
-      // El guardado definitivo lo hará fbLogout() original en el paso 7
+      // Forzar el guardado en Firestore AHORA con await — evita race condition
+      // donde el setDoc llega después del signOut y falla con permission-denied.
+      if (_currentUser && _fbDb && window.__fb) {
+        try {
+          const { doc, setDoc, serverTimestamp } = window.__fb;
+          await setDoc(doc(_fbDb, 'progress', _currentUser.uid), {
+            state,
+            attemptLog,
+            updatedAt: serverTimestamp()
+          });
+          localStorage.setItem('quiz_progress_ts', String(Date.now()));
+          console.log('[FB-LOGOUT] Debounce pendiente guardado antes del signOut');
+        } catch (e) {
+          console.error('[FB-LOGOUT] Error guardando debounce pendiente:', e.message);
+        }
+      }
     }
     // 2. Detener sesión única
     if (_fbSessionUnsubscribeLocal) {
@@ -8608,6 +8869,16 @@ function fbSaveProgressToCloud() {
     _stopContentVersionWatcher();
     // 6. Limpiar flag de beforeunload
     try { localStorage.removeItem('quiz_beforeunload_pending'); } catch (_) {}
+    // 6b. Esperar a que termine cualquier setDoc en vuelo antes del signOut
+    if (window._fbSyncInProgress) {
+      await new Promise(resolve => {
+        const check = setInterval(() => {
+          if (!window._fbSyncInProgress) { clearInterval(check); resolve(); }
+        }, 50);
+        setTimeout(() => { clearInterval(check); resolve(); }, 2000); // máximo 2s de espera
+      });
+      console.log('[FB-LOGOUT] Esperó a que terminara el setDoc en vuelo antes del signOut');
+    }
     // 7. Ejecutar logout original (que ya guarda en Firestore)
     await _fbLogoutOriginal();
   };
@@ -8638,5 +8909,10 @@ function fbSaveProgressToCloud() {
   window.GITHUB_IMAGES_BASE   = GITHUB_IMAGES_BASE;
   window.cargarSeccion        = cargarSeccion;
   window.generarCuestionario  = generarCuestionario;
+  window.showSection          = showSection;
+  Object.defineProperty(window, 'currentSection', {
+    get: function () { return currentSection; },
+    configurable: true
+  });
 
 })();
