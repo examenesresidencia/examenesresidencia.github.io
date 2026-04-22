@@ -1,4 +1,4 @@
-//V1
+//V2
 // ════════════════════════════════════════════════════════════════
 // subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
 // Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
@@ -403,6 +403,138 @@
       #sp-resultado-icon { font-size: 2.4rem; margin-bottom: 10px; }
       #sp-resultado-msg  { color: #e2e8f0; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
       #sp-resultado-sub  { color: #64748b; font-size: 0.82rem; }
+
+      /* ── Panel de vaciado ── */
+      #sp-vaciar-panel {
+        margin-top: 28px;
+        border-top: 1px solid rgba(255,255,255,0.06);
+        padding-top: 20px;
+      }
+      #sp-vaciar-toggle {
+        display: flex; align-items: center; gap: 10px;
+        background: none; border: none;
+        color: #475569; font-size: 0.78rem; font-weight: 600;
+        cursor: pointer; padding: 0; letter-spacing: 0.04em;
+        text-transform: uppercase; transition: color 0.2s;
+        width: 100%; text-align: left;
+      }
+      #sp-vaciar-toggle:hover { color: #f87171; }
+      #sp-vaciar-toggle-icon {
+        width: 22px; height: 22px; border-radius: 6px;
+        background: rgba(239,68,68,0.12);
+        border: 1px solid rgba(239,68,68,0.25);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.8rem; flex-shrink: 0;
+        transition: background 0.2s;
+      }
+      #sp-vaciar-toggle:hover #sp-vaciar-toggle-icon {
+        background: rgba(239,68,68,0.22);
+      }
+      #sp-vaciar-toggle-chevron {
+        margin-left: auto; font-size: 0.65rem; color: #334155;
+        transition: transform 0.2s;
+      }
+      #sp-vaciar-toggle.abierto #sp-vaciar-toggle-chevron { transform: rotate(180deg); }
+
+      #sp-vaciar-contenido {
+        display: none; margin-top: 14px;
+        background: rgba(239,68,68,0.04);
+        border: 1px solid rgba(239,68,68,0.15);
+        border-radius: 12px; padding: 18px 20px;
+      }
+      #sp-vaciar-contenido.visible { display: block; }
+
+      #sp-vaciar-aviso {
+        display: flex; gap: 12px; align-items: flex-start;
+        margin-bottom: 16px;
+      }
+      #sp-vaciar-aviso-icon {
+        font-size: 1.5rem; flex-shrink: 0; margin-top: 1px;
+      }
+      #sp-vaciar-aviso-txt {
+        color: #94a3b8; font-size: 0.82rem; line-height: 1.65;
+      }
+      #sp-vaciar-aviso-txt strong { color: #fca5a5; }
+
+      #sp-vaciar-select-wrap {
+        margin-bottom: 14px;
+      }
+      #sp-vaciar-select-label {
+        font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #475569; margin-bottom: 8px;
+        display: block;
+      }
+      #sp-vaciar-select {
+        width: 100%; padding: 10px 14px;
+        background: rgba(255,255,255,0.05);
+        border: 1.5px solid rgba(239,68,68,0.2);
+        border-radius: 10px; color: #f1f5f9; font-size: 0.88rem;
+        outline: none; cursor: pointer; transition: border-color 0.2s;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        padding-right: 36px;
+      }
+      #sp-vaciar-select:focus { border-color: #f87171; }
+      #sp-vaciar-select option, #sp-vaciar-select optgroup { background: #0f172a; color: #e2e8f0; }
+
+      #sp-vaciar-confirm-wrap {
+        display: none; margin-bottom: 14px;
+      }
+      #sp-vaciar-confirm-wrap.visible { display: block; }
+      #sp-vaciar-confirm-label {
+        font-size: 0.75rem; color: #fca5a5; margin-bottom: 7px; display: block;
+        font-weight: 600;
+      }
+      #sp-vaciar-confirm-input {
+        width: 100%; padding: 9px 13px; box-sizing: border-box;
+        background: rgba(239,68,68,0.07);
+        border: 1.5px solid rgba(239,68,68,0.25);
+        border-radius: 8px; color: #f87171; font-size: 0.88rem;
+        outline: none; font-family: monospace; letter-spacing: 0.05em;
+        transition: border-color 0.2s;
+      }
+      #sp-vaciar-confirm-input:focus { border-color: #f87171; }
+      #sp-vaciar-confirm-input.ok { border-color: #34d399; color: #34d399; }
+
+      #sp-vaciar-info {
+        font-size: 0.75rem; color: #475569; margin-bottom: 12px;
+        min-height: 18px; transition: color 0.2s;
+      }
+      #sp-vaciar-info.listo { color: #34d399; }
+      #sp-vaciar-info.error { color: #f87171; }
+
+      #sp-btn-vaciar {
+        width: 100%; padding: 12px 20px; border: none; border-radius: 10px;
+        background: linear-gradient(135deg, #dc2626, #b91c1c);
+        color: #fff; font-size: 0.88rem; font-weight: 800; cursor: pointer;
+        letter-spacing: 0.05em; text-transform: uppercase;
+        box-shadow: 0 4px 18px rgba(220,38,38,0.35);
+        transition: all 0.2s;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+      }
+      #sp-btn-vaciar:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 24px rgba(220,38,38,0.48);
+      }
+      #sp-btn-vaciar:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+      #sp-vaciar-log-wrap { display: none; margin-top: 14px; }
+      #sp-vaciar-progress-wrap { margin-top: 10px; display: none; }
+      #sp-vaciar-progress-labels {
+        display: flex; justify-content: space-between;
+        font-size: 0.74rem; color: #475569; margin-bottom: 5px;
+      }
+      #sp-vaciar-progress-bg {
+        height: 5px; background: rgba(255,255,255,0.06);
+        border-radius: 99px; overflow: hidden;
+      }
+      #sp-vaciar-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #dc2626, #f87171);
+        border-radius: 99px; width: 0%; transition: width 0.3s ease;
+      }
     `;
     document.head.appendChild(s);
   }
@@ -662,6 +794,79 @@
             <div id="sp-resultado-sub"></div>
           </div>
 
+          <!-- ══════════════════════════════════════════════════════
+               ZONA DE PELIGRO — Vaciar cuestionario
+               ══════════════════════════════════════════════════════ -->
+          <div id="sp-vaciar-panel">
+            <button id="sp-vaciar-toggle">
+              <span id="sp-vaciar-toggle-icon">🗑</span>
+              Zona de peligro — Vaciar cuestionario completo
+              <span id="sp-vaciar-toggle-chevron">▼</span>
+            </button>
+            <div id="sp-vaciar-contenido">
+              <div id="sp-vaciar-aviso">
+                <span id="sp-vaciar-aviso-icon">⚠️</span>
+                <div id="sp-vaciar-aviso-txt">
+                  Esta acción <strong>elimina permanentemente todas las preguntas</strong> del cuestionario
+                  seleccionado en Firestore. El cuestionario seguirá existiendo en la app (su lugar en el
+                  menú se mantiene), pero quedará vacío hasta que se suban preguntas nuevas.<br><br>
+                  El <strong>progreso de los usuarios no se ve afectado</strong>. Las preguntas de
+                  especialidades extrapoladas desde este cuestionario también se eliminarán del caché.
+                </div>
+              </div>
+
+              <div id="sp-vaciar-select-wrap">
+                <label id="sp-vaciar-select-label" for="sp-vaciar-select">Cuestionario a vaciar</label>
+                <select id="sp-vaciar-select">
+                  <option value="">Seleccioná el cuestionario a vaciar…</option>
+                  ${_buildSelectOptions()}
+                </select>
+              </div>
+
+              <div id="sp-vaciar-confirm-wrap">
+                <label id="sp-vaciar-confirm-label" for="sp-vaciar-confirm-input">
+                  Escribí el ID del cuestionario para confirmar (ej: <span id="sp-vaciar-confirm-hint">compilado1</span>)
+                </label>
+                <input type="text" id="sp-vaciar-confirm-input"
+                  placeholder="Escribí el ID para confirmar…"
+                  autocomplete="off" spellcheck="false">
+              </div>
+
+              <div id="sp-vaciar-info"></div>
+
+              <button id="sp-btn-vaciar" disabled>
+                <span>🗑</span>
+                <span id="sp-btn-vaciar-txt">VACIAR CUESTIONARIO</span>
+              </button>
+
+              <div id="sp-vaciar-log-wrap">
+                <div id="sp-log-titulo" style="margin-top:14px;">
+                  <div id="sp-vaciar-log-spinner" style="
+                    width:12px;height:12px;border:2px solid rgba(239,68,68,0.3);
+                    border-top-color:#f87171;border-radius:50%;
+                    animation:spSpin 0.6s linear infinite;display:none;
+                  "></div>
+                  <span style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#475569;">📋 Registro de vaciado</span>
+                </div>
+                <div id="sp-vaciar-log-box" style="
+                  background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.06);
+                  border-radius:10px;padding:12px 14px;max-height:180px;overflow-y:auto;
+                  font-family:'Cascadia Code','Fira Code',monospace;
+                  font-size:0.75rem;color:#475569;line-height:1.7;margin-top:8px;
+                "></div>
+                <div id="sp-vaciar-progress-wrap">
+                  <div id="sp-vaciar-progress-labels">
+                    <span id="sp-vaciar-progress-txt">Eliminando…</span>
+                    <span id="sp-vaciar-progress-pct">0%</span>
+                  </div>
+                  <div id="sp-vaciar-progress-bg">
+                    <div id="sp-vaciar-progress-bar"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>`;
 
@@ -758,6 +963,9 @@
       btn.classList.remove('cargando');
       btn.innerHTML = '🔄 Forzar nuevo escaneo desde Firebase';
     });
+
+    // ── Zona de peligro: Vaciar cuestionario ──────────────────────
+    _inicializarEventosVaciar();
   }
 
   // ── Procesar archivos seleccionados ───────────────────────────
@@ -1126,6 +1334,233 @@
       _toast('❌ Error al subir: ' + e.message, 'error');
       btnSubir.disabled = false;
       btnSubir.innerHTML = '<span>⬆️</span><span>REINTENTAR SUBIDA</span>';
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Zona de peligro — Vaciar cuestionario
+  // ════════════════════════════════════════════════════════════════
+
+  function _inicializarEventosVaciar() {
+    // Toggle panel
+    const toggle    = document.getElementById('sp-vaciar-toggle');
+    const contenido = document.getElementById('sp-vaciar-contenido');
+    toggle.addEventListener('click', () => {
+      const abierto = contenido.classList.toggle('visible');
+      toggle.classList.toggle('abierto', abierto);
+    });
+
+    // Selección de cuestionario
+    const selectVaciar = document.getElementById('sp-vaciar-select');
+    const confirmWrap  = document.getElementById('sp-vaciar-confirm-wrap');
+    const confirmInput = document.getElementById('sp-vaciar-confirm-input');
+    const confirmHint  = document.getElementById('sp-vaciar-confirm-hint');
+    const infoEl       = document.getElementById('sp-vaciar-info');
+    const btnVaciar    = document.getElementById('sp-btn-vaciar');
+    const btnTxt       = document.getElementById('sp-btn-vaciar-txt');
+
+    selectVaciar.addEventListener('change', function () {
+      const seccionId = this.value;
+      confirmInput.value = '';
+      confirmInput.classList.remove('ok');
+      infoEl.className = 'sp-vaciar-info';
+      infoEl.textContent = '';
+      btnVaciar.disabled = true;
+
+      if (!seccionId) {
+        confirmWrap.classList.remove('visible');
+        btnTxt.textContent = 'VACIAR CUESTIONARIO';
+        return;
+      }
+
+      // Mostrar cuántas preguntas hay actualmente
+      let cantActual = 0;
+      try {
+        const raw = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
+        if (raw) cantActual = JSON.parse(raw)?.preguntas?.length || 0;
+      } catch (_) {}
+      if (!cantActual && window.preguntasPorSeccion?.[seccionId]) {
+        cantActual = window.preguntasPorSeccion[seccionId].length;
+      }
+
+      const sec = TODAS_LAS_SECCIONES.find(s => s.id === seccionId);
+      confirmHint.textContent = seccionId;
+      confirmWrap.classList.add('visible');
+      infoEl.className = 'sp-vaciar-info';
+      infoEl.textContent = cantActual > 0
+        ? `📋 ${sec?.label} tiene aprox. ${cantActual} preguntas en caché local.`
+        : `⚠️ No hay datos en caché local para esta sección.`;
+      btnTxt.textContent = `VACIAR "${sec?.label?.toUpperCase()}"`;
+    });
+
+    // Validación del campo de confirmación
+    confirmInput.addEventListener('input', function () {
+      const seccionId = selectVaciar.value;
+      const ok = this.value.trim() === seccionId;
+      this.classList.toggle('ok', ok);
+      btnVaciar.disabled = !ok;
+      infoEl.className = 'sp-vaciar-info' + (ok ? ' listo' : '');
+      infoEl.textContent = ok
+        ? '✅ Confirmación correcta. Podés proceder.'
+        : seccionId ? `Escribí exactamente: ${seccionId}` : '';
+    });
+
+    // Acción de vaciado
+    btnVaciar.addEventListener('click', () => _vaciarCuestionario(selectVaciar.value));
+  }
+
+  // ── Lógica de vaciado en Firestore ────────────────────────────
+  async function _vaciarCuestionario(seccionId) {
+    if (!seccionId) return;
+
+    const fsModule = window.__fb || window.__firebase_firestore;
+    if (!fsModule) { _toast('❌ Firestore no disponible', 'error'); return; }
+    const { collection, getDocs, query, orderBy, writeBatch, doc, deleteDoc } = fsModule;
+    const db = window._fbDb;
+    if (!db) { _toast('❌ Base de datos no inicializada', 'error'); return; }
+
+    const sec      = TODAS_LAS_SECCIONES.find(s => s.id === seccionId);
+    const btnVaciar = document.getElementById('sp-btn-vaciar');
+    const logWrap   = document.getElementById('sp-vaciar-log-wrap');
+    const logBox    = document.getElementById('sp-vaciar-log-box');
+    const spinner   = document.getElementById('sp-vaciar-log-spinner');
+    const progWrap  = document.getElementById('sp-vaciar-progress-wrap');
+    const progBar   = document.getElementById('sp-vaciar-progress-bar');
+    const progTxt   = document.getElementById('sp-vaciar-progress-txt');
+    const progPct   = document.getElementById('sp-vaciar-progress-pct');
+    const confirmInput = document.getElementById('sp-vaciar-confirm-input');
+    const selectVaciar = document.getElementById('sp-vaciar-select');
+
+    function logV(tipo, msg) {
+      if (!logBox) return;
+      const line = document.createElement('div');
+      line.className = `sp-log-${tipo}`;
+      const hora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      line.innerHTML = `<span style="color:#1e293b">[${hora}]</span> ${_escapeHtml(msg)}`;
+      logBox.appendChild(line);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    function setProgV(actual, total, texto) {
+      const pct = total > 0 ? Math.round((actual / total) * 100) : 0;
+      if (progBar) progBar.style.width = pct + '%';
+      if (progTxt) progTxt.textContent = texto || `Eliminando ${actual} de ${total}…`;
+      if (progPct) progPct.textContent = pct + '%';
+    }
+
+    // Bloquear UI
+    btnVaciar.disabled = true;
+    btnVaciar.innerHTML = '<span>⏳</span><span>Vaciando…</span>';
+    confirmInput.disabled = true;
+    selectVaciar.disabled = true;
+    logWrap.style.display   = 'block';
+    progWrap.style.display  = 'block';
+    spinner.style.display   = 'block';
+
+    try {
+      logV('info', `Iniciando vaciado de "${sec?.label}" (${seccionId})…`);
+
+      // 1. Obtener todos los documentos de items/
+      logV('info', 'Consultando documentos en Firestore…');
+      const itemsRef = collection(db, 'preguntas', seccionId, 'items');
+      const snap     = await getDocs(query(itemsRef, orderBy('_idx')));
+
+      if (snap.empty) {
+        logV('warn', '⚠️ La sección ya está vacía en Firestore.');
+        spinner.style.display = 'none';
+        btnVaciar.innerHTML = '<span>✅</span><span>YA ESTABA VACÍO</span>';
+        _toast(`ℹ️ "${sec?.label}" ya estaba vacía en Firestore`, 'info');
+        return;
+      }
+
+      const total = snap.size;
+      logV('info', `Se encontraron ${total} preguntas. Eliminando en lotes…`);
+      setProgV(0, total, `0 de ${total} eliminadas…`);
+
+      // 2. Eliminar en lotes de 400 (límite de Firestore writeBatch)
+      const BATCH_SIZE = 400;
+      const docs       = snap.docs;
+      let   eliminadas = 0;
+
+      for (let i = 0; i < docs.length; i += BATCH_SIZE) {
+        const lote  = docs.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+        lote.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+        eliminadas += lote.length;
+        setProgV(eliminadas, total, `${eliminadas} de ${total} eliminadas…`);
+        logV('ok', `✅ Lote eliminado: ${eliminadas}/${total}`);
+      }
+
+      // 3. Actualizar metadato de la sección (total = 0)
+      try {
+        const { setDoc: setDocFn, doc: docFn, serverTimestamp } = fsModule;
+        if (setDocFn && docFn) {
+          await setDocFn(docFn(db, 'preguntas', seccionId), {
+            seccionId,
+            total    : 0,
+            updatedAt: serverTimestamp ? serverTimestamp() : new Date()
+          }, { merge: true });
+          logV('info', 'Metadato de sección actualizado (total: 0)');
+        }
+      } catch (_) {}
+
+      // 4. Limpiar caché local
+      try {
+        localStorage.removeItem(CACHE_KEY_PREFIX + seccionId);
+        if (window.preguntasPorSeccion) {
+          delete window.preguntasPorSeccion[seccionId];
+        }
+        // Limpiar también el caché del buscador de duplicados
+        localStorage.removeItem('fb_dup_scan_cache_v2');
+        // Limpiar caché de especialidades que pudieran tener extrapoladas de esta sección
+        const especialidadesAfectadas = new Set(
+          Object.values(window.MAPA_ESPECIALIDAD_KEY || {})
+        );
+        especialidadesAfectadas.forEach(espId => {
+          try { localStorage.removeItem(CACHE_KEY_PREFIX + espId); } catch (_) {}
+          if (window.preguntasPorSeccion) {
+            delete window.preguntasPorSeccion[espId];
+          }
+        });
+        logV('ok', '✅ Caché local limpiado (sección + especialidades extrapoladas)');
+      } catch (cacheErr) {
+        logV('warn', `⚠️ No se pudo limpiar el caché local: ${cacheErr.message}`);
+      }
+
+      // 5. Notificar a usuarios conectados
+      try {
+        if (typeof window._bumpContentVersion === 'function') {
+          await window._bumpContentVersion(seccionId, null, null, { vaciado: true });
+          logV('ok', '🔔 Usuarios conectados notificados del vaciado');
+        }
+      } catch (bumpErr) {
+        logV('warn', `⚠️ No se pudo notificar content version: ${bumpErr.message}`);
+      }
+
+      // 6. Finalizar UI
+      setProgV(total, total, '¡Vaciado completo!');
+      spinner.style.display = 'none';
+      logV('ok', `🎉 Vaciado finalizado: ${eliminadas} preguntas eliminadas de "${sec?.label}"`);
+
+      btnVaciar.innerHTML   = '<span>✅</span><span>VACIADO COMPLETADO</span>';
+      confirmInput.value    = '';
+      confirmInput.classList.remove('ok');
+      selectVaciar.value    = '';
+      document.getElementById('sp-vaciar-confirm-wrap').classList.remove('visible');
+      document.getElementById('sp-vaciar-info').textContent = '';
+
+      _toast(`🗑 "${sec?.label}" vaciada — ${eliminadas} preguntas eliminadas`, 'success');
+      _actualizarCacheEstado();
+
+    } catch (e) {
+      spinner.style.display = 'none';
+      logV('err', '❌ Error crítico: ' + e.message);
+      btnVaciar.disabled  = false;
+      btnVaciar.innerHTML = '<span>🗑</span><span>REINTENTAR</span>';
+      confirmInput.disabled  = false;
+      selectVaciar.disabled  = false;
+      _toast('❌ Error al vaciar: ' + e.message, 'error');
     }
   }
 
