@@ -1,4 +1,4 @@
-//PRUEBA 2 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 3 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
 // Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
 // Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
@@ -556,12 +556,17 @@
     return seccionId;
   }
 
-  function aplicarExtrapolacion() {
-    if (window._extrapolacionAplicada) return;
-    window._extrapolacionAplicada = true;
+  // DESPUÉS:
+  function aplicarExtrapolacion(soloSeccion) {
+    if (!soloSeccion) {
+      if (window._extrapolacionAplicada) return;
+      window._extrapolacionAplicada = true;
+    }
 
     // Procesar exámenes únicos, UBA y compilados con la misma lógica de extrapolación
-    const fuentesOficiales = [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
+    const fuentesOficiales = soloSeccion
+      ? [soloSeccion]
+      : [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
 
     fuentesOficiales.forEach(seccionId => {
       const preguntas = preguntasPorSeccion[seccionId];
@@ -900,7 +905,7 @@
       }
       return Promise.resolve();
     }).then(() => {
-      aplicarExtrapolacion();
+      aplicarExtrapolacion(esCompilado(seccionId) ? seccionId : undefined);
       _scrollOnNextRender = true;
       generarCuestionario(seccionId);
 
