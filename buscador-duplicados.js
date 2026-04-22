@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V10
+// buscador-duplicados.js- V1
 // ────────────────────────────────────────────────────────────────
 
 
@@ -134,7 +134,6 @@
 
     document.body.appendChild(overlay);
 
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     document.getElementById('dup-close').onclick = () => overlay.remove();
 
     document.getElementById('dup-btn-scan').onclick = () => _escanearDuplicados();
@@ -765,6 +764,41 @@
   // ════════════════════════════════════════════════════════════════
   // Exponer al ámbito global
   // ════════════════════════════════════════════════════════════════
+  // ── Escuchar subidas nuevas desde subir-preguntas-admin.js ──
+  // Actualiza el caché en memoria sin releer Firestore
+  window.addEventListener('sp:preguntasSubidas', ({ detail }) => {
+    const { seccionId, nuevas } = detail;
+    // Solo actuar si ya hay un escaneo cargado en memoria o en localStorage
+    const hayCache = _dupGruposCache.length > 0 || !!localStorage.getItem(_DUP_CACHE_KEY);
+    if (!hayCache) return;
+
+    // Para cada pregunta nueva, ver si su enunciado ya existe en algún grupo
+    nuevas.forEach(item => {
+      const clave = _normalizarEnunciado(item.pregunta);
+      if (!clave) return;
+      const grupoExistente = _dupGruposCache.find(g =>
+        g.length > 0 && _normalizarEnunciado(g[0].pregunta) === clave
+      );
+      if (grupoExistente) {
+        // Era duplicado — agregar al grupo existente
+        grupoExistente.push(item);
+      }
+      // Si es pregunta nueva única, no genera grupo → no hace falta agregar
+    });
+
+    // Actualizar caché localStorage con los grupos actualizados
+    try {
+      const cached = JSON.parse(localStorage.getItem(_DUP_CACHE_KEY) || 'null');
+      if (cached) {
+        cached.grupos        = _dupGruposCache;
+        cached.totalPreguntas = (cached.totalPreguntas || 0) + nuevas.length;
+        localStorage.setItem(_DUP_CACHE_KEY, JSON.stringify(cached));
+        console.log('[DUP-SCAN] Caché actualizado por subida nueva en', seccionId,
+          '+' + nuevas.length + ' preguntas');
+      }
+    } catch (_) {}
+  });
+  
   window.fbAbrirBuscadorDuplicados = fbAbrirBuscadorDuplicados;
   window._dupForzarRescan          = () => _escanearDuplicados(true);
 
