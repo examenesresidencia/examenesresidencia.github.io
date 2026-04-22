@@ -1,0 +1,1142 @@
+//V1
+// ════════════════════════════════════════════════════════════════
+// subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
+// Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
+// ════════════════════════════════════════════════════════════════
+(function () {
+  'use strict';
+
+  // ── Constantes ────────────────────────────────────────────────
+  const CACHE_KEY_PREFIX = 'fb_q_cache_';
+  const UPLOAD_LOG_KEY   = 'fb_upload_log';
+
+  const TODAS_LAS_SECCIONES = [
+    { id: 'unico2016',      label: 'Único 2016',        grupo: 'Exámenes Único' },
+    { id: 'unico2017',      label: 'Único 2017',        grupo: 'Exámenes Único' },
+    { id: 'unico2018',      label: 'Único 2018',        grupo: 'Exámenes Único' },
+    { id: 'unico2019',      label: 'Único 2019',        grupo: 'Exámenes Único' },
+    { id: 'unico2020',      label: 'Único 2020',        grupo: 'Exámenes Único' },
+    { id: 'unico2021',      label: 'Único 2021',        grupo: 'Exámenes Único' },
+    { id: 'unico2022',      label: 'Único 2022',        grupo: 'Exámenes Único' },
+    { id: 'unico2023',      label: 'Único 2023',        grupo: 'Exámenes Único' },
+    { id: 'unico2024',      label: 'Único 2024',        grupo: 'Exámenes Único' },
+    { id: 'unico2025',      label: 'Único 2025',        grupo: 'Exámenes Único' },
+    { id: 'uba2016',        label: 'UBA 2016',          grupo: 'Exámenes UBA' },
+    { id: 'uba2017',        label: 'UBA 2017',          grupo: 'Exámenes UBA' },
+    { id: 'uba2018',        label: 'UBA 2018',          grupo: 'Exámenes UBA' },
+    { id: 'uba2019',        label: 'UBA 2019',          grupo: 'Exámenes UBA' },
+    { id: 'compilado1',     label: 'Compilado 1',       grupo: 'Compilados' },
+    { id: 'compilado2',     label: 'Compilado 2',       grupo: 'Compilados' },
+    { id: 'compilado3',     label: 'Compilado 3',       grupo: 'Compilados' },
+    { id: 'compilado4',     label: 'Compilado 4',       grupo: 'Compilados' },
+    { id: 'compilado5',     label: 'Compilado 5',       grupo: 'Compilados' },
+    { id: 'compilado6',     label: 'Compilado 6',       grupo: 'Compilados' },
+    { id: 'compilado7',     label: 'Compilado 7',       grupo: 'Compilados' },
+    { id: 'compilado8',     label: 'Compilado 8',       grupo: 'Compilados' },
+    { id: 'compilado9',     label: 'Compilado 9',       grupo: 'Compilados' },
+    { id: 'compilado10',    label: 'Compilado 10',      grupo: 'Compilados' },
+    { id: 'pediatria',      label: 'Pediatría',         grupo: 'Especialidades' },
+    { id: 'cardiologia',    label: 'Cardiología',       grupo: 'Especialidades' },
+    { id: 'neurologia',     label: 'Neurología',        grupo: 'Especialidades' },
+    { id: 'endocrinologia', label: 'Endocrinología',    grupo: 'Especialidades' },
+    { id: 'neumonologia',   label: 'Neumonología',      grupo: 'Especialidades' },
+    { id: 'nefrologia',     label: 'Nefrología',        grupo: 'Especialidades' },
+    { id: 'digestivo',      label: 'Digestivo',         grupo: 'Especialidades' },
+    { id: 'hematologia',    label: 'Hematología',       grupo: 'Especialidades' },
+    { id: 'infectologia',   label: 'Infectología',      grupo: 'Especialidades' },
+    { id: 'clinicamedica',  label: 'Clínica Médica',    grupo: 'Especialidades' },
+    { id: 'ginecologia',    label: 'Ginecología',       grupo: 'Especialidades' },
+    { id: 'obstetricia',    label: 'Obstetricia',       grupo: 'Especialidades' },
+    { id: 'cirugia',        label: 'Cirugía',           grupo: 'Especialidades' },
+    { id: 'traumatologia',  label: 'Traumatología',     grupo: 'Especialidades' },
+    { id: 'urologia',       label: 'Urología',          grupo: 'Especialidades' },
+    { id: 'of',             label: 'Oftalmología',      grupo: 'Especialidades' },
+    { id: 'orl',            label: 'ORL',               grupo: 'Especialidades' },
+    { id: 'dermatologia',   label: 'Dermatología',      grupo: 'Especialidades' },
+    { id: 'psiquiatria',    label: 'Psiquiatría',       grupo: 'Especialidades' },
+    { id: 'reumatologia',   label: 'Reumatología',      grupo: 'Especialidades' },
+    { id: 'toxicologia',    label: 'Toxicología',       grupo: 'Especialidades' },
+    { id: 'medicinalegal',  label: 'Medicina Legal',    grupo: 'Especialidades' },
+    { id: 'saludpublica',   label: 'Salud Pública',     grupo: 'Especialidades' },
+    { id: 'medicinafamiliar', label: 'Medicina Familiar', grupo: 'Especialidades' },
+  ];
+
+  // ── Estado del módulo ─────────────────────────────────────────
+  let _preguntasCargadas    = [];   // preguntas parseadas de los archivos .js
+  let _seccionDestino       = '';
+  let _preguntasNuevas      = [];   // sin duplicados — listas para subir
+  let _preguntasDuplicadas  = [];
+  let _cacheEnunciados      = null; // Set de enunciados normalizados de TODOS los cuestionarios
+
+  // ── Normalizar enunciado ──────────────────────────────────────
+  function _norm(texto) {
+    if (!texto) return '';
+    return texto.toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────
+  function _toast(msg, tipo) {
+    if (typeof window.fbToast === 'function') window.fbToast(msg, tipo);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Inyectar estilos
+  // ════════════════════════════════════════════════════════════════
+  function _inyectarEstilos() {
+    if (document.getElementById('sp-admin-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'sp-admin-styles';
+    s.textContent = `
+      /* ── Modal overlay ── */
+      #sp-modal-overlay {
+        position: fixed; inset: 0; z-index: 210000;
+        background: rgba(2, 6, 15, 0.94);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        display: flex; align-items: flex-start; justify-content: center;
+        padding: 20px 12px 40px; overflow-y: auto; box-sizing: border-box;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        animation: spFadeIn 0.22s ease both;
+      }
+      @keyframes spFadeIn { from { opacity:0 } to { opacity:1 } }
+
+      /* ── Contenedor principal ── */
+      #sp-modal-box {
+        max-width: 860px; width: 100%;
+        background: rgba(8, 14, 28, 0.98);
+        border: 1px solid rgba(14, 165, 233, 0.2);
+        border-radius: 24px;
+        box-shadow: 0 40px 100px rgba(0,0,0,0.7), 0 0 0 1px rgba(14,165,233,0.06) inset;
+        overflow: hidden;
+        animation: spSlideIn 0.3s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+      }
+      @keyframes spSlideIn {
+        from { opacity:0; transform: translateY(32px) scale(0.97) }
+        to   { opacity:1; transform: translateY(0) scale(1) }
+      }
+
+      /* ── Header ── */
+      #sp-header {
+        background: linear-gradient(135deg, rgba(2,132,199,0.18), rgba(6,182,212,0.08));
+        border-bottom: 1px solid rgba(14,165,233,0.15);
+        padding: 22px 28px;
+        display: flex; justify-content: space-between; align-items: center;
+      }
+      #sp-header-left { display: flex; align-items: center; gap: 14px; }
+      #sp-header-icon {
+        width: 44px; height: 44px; border-radius: 12px;
+        background: linear-gradient(135deg, #0284c7, #0891b2);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem;
+        box-shadow: 0 4px 16px rgba(8,145,178,0.4);
+      }
+      #sp-header-title {
+        color: #f0f9ff; font-size: 1.1rem; font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      #sp-header-sub {
+        color: rgba(148,163,184,0.7); font-size: 0.76rem; margin-top: 2px;
+      }
+      #sp-btn-close {
+        background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+        color: #94a3b8; border-radius: 50%; width: 36px; height: 36px;
+        font-size: 1rem; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.15s;
+      }
+      #sp-btn-close:hover { background: rgba(239,68,68,0.15); color: #f87171; border-color: rgba(239,68,68,0.3); }
+
+      /* ── Steps indicator ── */
+      #sp-steps {
+        display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+        overflow: hidden;
+      }
+      .sp-step {
+        flex: 1; padding: 12px 8px; text-align: center;
+        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em;
+        text-transform: uppercase; color: #334155;
+        border-right: 1px solid rgba(255,255,255,0.05);
+        transition: all 0.25s; position: relative;
+      }
+      .sp-step:last-child { border-right: none; }
+      .sp-step.activo {
+        color: #38bdf8;
+        background: rgba(14,165,233,0.07);
+      }
+      .sp-step.activo::after {
+        content: '';
+        position: absolute; bottom: 0; left: 0; right: 0;
+        height: 2px; background: linear-gradient(90deg, #0284c7, #06b6d4);
+      }
+      .sp-step.completado { color: #34d399; }
+      .sp-step-num {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 20px; height: 20px; border-radius: 50%;
+        background: rgba(255,255,255,0.06);
+        font-size: 0.68rem; margin-right: 5px;
+        transition: all 0.25s;
+      }
+      .sp-step.activo .sp-step-num { background: #0284c7; color: #fff; }
+      .sp-step.completado .sp-step-num { background: #059669; color: #fff; }
+
+      /* ── Contenido ── */
+      #sp-content { padding: 24px 28px; }
+
+      /* ── Sección card ── */
+      .sp-card {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 14px; padding: 20px; margin-bottom: 16px;
+      }
+      .sp-card-title {
+        font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em;
+        text-transform: uppercase; color: #475569;
+        margin-bottom: 14px; padding-bottom: 10px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        display: flex; align-items: center; gap: 8px;
+      }
+      .sp-card-title span { color: #0ea5e9; }
+
+      /* ── Zona de drop de archivos ── */
+      #sp-dropzone {
+        border: 2px dashed rgba(14,165,233,0.25);
+        border-radius: 12px; padding: 32px 20px;
+        text-align: center; cursor: pointer;
+        transition: all 0.2s;
+        background: rgba(14,165,233,0.03);
+      }
+      #sp-dropzone:hover, #sp-dropzone.drag-over {
+        border-color: #0284c7;
+        background: rgba(14,165,233,0.08);
+      }
+      #sp-dropzone-icon { font-size: 2.2rem; margin-bottom: 10px; }
+      #sp-dropzone-txt { color: #64748b; font-size: 0.85rem; line-height: 1.6; }
+      #sp-dropzone-txt strong { color: #94a3b8; }
+      #sp-input-file { display: none; }
+
+      /* ── Archivos cargados ── */
+      #sp-archivos-lista { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+      .sp-archivo-item {
+        display: flex; align-items: center; gap: 10px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 8px; padding: 9px 12px;
+      }
+      .sp-archivo-icon { font-size: 1rem; flex-shrink: 0; }
+      .sp-archivo-nombre { color: #e2e8f0; font-size: 0.82rem; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sp-archivo-cnt { color: #0ea5e9; font-size: 0.75rem; font-weight: 700; flex-shrink: 0; }
+      .sp-archivo-remove { background: none; border: none; color: #475569; cursor: pointer; font-size: 0.9rem; padding: 2px 4px; border-radius: 4px; transition: color 0.15s; }
+      .sp-archivo-remove:hover { color: #f87171; }
+
+      /* ── Select destino ── */
+      #sp-select-destino {
+        width: 100%; padding: 11px 14px;
+        background: rgba(255,255,255,0.06);
+        border: 1.5px solid rgba(255,255,255,0.1);
+        border-radius: 10px; color: #f1f5f9; font-size: 0.88rem;
+        outline: none; cursor: pointer; transition: border-color 0.2s;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        padding-right: 36px;
+      }
+      #sp-select-destino:focus { border-color: #0284c7; }
+      #sp-select-destino option, #sp-select-destino optgroup {
+        background: #0f172a; color: #e2e8f0;
+      }
+
+      /* ── Info destino ── */
+      #sp-destino-info {
+        margin-top: 10px; padding: 10px 14px;
+        background: rgba(14,165,233,0.07);
+        border: 1px solid rgba(14,165,233,0.15);
+        border-radius: 8px; font-size: 0.8rem; color: #7dd3fc;
+        display: none;
+      }
+
+      /* ── Botón analizar ── */
+      #sp-btn-analizar {
+        width: 100%; padding: 13px 20px; border: none; border-radius: 12px;
+        background: linear-gradient(135deg, #0284c7, #0891b2);
+        color: #fff; font-size: 0.92rem; font-weight: 700; cursor: pointer;
+        letter-spacing: 0.03em;
+        box-shadow: 0 4px 20px rgba(8,145,178,0.4);
+        transition: all 0.2s; margin-top: 4px;
+      }
+      #sp-btn-analizar:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 24px rgba(8,145,178,0.5); }
+      #sp-btn-analizar:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+
+      /* ── Botón forzar rescan ── */
+      #sp-btn-rescan {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 7px 14px; border-radius: 8px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        color: #7dd3fc; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+        transition: all 0.15s;
+      }
+      #sp-btn-rescan:hover { background: rgba(14,165,233,0.1); border-color: rgba(14,165,233,0.3); }
+      #sp-btn-rescan.cargando { opacity: 0.6; pointer-events: none; }
+
+      /* ── Estado caché ── */
+      #sp-cache-estado {
+        font-size: 0.75rem; color: #475569; margin-top: 8px; min-height: 20px;
+      }
+
+      /* ── Panel de resultados ── */
+      #sp-panel-resultados { display: none; }
+      #sp-resumen-bar {
+        display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+      }
+      .sp-stat {
+        flex: 1; min-width: 120px; padding: 14px 16px;
+        border-radius: 12px; text-align: center;
+      }
+      .sp-stat.verde { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); }
+      .sp-stat.roja  { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.2);  }
+      .sp-stat.azul  { background: rgba(14,165,233,0.1); border: 1px solid rgba(14,165,233,0.2); }
+      .sp-stat-num { font-size: 1.8rem; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+      .sp-stat.verde .sp-stat-num { color: #34d399; }
+      .sp-stat.roja  .sp-stat-num { color: #f87171; }
+      .sp-stat.azul  .sp-stat-num { color: #38bdf8; }
+      .sp-stat-lbl { font-size: 0.72rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+
+      /* ── Tabs nuevas/duplicadas ── */
+      #sp-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+      .sp-tab {
+        padding: 7px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+        background: rgba(255,255,255,0.04); color: #64748b;
+        font-size: 0.8rem; font-weight: 600; cursor: pointer;
+        transition: all 0.15s;
+      }
+      .sp-tab.activo.verde { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.3); color: #34d399; }
+      .sp-tab.activo.roja  { background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3);  color: #f87171; }
+
+      /* ── Lista de preguntas ── */
+      #sp-lista-preguntas {
+        max-height: 300px; overflow-y: auto;
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 10px;
+      }
+      #sp-lista-preguntas::-webkit-scrollbar { width: 5px; }
+      #sp-lista-preguntas::-webkit-scrollbar-track { background: transparent; }
+      #sp-lista-preguntas::-webkit-scrollbar-thumb { background: rgba(14,165,233,0.3); border-radius: 3px; }
+
+      .sp-pregunta-item {
+        padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04);
+        display: flex; align-items: flex-start; gap: 10px;
+        transition: background 0.1s;
+      }
+      .sp-pregunta-item:last-child { border-bottom: none; }
+      .sp-pregunta-item:hover { background: rgba(255,255,255,0.02); }
+      .sp-pregunta-badge {
+        flex-shrink: 0; margin-top: 2px; width: 7px; height: 7px;
+        border-radius: 50%; margin-top: 5px;
+      }
+      .sp-pregunta-badge.verde { background: #34d399; }
+      .sp-pregunta-badge.roja  { background: #f87171; }
+      .sp-pregunta-num { color: #475569; font-size: 0.72rem; flex-shrink: 0; margin-top: 3px; font-family: monospace; }
+      .sp-pregunta-txt { color: #cbd5e1; font-size: 0.82rem; line-height: 1.5; flex: 1; }
+      .sp-pregunta-meta { color: #475569; font-size: 0.7rem; margin-top: 2px; }
+      .sp-dup-origen {
+        display: inline-block; padding: 1px 7px; border-radius: 20px;
+        background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25);
+        color: #fca5a5; font-size: 0.68rem; font-weight: 600;
+        margin-top: 4px;
+      }
+
+      /* ── Botón subir ── */
+      #sp-btn-subir {
+        width: 100%; padding: 15px 24px; border: none; border-radius: 14px;
+        background: linear-gradient(135deg, #059669, #047857);
+        color: #fff; font-size: 1rem; font-weight: 800; cursor: pointer;
+        letter-spacing: 0.04em; text-transform: uppercase;
+        box-shadow: 0 5px 24px rgba(5,150,105,0.45);
+        transition: all 0.2s; margin-top: 16px;
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+      }
+      #sp-btn-subir:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(5,150,105,0.55); }
+      #sp-btn-subir:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+      /* ── Panel de log ── */
+      #sp-log-wrap { display: none; margin-top: 16px; }
+      #sp-log-titulo {
+        font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;
+        text-transform: uppercase; color: #475569;
+        margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+      }
+      #sp-log-spinner {
+        width: 12px; height: 12px; border: 2px solid rgba(14,165,233,0.3);
+        border-top-color: #0ea5e9; border-radius: 50%;
+        animation: spSpin 0.6s linear infinite; display: none;
+      }
+      @keyframes spSpin { to { transform: rotate(360deg); } }
+      #sp-log-box {
+        background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 10px; padding: 12px 14px;
+        max-height: 220px; overflow-y: auto;
+        font-family: 'Cascadia Code', 'Fira Code', monospace;
+        font-size: 0.75rem; color: #475569; line-height: 1.7;
+      }
+      #sp-log-box::-webkit-scrollbar { width: 4px; }
+      #sp-log-box::-webkit-scrollbar-thumb { background: rgba(14,165,233,0.25); border-radius: 2px; }
+      .sp-log-ok   { color: #34d399; }
+      .sp-log-err  { color: #f87171; }
+      .sp-log-warn { color: #fbbf24; }
+      .sp-log-info { color: #38bdf8; }
+      .sp-log-dim  { color: #334155; }
+
+      /* ── Barra de progreso subida ── */
+      #sp-progress-wrap { margin-top: 14px; display: none; }
+      #sp-progress-labels { display: flex; justify-content: space-between; font-size: 0.76rem; color: #475569; margin-bottom: 6px; }
+      #sp-progress-bg { height: 6px; background: rgba(255,255,255,0.06); border-radius: 99px; overflow: hidden; }
+      #sp-progress-bar { height: 100%; background: linear-gradient(90deg, #0284c7, #34d399); border-radius: 99px; width: 0%; transition: width 0.4s ease; }
+
+      /* ── Resultado final ── */
+      #sp-resultado-final {
+        display: none; padding: 20px; border-radius: 14px;
+        text-align: center; margin-top: 16px;
+      }
+      #sp-resultado-final.exito { background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); }
+      #sp-resultado-final.error { background: rgba(239,68,68,0.08);  border: 1px solid rgba(239,68,68,0.2);  }
+      #sp-resultado-icon { font-size: 2.4rem; margin-bottom: 10px; }
+      #sp-resultado-msg  { color: #e2e8f0; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+      #sp-resultado-sub  { color: #64748b; font-size: 0.82rem; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Parsear archivo .js de preguntas
+  // ════════════════════════════════════════════════════════════════
+  function _parsearArchivoJS(contenido, nombreArchivo) {
+    // Intentar varios patrones comunes
+    const patrones = [
+      /preguntasPorSeccion\[["']\w+["']\]\s*=\s*(\[[\s\S]*?\]);\s*$/m,
+      /preguntasPorSeccion\[["']\w+["']\]\s*=\s*(\[[\s\S]*\])/,
+      /=\s*(\[\s*\{[\s\S]*\}\s*\])/,
+    ];
+    for (const pat of patrones) {
+      const m = contenido.match(pat);
+      if (m) {
+        try {
+          return JSON.parse(m[1]);
+        } catch (e) {
+          // Intentar eval seguro como fallback
+          try {
+            // eslint-disable-next-line no-new-func
+            const fn = new Function(`
+              const preguntasPorSeccion = {};
+              ${contenido}
+              const keys = Object.keys(preguntasPorSeccion);
+              return keys.length > 0 ? preguntasPorSeccion[keys[0]] : null;
+            `);
+            const result = fn();
+            if (result) return result;
+          } catch (_) {}
+        }
+      }
+    }
+    // Fallback: intentar eval del archivo completo
+    try {
+      // eslint-disable-next-line no-new-func
+      const fn = new Function(`
+        const preguntasPorSeccion = {};
+        ${contenido}
+        const keys = Object.keys(preguntasPorSeccion);
+        return keys.length > 0 ? preguntasPorSeccion[keys[0]] : null;
+      `);
+      const result = fn();
+      if (Array.isArray(result) && result.length > 0) return result;
+    } catch (_) {}
+    throw new Error(`No se pudo parsear "${nombreArchivo}". Verificá que el archivo contenga una asignación a preguntasPorSeccion.`);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Construir caché de enunciados desde localStorage
+  // ════════════════════════════════════════════════════════════════
+  function _construirCacheEnunciados() {
+    const enunciados = new Set();
+    let seccionesConDatos = 0;
+    let totalPreguntas = 0;
+
+    for (const sec of TODAS_LAS_SECCIONES) {
+      try {
+        const raw = localStorage.getItem(CACHE_KEY_PREFIX + sec.id);
+        if (!raw) continue;
+        const cached = JSON.parse(raw);
+        if (!cached || !cached.preguntas || !Array.isArray(cached.preguntas)) continue;
+        for (const p of cached.preguntas) {
+          const n = _norm(p.pregunta);
+          if (n) { enunciados.add(n); totalPreguntas++; }
+        }
+        seccionesConDatos++;
+      } catch (_) {}
+    }
+
+    // También revisar window.preguntasPorSeccion (en memoria)
+    if (window.preguntasPorSeccion) {
+      for (const secId of Object.keys(window.preguntasPorSeccion)) {
+        const pregs = window.preguntasPorSeccion[secId];
+        if (!Array.isArray(pregs)) continue;
+        for (const p of pregs) {
+          const n = _norm(p.pregunta);
+          if (n) enunciados.add(n);
+        }
+      }
+    }
+
+    return { enunciados, seccionesConDatos, totalPreguntas };
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Descargar caché desde Firestore (todas las secciones)
+  // ════════════════════════════════════════════════════════════════
+  async function _descargarCacheFirestore(onProgress) {
+    const fsModule = window.__fb || window.__firebase_firestore;
+    if (!fsModule || typeof fsModule.collection !== 'function') {
+      throw new Error('Firestore no disponible. Iniciá sesión primero.');
+    }
+    const { collection, getDocs, query, orderBy } = fsModule;
+    const db = window._fbDb;
+    if (!db) throw new Error('Base de datos no inicializada.');
+
+    let totalDescargadas = 0;
+    for (let i = 0; i < TODAS_LAS_SECCIONES.length; i++) {
+      const sec = TODAS_LAS_SECCIONES[i];
+      if (onProgress) onProgress(i + 1, TODAS_LAS_SECCIONES.length, sec.id);
+      try {
+        const itemsRef = collection(db, 'preguntas', sec.id, 'items');
+        const q = query(itemsRef, orderBy('_idx'));
+        const snap = await getDocs(q);
+        if (snap.empty) continue;
+        const preguntas = snap.docs.map(d => {
+          const { _idx, ...p } = d.data();
+          p._firestoreIdx = _idx;
+          return p;
+        });
+        localStorage.setItem(CACHE_KEY_PREFIX + sec.id, JSON.stringify({
+          ts: Date.now(), preguntas
+        }));
+        if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+        window.preguntasPorSeccion[sec.id] = preguntas;
+        totalDescargadas += preguntas.length;
+      } catch (e) {
+        console.warn('[SP] Error descargando', sec.id, e.message);
+      }
+    }
+    return totalDescargadas;
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Abrir modal principal
+  // ════════════════════════════════════════════════════════════════
+  function fbAbrirSubirPreguntas() {
+    if (!window.fbIsAdmin || !window.fbIsAdmin()) {
+      _toast('⛔ Solo el administrador puede acceder a esta función', 'error');
+      return;
+    }
+    _inyectarEstilos();
+    document.getElementById('sp-modal-overlay')?.remove();
+
+    // Reset estado
+    _preguntasCargadas   = [];
+    _seccionDestino      = '';
+    _preguntasNuevas     = [];
+    _preguntasDuplicadas = [];
+    _cacheEnunciados     = null;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'sp-modal-overlay';
+    overlay.innerHTML = `
+      <div id="sp-modal-box">
+
+        <!-- Header -->
+        <div id="sp-header">
+          <div id="sp-header-left">
+            <div id="sp-header-icon">📤</div>
+            <div>
+              <div id="sp-header-title">Subir Preguntas</div>
+              <div id="sp-header-sub">Solo se suben al final del cuestionario destino · Sin afectar el progreso de usuarios</div>
+            </div>
+          </div>
+          <button id="sp-btn-close">✕</button>
+        </div>
+
+        <!-- Steps -->
+        <div id="sp-steps">
+          <div class="sp-step activo" id="sp-step-1"><span class="sp-step-num">1</span>Origen</div>
+          <div class="sp-step"       id="sp-step-2"><span class="sp-step-num">2</span>Destino</div>
+          <div class="sp-step"       id="sp-step-3"><span class="sp-step-num">3</span>Análisis</div>
+          <div class="sp-step"       id="sp-step-4"><span class="sp-step-num">4</span>Subida</div>
+        </div>
+
+        <!-- Contenido -->
+        <div id="sp-content">
+
+          <!-- ── PASO A: Origen ─────────────────────────────────── -->
+          <div class="sp-card">
+            <div class="sp-card-title">📂 <span>A</span> — Archivos a subir</div>
+            <div id="sp-dropzone">
+              <div id="sp-dropzone-icon">🗂</div>
+              <div id="sp-dropzone-txt">
+                <strong>Arrastrá archivos .js aquí</strong> o hacé clic para seleccionar<br>
+                <span style="font-size:0.78rem;color:#334155;">Podés seleccionar múltiples archivos o una carpeta completa</span>
+              </div>
+            </div>
+            <input type="file" id="sp-input-file" accept=".js" multiple>
+            <div id="sp-archivos-lista"></div>
+          </div>
+
+          <!-- ── PASO B: Destino ────────────────────────────────── -->
+          <div class="sp-card">
+            <div class="sp-card-title">🎯 <span>B</span> — Cuestionario destino</div>
+            <select id="sp-select-destino">
+              <option value="">Seleccioná el cuestionario destino…</option>
+              ${_buildSelectOptions()}
+            </select>
+            <div id="sp-destino-info"></div>
+          </div>
+
+          <!-- ── Cache status + botón analizar ─────────────────── -->
+          <div class="sp-card">
+            <div class="sp-card-title" style="margin-bottom:10px;">🔍 <span>Análisis</span> de duplicados</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+              <div id="sp-cache-estado">Verificando caché local…</div>
+              <button id="sp-btn-rescan">🔄 Forzar nuevo escaneo desde Firebase</button>
+            </div>
+            <button id="sp-btn-analizar" disabled>🔍 Analizar preguntas</button>
+          </div>
+
+          <!-- ── Panel resultados ───────────────────────────────── -->
+          <div id="sp-panel-resultados">
+            <div id="sp-resumen-bar">
+              <div class="sp-stat azul">
+                <div class="sp-stat-num" id="sp-cnt-total">0</div>
+                <div class="sp-stat-lbl">Total cargadas</div>
+              </div>
+              <div class="sp-stat verde">
+                <div class="sp-stat-num" id="sp-cnt-nuevas">0</div>
+                <div class="sp-stat-lbl">✅ Nuevas</div>
+              </div>
+              <div class="sp-stat roja">
+                <div class="sp-stat-num" id="sp-cnt-dup">0</div>
+                <div class="sp-stat-lbl">🔁 Duplicadas</div>
+              </div>
+            </div>
+
+            <div id="sp-tabs">
+              <button class="sp-tab activo verde" id="sp-tab-nuevas">✅ Nuevas (<span id="sp-tab-cnt-nuevas">0</span>)</button>
+              <button class="sp-tab" id="sp-tab-dup">🔁 Duplicadas (<span id="sp-tab-cnt-dup">0</span>)</button>
+            </div>
+            <div id="sp-lista-preguntas"></div>
+
+            <!-- Botón subir -->
+            <button id="sp-btn-subir" disabled>
+              <span>⬆️</span>
+              <span id="sp-btn-subir-txt">SUBIR AL FINAL DEL CUESTIONARIO</span>
+            </button>
+          </div>
+
+          <!-- ── Log de subida ──────────────────────────────────── -->
+          <div id="sp-log-wrap">
+            <div id="sp-log-titulo">
+              <div id="sp-log-spinner"></div>
+              <span>📋 Registro de operaciones</span>
+            </div>
+            <div id="sp-log-box"></div>
+            <div id="sp-progress-wrap">
+              <div id="sp-progress-labels">
+                <span id="sp-progress-txt">Preparando…</span>
+                <span id="sp-progress-pct">0%</span>
+              </div>
+              <div id="sp-progress-bg"><div id="sp-progress-bar"></div></div>
+            </div>
+          </div>
+
+          <!-- ── Resultado final ────────────────────────────────── -->
+          <div id="sp-resultado-final">
+            <div id="sp-resultado-icon"></div>
+            <div id="sp-resultado-msg"></div>
+            <div id="sp-resultado-sub"></div>
+          </div>
+
+        </div>
+      </div>`;
+
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('sp-btn-close').onclick = () => overlay.remove();
+
+    _inicializarEventos();
+    _actualizarCacheEstado();
+  }
+
+  // ── Construir options del select ──────────────────────────────
+  function _buildSelectOptions() {
+    const grupos = {};
+    for (const s of TODAS_LAS_SECCIONES) {
+      if (!grupos[s.grupo]) grupos[s.grupo] = [];
+      grupos[s.grupo].push(s);
+    }
+    return Object.entries(grupos).map(([grupo, secs]) => `
+      <optgroup label="${grupo}">
+        ${secs.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}
+      </optgroup>
+    `).join('');
+  }
+
+  // ── Actualizar estado del caché en pantalla ───────────────────
+  function _actualizarCacheEstado() {
+    const { enunciados, seccionesConDatos, totalPreguntas } = _construirCacheEnunciados();
+    const el = document.getElementById('sp-cache-estado');
+    if (!el) return;
+    if (seccionesConDatos === 0) {
+      el.innerHTML = `<span style="color:#f87171;">⚠️ No hay caché local — necesitás forzar un escaneo para comparar duplicados</span>`;
+    } else {
+      el.innerHTML = `<span style="color:#34d399;">✅ Caché disponible</span> <span style="color:#475569;">— ${seccionesConDatos} secciones · ${totalPreguntas.toLocaleString()} preguntas</span>`;
+    }
+    _cacheEnunciados = enunciados;
+  }
+
+  // ── Inicializar eventos ───────────────────────────────────────
+  function _inicializarEventos() {
+    const dropzone  = document.getElementById('sp-dropzone');
+    const inputFile = document.getElementById('sp-input-file');
+
+    // Drag & drop
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      _procesarArchivos(Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.js')));
+    });
+    dropzone.addEventListener('click', () => inputFile.click());
+    inputFile.addEventListener('change', e => {
+      _procesarArchivos(Array.from(e.target.files));
+      inputFile.value = '';
+    });
+
+    // Select destino
+    document.getElementById('sp-select-destino').addEventListener('change', function () {
+      _seccionDestino = this.value;
+      _actualizarDestinoInfo();
+      _verificarListoParaAnalizar();
+    });
+
+    // Analizar
+    document.getElementById('sp-btn-analizar').addEventListener('click', _analizarPreguntas);
+
+    // Tabs
+    document.getElementById('sp-tab-nuevas').addEventListener('click', () => _mostrarTab('nuevas'));
+    document.getElementById('sp-tab-dup').addEventListener('click',    () => _mostrarTab('dup'));
+
+    // Subir
+    document.getElementById('sp-btn-subir').addEventListener('click', _subirPreguntas);
+
+    // Forzar rescan
+    document.getElementById('sp-btn-rescan').addEventListener('click', async () => {
+      const btn = document.getElementById('sp-btn-rescan');
+      btn.classList.add('cargando');
+      btn.textContent = '⏳ Descargando desde Firebase…';
+      const logWrap = document.getElementById('sp-log-wrap');
+      logWrap.style.display = 'block';
+      _log('info', 'Iniciando descarga de todas las secciones desde Firebase…');
+      try {
+        const total = await _descargarCacheFirestore((actual, maximo, secId) => {
+          _log('dim', `→ Descargando ${secId} (${actual}/${maximo})…`);
+        });
+        _log('ok', `✅ Descarga completa: ${total.toLocaleString()} preguntas en caché`);
+        _actualizarCacheEstado();
+        _toast('✅ Caché actualizado desde Firebase', 'success');
+      } catch (e) {
+        _log('err', '❌ Error: ' + e.message);
+        _toast('❌ Error al descargar: ' + e.message, 'error');
+      }
+      btn.classList.remove('cargando');
+      btn.innerHTML = '🔄 Forzar nuevo escaneo desde Firebase';
+    });
+  }
+
+  // ── Procesar archivos seleccionados ───────────────────────────
+  async function _procesarArchivos(files) {
+    if (!files.length) return;
+    for (const file of files) {
+      try {
+        const contenido = await file.text();
+        const preguntas = _parsearArchivoJS(contenido, file.name);
+        if (!Array.isArray(preguntas) || preguntas.length === 0) {
+          _toast(`⚠️ "${file.name}" no contiene preguntas válidas`, 'info');
+          continue;
+        }
+        // Evitar cargar el mismo archivo dos veces
+        const yaExiste = _preguntasCargadas.some(p => p._archivo === file.name);
+        if (!yaExiste) {
+          preguntas.forEach(p => p._archivo = file.name);
+          _preguntasCargadas.push(...preguntas);
+        }
+        _renderArchivoItem(file.name, preguntas.length);
+      } catch (e) {
+        _toast(`❌ Error en "${file.name}": ${e.message}`, 'error');
+      }
+    }
+    _verificarListoParaAnalizar();
+    _actualizarStep(1);
+  }
+
+  // ── Renderizar ítem de archivo cargado ────────────────────────
+  function _renderArchivoItem(nombre, cantidad) {
+    const lista = document.getElementById('sp-archivos-lista');
+    // Evitar duplicados visuales
+    if (lista.querySelector(`[data-archivo="${nombre}"]`)) return;
+    const item = document.createElement('div');
+    item.className = 'sp-archivo-item';
+    item.dataset.archivo = nombre;
+    item.innerHTML = `
+      <span class="sp-archivo-icon">📄</span>
+      <span class="sp-archivo-nombre">${nombre}</span>
+      <span class="sp-archivo-cnt">${cantidad} pregs.</span>
+      <button class="sp-archivo-remove" title="Quitar archivo">✕</button>
+    `;
+    item.querySelector('.sp-archivo-remove').onclick = () => {
+      _preguntasCargadas = _preguntasCargadas.filter(p => p._archivo !== nombre);
+      item.remove();
+      _verificarListoParaAnalizar();
+    };
+    lista.appendChild(item);
+  }
+
+  // ── Actualizar info del destino ───────────────────────────────
+  function _actualizarDestinoInfo() {
+    const info = document.getElementById('sp-destino-info');
+    if (!_seccionDestino) { info.style.display = 'none'; return; }
+    const sec = TODAS_LAS_SECCIONES.find(s => s.id === _seccionDestino);
+    let cantActual = 0;
+    try {
+      const raw = localStorage.getItem(CACHE_KEY_PREFIX + _seccionDestino);
+      if (raw) {
+        const c = JSON.parse(raw);
+        cantActual = c?.preguntas?.length || 0;
+      }
+    } catch (_) {}
+    if (!cantActual && window.preguntasPorSeccion?.[_seccionDestino]) {
+      cantActual = window.preguntasPorSeccion[_seccionDestino].length;
+    }
+    info.style.display = 'block';
+    info.innerHTML = `📋 <strong>${sec?.label}</strong> — ${cantActual > 0 ? `<strong>${cantActual}</strong> preguntas actuales en el cuestionario` : `<span style="color:#fbbf24;">Sin datos en caché local — las preguntas nuevas se posicionarán al final según Firebase</span>`}`;
+    _actualizarStep(2);
+  }
+
+  // ── Verificar si se puede analizar ───────────────────────────
+  function _verificarListoParaAnalizar() {
+    const btn = document.getElementById('sp-btn-analizar');
+    if (!btn) return;
+    btn.disabled = !(_preguntasCargadas.length > 0 && _seccionDestino);
+  }
+
+  // ── Actualizar indicador de pasos ─────────────────────────────
+  function _actualizarStep(paso) {
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById('sp-step-' + i);
+      if (!el) continue;
+      el.classList.remove('activo', 'completado');
+      if (i < paso) el.classList.add('completado');
+      else if (i === paso) el.classList.add('activo');
+    }
+  }
+
+  // ── Analizar preguntas ────────────────────────────────────────
+  function _analizarPreguntas() {
+    if (!_preguntasCargadas.length || !_seccionDestino) return;
+
+    // Reconstruir caché de enunciados
+    const { enunciados } = _construirCacheEnunciados();
+    _cacheEnunciados = enunciados;
+
+    _preguntasNuevas     = [];
+    _preguntasDuplicadas = [];
+
+    for (const p of _preguntasCargadas) {
+      const n = _norm(p.pregunta);
+      if (!n) continue;
+      if (_cacheEnunciados.has(n)) {
+        _preguntasDuplicadas.push(p);
+      } else {
+        _preguntasNuevas.push(p);
+      }
+    }
+
+    // Actualizar UI
+    document.getElementById('sp-cnt-total').textContent  = _preguntasCargadas.length;
+    document.getElementById('sp-cnt-nuevas').textContent = _preguntasNuevas.length;
+    document.getElementById('sp-cnt-dup').textContent    = _preguntasDuplicadas.length;
+    document.getElementById('sp-tab-cnt-nuevas').textContent = _preguntasNuevas.length;
+    document.getElementById('sp-tab-cnt-dup').textContent    = _preguntasDuplicadas.length;
+
+    document.getElementById('sp-panel-resultados').style.display = 'block';
+    document.getElementById('sp-btn-subir').disabled = _preguntasNuevas.length === 0;
+
+    const txtBtn = document.getElementById('sp-btn-subir-txt');
+    const sec = TODAS_LAS_SECCIONES.find(s => s.id === _seccionDestino);
+    txtBtn.textContent = _preguntasNuevas.length > 0
+      ? `SUBIR ${_preguntasNuevas.length} PREGUNTA${_preguntasNuevas.length > 1 ? 'S' : ''} NUEVAS → ${sec?.label}`
+      : 'NO HAY PREGUNTAS NUEVAS PARA SUBIR';
+
+    _mostrarTab('nuevas');
+    _actualizarStep(3);
+
+    // Scroll al panel
+    document.getElementById('sp-panel-resultados').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ── Mostrar tab ───────────────────────────────────────────────
+  function _mostrarTab(cual) {
+    const lista = document.getElementById('sp-lista-preguntas');
+    const tabN  = document.getElementById('sp-tab-nuevas');
+    const tabD  = document.getElementById('sp-tab-dup');
+
+    tabN.classList.remove('activo', 'verde', 'roja');
+    tabD.classList.remove('activo', 'verde', 'roja');
+
+    if (cual === 'nuevas') {
+      tabN.classList.add('activo', 'verde');
+      lista.innerHTML = '';
+      if (_preguntasNuevas.length === 0) {
+        lista.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;font-size:0.85rem;">No hay preguntas nuevas.</div>';
+        return;
+      }
+      _preguntasNuevas.forEach((p, i) => {
+        const div = document.createElement('div');
+        div.className = 'sp-pregunta-item';
+        div.innerHTML = `
+          <div class="sp-pregunta-badge verde"></div>
+          <span class="sp-pregunta-num">#${i + 1}</span>
+          <div>
+            <div class="sp-pregunta-txt">${_escapeHtml(p.pregunta || '(sin enunciado)')}</div>
+            <div class="sp-pregunta-meta">${p.opciones?.length || 0} opciones · ${p._archivo || ''}</div>
+          </div>`;
+        lista.appendChild(div);
+      });
+    } else {
+      tabD.classList.add('activo', 'roja');
+      lista.innerHTML = '';
+      if (_preguntasDuplicadas.length === 0) {
+        lista.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;font-size:0.85rem;">No hay duplicadas.</div>';
+        return;
+      }
+      _preguntasDuplicadas.forEach((p, i) => {
+        const div = document.createElement('div');
+        div.className = 'sp-pregunta-item';
+        div.innerHTML = `
+          <div class="sp-pregunta-badge roja"></div>
+          <span class="sp-pregunta-num">#${i + 1}</span>
+          <div>
+            <div class="sp-pregunta-txt">${_escapeHtml(p.pregunta || '(sin enunciado)')}</div>
+            <div class="sp-pregunta-meta">${p.opciones?.length || 0} opciones · ${p._archivo || ''}</div>
+            <div class="sp-dup-origen">🔁 Ya existe en el cuestionario</div>
+          </div>`;
+        lista.appendChild(div);
+      });
+    }
+  }
+
+  // ── Log helper ────────────────────────────────────────────────
+  function _log(tipo, msg) {
+    const box = document.getElementById('sp-log-box');
+    if (!box) return;
+    const line = document.createElement('div');
+    line.className = `sp-log-${tipo}`;
+    const hora = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    line.innerHTML = `<span style="color:#1e293b">[${hora}]</span> ${_escapeHtml(msg)}`;
+    box.appendChild(line);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // ── Actualizar barra de progreso ──────────────────────────────
+  function _setProgreso(actual, total, texto) {
+    const pct = total > 0 ? Math.round((actual / total) * 100) : 0;
+    const bar = document.getElementById('sp-progress-bar');
+    const txt = document.getElementById('sp-progress-txt');
+    const num = document.getElementById('sp-progress-pct');
+    if (bar) bar.style.width = pct + '%';
+    if (txt) txt.textContent = texto || `Subiendo ${actual} de ${total}…`;
+    if (num) num.textContent = pct + '%';
+  }
+
+  // ── Subir preguntas a Firestore ───────────────────────────────
+  async function _subirPreguntas() {
+    if (_preguntasNuevas.length === 0) return;
+
+    const fsModule = window.__fb || window.__firebase_firestore;
+    if (!fsModule) { _toast('❌ Firestore no disponible', 'error'); return; }
+    const { collection, getDocs, query, orderBy, writeBatch, doc, where } = fsModule;
+    const db = window._fbDb;
+    if (!db) { _toast('❌ Base de datos no inicializada', 'error'); return; }
+
+    // Bloquear botón
+    const btnSubir = document.getElementById('sp-btn-subir');
+    btnSubir.disabled = true;
+    btnSubir.innerHTML = '<span>⏳</span><span>Subiendo…</span>';
+
+    // Mostrar log y progreso
+    const logWrap = document.getElementById('sp-log-wrap');
+    logWrap.style.display = 'block';
+    document.getElementById('sp-log-spinner').style.display = 'block';
+    document.getElementById('sp-progress-wrap').style.display = 'block';
+    _actualizarStep(4);
+
+    try {
+      const seccionId = _seccionDestino;
+      const sec = TODAS_LAS_SECCIONES.find(s => s.id === seccionId);
+      _log('info', `Iniciando subida a "${sec?.label}" (${seccionId})`);
+      _log('info', `${_preguntasNuevas.length} preguntas nuevas a subir`);
+
+      // 1. Obtener el _idx máximo actual en Firestore
+      _log('info', 'Consultando el índice máximo actual en Firebase…');
+      const itemsRef = collection(db, 'preguntas', seccionId, 'items');
+      const q = query(itemsRef, orderBy('_idx'));
+      const snap = await getDocs(q);
+
+      let maxIdx = -1;
+      snap.forEach(d => {
+        const idx = d.data()._idx;
+        if (typeof idx === 'number' && idx > maxIdx) maxIdx = idx;
+      });
+      const startIdx = maxIdx + 1;
+      _log('ok', `Índice máximo actual: ${maxIdx} → nuevas preguntas desde _idx: ${startIdx}`);
+      _log('info', `Total preguntas actuales en Firebase: ${snap.size}`);
+
+      // 2. Subir en lotes de 400
+      const BATCH_SIZE = 400;
+      let subidas = 0;
+      const errores = [];
+
+      for (let i = 0; i < _preguntasNuevas.length; i += BATCH_SIZE) {
+        const lote = _preguntasNuevas.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        lote.forEach((p, j) => {
+          const idx = startIdx + i + j;
+          const docId = String(idx).padStart(5, '0');
+          // Limpiar campo interno antes de subir
+          const { _archivo, _firestoreIdx, ...pregLimpia } = p;
+          const docRef = doc(db, 'preguntas', seccionId, 'items', docId);
+          batch.set(docRef, { ...pregLimpia, _idx: idx });
+        });
+
+        await batch.commit();
+        subidas += lote.length;
+        _setProgreso(subidas, _preguntasNuevas.length, `Subiendo lote… ${subidas}/${_preguntasNuevas.length}`);
+        _log('ok', `✅ Lote ${Math.ceil((i + BATCH_SIZE) / BATCH_SIZE)}: ${lote.length} preguntas subidas (idx ${startIdx + i} → ${startIdx + i + lote.length - 1})`);
+      }
+
+      // 3. Actualizar metadato de la sección
+      try {
+        const { setDoc, doc: docFn, serverTimestamp } = fsModule;
+        if (setDoc && docFn) {
+          await setDoc(docFn(db, 'preguntas', seccionId), {
+            seccionId,
+            total: snap.size + subidas,
+            updatedAt: serverTimestamp ? serverTimestamp() : new Date()
+          }, { merge: true });
+          _log('info', `Metadato de sección actualizado (total: ${snap.size + subidas})`);
+        }
+      } catch (_) {}
+
+      // 4. Actualizar caché local con las nuevas preguntas
+      _log('info', 'Actualizando caché local…');
+      try {
+        const rawCache = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
+        let preguntasActuales = [];
+        if (rawCache) {
+          const c = JSON.parse(rawCache);
+          preguntasActuales = c?.preguntas || [];
+        } else if (window.preguntasPorSeccion?.[seccionId]) {
+          preguntasActuales = window.preguntasPorSeccion[seccionId];
+        }
+        const preguntasConIdx = _preguntasNuevas.map((p, i) => {
+          const { _archivo, ...limpia } = p;
+          return { ...limpia, _firestoreIdx: startIdx + i };
+        });
+        const preguntasActualizadas = [...preguntasActuales, ...preguntasConIdx];
+        localStorage.setItem(CACHE_KEY_PREFIX + seccionId, JSON.stringify({
+          ts: Date.now(),
+          preguntas: preguntasActualizadas
+        }));
+        if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+        window.preguntasPorSeccion[seccionId] = preguntasActualizadas;
+        _log('ok', `✅ Caché local actualizado: ${preguntasActualizadas.length} preguntas totales`);
+      } catch (cacheErr) {
+        _log('warn', `⚠️ No se pudo actualizar el caché local: ${cacheErr.message}`);
+      }
+
+      // 5. Invalidar caché del buscador de duplicados para que refleje los cambios
+      try { localStorage.removeItem('fb_dup_scan_cache_v2'); } catch (_) {}
+
+      // 6. Notificar a usuarios conectados (carga incremental — solo las nuevas)
+      try {
+        if (typeof window._bumpContentVersion === 'function') {
+          await window._bumpContentVersion(seccionId, null, null, { startIdx });
+          _log('ok', '🔔 Usuarios conectados notificados — recibirán solo las preguntas nuevas');
+        }
+      } catch (bumpErr) {
+        _log('warn', `⚠️ No se pudo notificar content version: ${bumpErr.message}`);
+      }
+
+      // 7. Emitir evento para que buscador-duplicados actualice su caché en memoria
+      try {
+        const preguntasParaBuscador = _preguntasNuevas.map((p, i) => ({
+          seccionId,
+          docId   : String(startIdx + i).padStart(5, '0'),
+          idx     : startIdx + i,
+          pregunta: p.pregunta || '',
+          huerfana: false
+        }));
+        window.dispatchEvent(new CustomEvent('sp:preguntasSubidas', {
+          detail: { seccionId, startIdx, nuevas: preguntasParaBuscador }
+        }));
+      } catch (_) {}
+
+      _setProgreso(_preguntasNuevas.length, _preguntasNuevas.length, '¡Subida completa!');
+      _log('ok', `🎉 Subida finalizada: ${subidas} preguntas añadidas a "${sec?.label}"`);
+      if (errores.length > 0) _log('warn', `⚠️ ${errores.length} errores durante la subida`);
+
+      // Mostrar resultado
+      document.getElementById('sp-log-spinner').style.display = 'none';
+      const rfinal = document.getElementById('sp-resultado-final');
+      rfinal.style.display = 'block';
+      rfinal.className = 'exito';
+      document.getElementById('sp-resultado-icon').textContent = '🎉';
+      document.getElementById('sp-resultado-msg').textContent  = `${subidas} pregunta${subidas > 1 ? 's' : ''} subida${subidas > 1 ? 's' : ''} correctamente`;
+      document.getElementById('sp-resultado-sub').innerHTML    = `Añadidas al final de <strong>${sec?.label}</strong> · Caché local actualizado · Progreso de usuarios intacto`;
+
+      _toast(`✅ ${subidas} preguntas subidas a ${sec?.label}`, 'success');
+
+    } catch (e) {
+      _log('err', '❌ Error crítico: ' + e.message);
+      document.getElementById('sp-log-spinner').style.display = 'none';
+      const rfinal = document.getElementById('sp-resultado-final');
+      rfinal.style.display = 'block';
+      rfinal.className = 'error';
+      document.getElementById('sp-resultado-icon').textContent = '❌';
+      document.getElementById('sp-resultado-msg').textContent  = 'Error durante la subida';
+      document.getElementById('sp-resultado-sub').textContent  = e.message;
+      _toast('❌ Error al subir: ' + e.message, 'error');
+      btnSubir.disabled = false;
+      btnSubir.innerHTML = '<span>⬆️</span><span>REINTENTAR SUBIDA</span>';
+    }
+  }
+
+  // ── Escape HTML ───────────────────────────────────────────────
+  function _escapeHtml(str) {
+    return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Exponer globalmente
+  // ════════════════════════════════════════════════════════════════
+  window.fbAbrirSubirPreguntas = fbAbrirSubirPreguntas;
+
+})();
