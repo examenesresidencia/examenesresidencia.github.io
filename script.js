@@ -1,4 +1,4 @@
-//PRUEBA 4 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 5 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
 // Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
 // Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
@@ -557,16 +557,24 @@
   }
 
   // DESPUÉS:
-  function aplicarExtrapolacion(soloSeccion) {
-    if (!soloSeccion) {
+  function aplicarExtrapolacion(soloSeccion, opciones) {
+    // opciones.hacia: si se pasa, fuerza extrapolar compilados ya cargados HACIA esa
+    // especialidad destino. No usa ni modifica el guard global _extrapolacionAplicada.
+    const especialidadDestino = opciones && opciones.hacia ? opciones.hacia : null;
+
+    if (!soloSeccion && !especialidadDestino) {
       if (window._extrapolacionAplicada) return;
       window._extrapolacionAplicada = true;
     }
 
-    // Procesar exámenes únicos, UBA y compilados con la misma lógica de extrapolación
-    const fuentesOficiales = soloSeccion
-      ? [soloSeccion]
-      : [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
+    // Procesar exámenes únicos, UBA y compilados con la misma lógica de extrapolación.
+    // Cuando se usa opciones.hacia, procesar todas las fuentes ya en memoria
+    // (Únicos, UBA y compilados) para inyectar en la especialidad destino.
+    const fuentesOficiales = especialidadDestino
+      ? [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS].filter(id => !!preguntasPorSeccion[id])
+      : soloSeccion
+        ? [soloSeccion]
+        : [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
 
     fuentesOficiales.forEach(seccionId => {
       const preguntas = preguntasPorSeccion[seccionId];
@@ -581,6 +589,9 @@
                     etqEspecialidad.toLowerCase()
                       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                       .replace(/\s+/g, '');
+
+        // Si se pasó especialidadDestino, solo inyectar en esa especialidad
+        if (especialidadDestino && key !== especialidadDestino) return;
 
         if (!preguntasPorSeccion[key]) return; // especialidad no existe en la BD
 
@@ -909,6 +920,14 @@
       return Promise.resolve();
     }).then(() => {
       aplicarExtrapolacion(esCompilado(seccionId) ? seccionId : undefined);
+      // Si es una especialidad (no compilado, no simulador), forzar re-extrapolación
+      // de todas las fuentes ya en memoria (Únicos, UBA y compilados) hacia esta
+      // especialidad. Esto cubre el caso en que esas fuentes se cargaron en caché
+      // ANTES de que la especialidad estuviera en memoria, por lo que la extrapolación
+      // global no pudo inyectarlas (preguntasPorSeccion[key] no existía aún).
+      if (!esCompilado(seccionId) && !esExamenOficial(seccionId) && seccionId !== 'simulador') {
+        aplicarExtrapolacion(undefined, { hacia: seccionId });
+      }
       _scrollOnNextRender = true;
       generarCuestionario(seccionId);
 
@@ -6443,8 +6462,19 @@
               const _hashAlAuth = window.location.hash.substring(1);
               if (_hashAlAuth && _hashAlAuth !== 'menu') {
                 history.replaceState({ section: _hashAlAuth }, _hashAlAuth, '#' + _hashAlAuth);
-                showSection(_hashAlAuth);
-                currentSection = _hashAlAuth;
+                // Si hay hash (recarga de página), esperar a que las fuentes de
+                // extrapolación (Únicos, UBA, compilados) estén listas antes de
+                // mostrar la especialidad. Así la extrapolación siempre tiene
+                // todos los datos disponibles, incluso al recargar.
+                const mostrarConFuentes = () => {
+                  showSection(_hashAlAuth);
+                  currentSection = _hashAlAuth;
+                };
+                if (window._fuentesExtrapolacionListas) {
+                  window._fuentesExtrapolacionListas.then(mostrarConFuentes);
+                } else {
+                  mostrarConFuentes();
+                }
               } else {
                 history.replaceState({ section: null }, 'Menú Principal', '#menu');
                 showMenu();
@@ -8843,6 +8873,11 @@ function fbSaveProgressToCloud() {
   // ════════════════════════════════════════════════════════════════
 
   // Cuando el usuario está aprobado y su progreso cargó, iniciamos todo
+  // Promesa global que resuelve cuando todas las fuentes de extrapolación
+  // (Únicos, UBA y compilados) están cargadas en memoria.
+  // showSection la espera si hay hash en la URL (recarga de página).
+  window._fuentesExtrapolacionListas = null;
+
   document.addEventListener('fb:usuarioAprobadoActivo', () => {
     if (!_currentUser || !_currentUserData) return;
     // Registrar sesión única
@@ -8855,12 +8890,18 @@ function fbSaveProgressToCloud() {
     _startContentVersionWatcher();
     // NOTA: quiz_beforeunload_pending se limpia dentro de fbSyncProgressFromCloud
     // (que ya fue llamado antes de disparar este evento), por lo que NO lo limpiamos aquí.
-    setTimeout(() => {
-      Promise.all(COMPILADOS.map(id => cargarSeccion(id))).then(() => {
-        aplicarExtrapolacion();
-        console.log('[COMPILADOS] Todos cargados y extrapolados en background');
-      });
-    }, 3000);
+
+    // Cargar TODAS las fuentes de extrapolación en background inmediatamente,
+    // sin delay. Así están disponibles antes de que el usuario abra cualquier
+    // especialidad, tanto en login normal como al recargar la página.
+    const todasLasFuentes = [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
+    window._fuentesExtrapolacionListas = Promise.all(
+      todasLasFuentes.map(id => cargarSeccion(id))
+    ).then(() => {
+      aplicarExtrapolacion();
+      console.log('[FUENTES] Únicos, UBA y compilados cargados y extrapolados en background');
+    });
+
     console.log('[MÓDULOS FB] Sesión única, heartbeat, inactividad y content-sync activos');
   });
 
