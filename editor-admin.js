@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V1
+// editor-admin.js  — V8
 // ────────────────────────────────────────────────────────────────
 
 
@@ -761,6 +761,7 @@
       const btn = document.getElementById('edit-q-save');
       btn.disabled = true; btn.textContent = 'Guardando…';
 
+      preg._enunciadoOriginal = preg.pregunta; // guardar antes de mutar, para búsqueda en fuente
       preg.pregunta    = nuevaPreg;
       preg.opciones    = nuevasOpciones;
       preg.correcta    = nuevaCorrecta;
@@ -782,6 +783,50 @@
         }, { merge: true });
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
+
+        // ── Propagar edición a la sección fuente si la pregunta fue extrapolada ──
+        // Si la pregunta vino de un examen único, UBA o compilado, guardar la misma
+        // edición también en esa fuente, usando el qIndex original (buscado por enunciado).
+        const seccionOrigen = preg._origenExamen || preg._origenUnico || null;
+        if (seccionOrigen && seccionOrigen !== seccionId) {
+          try {
+            const preguntasFuente = (window.preguntasPorSeccion || {})[seccionOrigen] || [];
+            // Buscar el índice original comparando el enunciado original (antes de la edición)
+            // Como ya mutamos preg.pregunta arriba, comparamos con nuevaPreg
+            const enunciadoNorm = t => (t || '').trim().replace(/^\d+[\.\-\)]\s*/, '').replace(/\s+/g,' ').toLowerCase();
+            const qIndexOrigen = preguntasFuente.findIndex(p =>
+              enunciadoNorm(p.pregunta) === enunciadoNorm(nuevaPreg) ||
+              // También buscar por enunciado anterior (por si el admin cambió el texto)
+              enunciadoNorm(p.pregunta) === enunciadoNorm(preg._enunciadoOriginal || '')
+            );
+
+            if (qIndexOrigen !== -1) {
+              await setDoc(doc(_fbDb, 'questions', `${seccionOrigen}_${qIndexOrigen}`), {
+                seccionId  : seccionOrigen,
+                qIndex     : qIndexOrigen,
+                pregunta   : nuevaPreg,
+                opciones   : nuevasOpciones,
+                correcta   : nuevaCorrecta,
+                explicacion: nuevaExpl,
+                updatedAt  : serverTimestamp(),
+                updatedBy  : _currentUser.uid
+              }, { merge: true });
+
+              // Invalidar caché de la sección fuente también
+              try { localStorage.removeItem('fb_edits_cache_' + seccionOrigen); } catch (_) {}
+              try { localStorage.removeItem('fb_q_cache_'    + seccionOrigen); } catch (_) {}
+              if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionOrigen);
+              if (window.preguntasPorSeccion)  delete window.preguntasPorSeccion[seccionOrigen];
+
+              console.log('🔗 Edición propagada a fuente:', seccionOrigen, '→ qIndex', qIndexOrigen);
+              _eaToast(`✅ Guardado también en ${seccionOrigen}`, 'success');
+            } else {
+              console.warn('⚠️ No se encontró la pregunta en la fuente:', seccionOrigen, '— no se propagó.');
+            }
+          } catch (propErr) {
+            console.warn('⚠️ No se pudo propagar la edición a la fuente:', seccionOrigen, propErr.message);
+          }
+        }
 
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
         try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
@@ -805,6 +850,30 @@
         if (state[seccionId] && state[seccionId].explanationShown) {
           state[seccionId].explanationShown = {};
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        // ── Preservar el orden visual actual de las preguntas sin responder ──
+        // Antes de re-renderizar, capturamos del DOM el orden exacto en que están
+        // las preguntas sin responder y lo guardamos en unansweredOrder temporalmente.
+        // Así getDisplayOrder respeta ese orden en este re-render puntual y
+        // restoreSelectionsAndGrades puede restaurar cada respuesta en la pregunta
+        // correcta. Sin esto, las sin responder se re-mezclan con Date.now() y el
+        // shuffleMap queda desfasado → respuestas aparecen en preguntas equivocadas.
+        if (state[seccionId]) {
+          const contDOM = document.getElementById(`cuestionario-${seccionId}`);
+          const sState = state[seccionId];
+          if (contDOM) {
+            const puntajeEls = contDOM.querySelectorAll('[id^="puntaje-' + seccionId + '-"]');
+            const ordenDOM = [];
+            puntajeEls.forEach(el => {
+              const idx = parseInt(el.id.replace(`puntaje-${seccionId}-`, ''), 10);
+              if (!isNaN(idx) && (!sState.graded || !sState.graded[idx])) ordenDOM.push(idx);
+            });
+            if (ordenDOM.length > 0) {
+              sState.unansweredOrder = ordenDOM;
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            }
+          }
         }
 
         if (typeof window.cargarSeccion === 'function')       await window.cargarSeccion(seccionId);
