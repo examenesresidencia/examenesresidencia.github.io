@@ -1,4 +1,4 @@
-//V3
+//V2
 // ════════════════════════════════════════════════════════════════
 // subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
 // Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
@@ -559,6 +559,16 @@
   // Parsear archivo .js de preguntas
   // ════════════════════════════════════════════════════════════════
   function _parsearArchivoJS(contenido, nombreArchivo) {
+    // Limpiar comentarios de línea (ej: los que inserta QDuplicator).
+    // Problema: QDuplicator reemplaza la coma separadora del array con el comentario,
+    // dejando  }  \n  // comentario  \n  {  sin coma → JSON inválido.
+    // Solución: reemplazar cada línea de comentario por una coma si el contexto lo requiere.
+    const contenidoLimpio = contenido
+      // Primero reemplazar líneas que son SOLO un comentario // por nada (línea vacía)
+      .replace(/^[ \t]*\/\/[^\n]*$/gm, '')
+      // Luego asegurarse de que entre  }  y  {  haya siempre una coma
+      .replace(/\}\s*\n(\s*)\{/g, '},\n$1{');
+
     // Intentar varios patrones comunes
     const patrones = [
       /preguntasPorSeccion\[["']\w+["']\]\s*=\s*(\[[\s\S]*?\]);\s*$/m,
@@ -566,7 +576,7 @@
       /=\s*(\[\s*\{[\s\S]*\}\s*\])/,
     ];
     for (const pat of patrones) {
-      const m = contenido.match(pat);
+      const m = contenidoLimpio.match(pat);
       if (m) {
         try {
           return JSON.parse(m[1]);
@@ -576,7 +586,7 @@
             // eslint-disable-next-line no-new-func
             const fn = new Function(`
               const preguntasPorSeccion = {};
-              ${contenido}
+              ${contenidoLimpio}
               const keys = Object.keys(preguntasPorSeccion);
               return keys.length > 0 ? preguntasPorSeccion[keys[0]] : null;
             `);
@@ -586,12 +596,12 @@
         }
       }
     }
-    // Fallback: intentar eval del archivo completo
+    // Fallback: intentar eval del archivo completo (limpio)
     try {
       // eslint-disable-next-line no-new-func
       const fn = new Function(`
         const preguntasPorSeccion = {};
-        ${contenido}
+        ${contenidoLimpio}
         const keys = Object.keys(preguntasPorSeccion);
         return keys.length > 0 ? preguntasPorSeccion[keys[0]] : null;
       `);
