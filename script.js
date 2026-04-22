@@ -7214,7 +7214,29 @@
 
     document.getElementById('fb-admin-close').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('btn-buscar-duplicados').onclick = () => fbAbrirBuscadorDuplicados();
-    document.getElementById('btn-subir-preguntas').onclick = () => window.fbAbrirSubirPreguntas();
+    document.getElementById('btn-subir-preguntas').onclick = () => {
+      if (typeof window.fbAbrirSubirPreguntas === 'function') {
+        window.fbAbrirSubirPreguntas();
+      } else {
+        // Cargar el módulo dinámicamente si no fue incluido en el HTML
+        const existing = document.querySelector('script[src*="subir-preguntas-admin"]');
+        if (existing) {
+          _toast('⏳ Módulo cargando, intentá de nuevo en un segundo…', 'info');
+          return;
+        }
+        const s = document.createElement('script');
+        s.src = 'subir-preguntas-admin.js';
+        s.onload = () => {
+          if (typeof window.fbAbrirSubirPreguntas === 'function') {
+            window.fbAbrirSubirPreguntas();
+          } else {
+            _toast('❌ No se pudo cargar el módulo subir-preguntas-admin.js', 'error');
+          }
+        };
+        s.onerror = () => _toast('❌ No se encontró subir-preguntas-admin.js', 'error');
+        document.head.appendChild(s);
+      }
+    };
 
     document.getElementById('admin-btn-debug-toggle').onclick = () => {
       _debugPanelEnabled = !_debugPanelEnabled;
