@@ -1,4 +1,4 @@
-//PRUEBA 7 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 8 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: preguntas sin responder se re-mezclan en cada entrada a la sección (nuevo orden aleatorio
 //      cada vez que se recarga o se vuelve desde el menú/otra sección). Las preguntas respondidas
 //      permanecen fijas arriba con sus respuestas correctamente restauradas.
@@ -2100,14 +2100,27 @@
       if (!graded[i]) unanswered.push(i);
     }
 
-    // 2) Sin responder: siempre mezclar con semilla nueva al entrar/volver a la sección.
-    //    Las preguntas respondidas (arriba) son fijas; solo las sin responder se re-mezclan.
-    //    El shuffleMap de opciones de preguntas sin responder no existe aún, así que
-    //    también se regenerará al renderizar cada una (comportamiento correcto).
-    const shuffledUnanswered = shuffle(unanswered, seccionId + '-' + Date.now());
+    // 2) Sin responder: normalmente se mezclan con semilla nueva cada vez que se entra.
+    //    EXCEPCIÓN: si editor-admin guardó un unansweredOrder capturado del DOM justo
+    //    antes del re-render post-guardado, respetarlo para que restoreSelectionsAndGrades
+    //    pueda restaurar cada respuesta en la pregunta correcta (el shuffleMap está
+    //    asociado a ese orden exacto). Se borra inmediatamente después para que la
+    //    próxima entrada voluntaria vuelva a mezclar normalmente.
+    let shuffledUnanswered;
+    if (s.unansweredOrder && s.unansweredOrder.length > 0) {
+      // Filtrar por si alguna fue respondida entre medias o el total de preguntas cambió
+      const unansweredSet = new Set(unanswered);
+      const ordenFiltrado = s.unansweredOrder.filter(i => unansweredSet.has(i));
+      // Agregar al final cualquier índice nuevo que no estuviera en el orden guardado
+      const enOrden = new Set(ordenFiltrado);
+      unanswered.forEach(i => { if (!enOrden.has(i)) ordenFiltrado.push(i); });
+      shuffledUnanswered = ordenFiltrado;
+    } else {
+      // Entrada voluntaria normal: mezclar con semilla nueva
+      shuffledUnanswered = shuffle(unanswered, seccionId + '-' + Date.now());
+    }
 
-    // No persistir unansweredOrder: se quiere un orden nuevo en cada entrada.
-    // limpiarSeccion ya borraba este campo, así que no hay cambio en el flujo de reinicio.
+    // Limpiar siempre: si había un orden guardado ya lo usamos; la próxima entrada mezclará de cero.
     s.unansweredOrder = [];
     if (!window._fbSyncInProgress) {
       saveJSON(STORAGE_KEY, state);
