@@ -1,4 +1,7 @@
-//PRUEBA 5 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 6 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix: orden de preguntas inconsistente al volver a una sección después de navegar a otra
+//      — unansweredOrder ahora se persiste en localStorage para que el orden sea idéntico
+//        al re-entrar a la sección (desde el menú, desde vacunas, o desde cualquier otra página)
 // Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
 // Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
 // Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
@@ -2097,8 +2100,8 @@
       if (!graded[i]) unanswered.push(i);
     }
 
-    // 2) Sin responder: usar el orden guardado si existe (re-render forzado por sync del admin),
-    //    o mezclar con semilla nueva si es una entrada voluntaria del usuario.
+    // 2) Sin responder: usar el orden guardado si existe (re-render forzado por sync del admin,
+    //    o re-entrada a la misma sección), o mezclar con semilla nueva si es la primera entrada.
     let shuffledUnanswered;
     if (s.unansweredOrder && s.unansweredOrder.length > 0) {
       // Filtrar por si alguna pregunta fue respondida entre medias o el total cambió
@@ -2109,13 +2112,18 @@
       unanswered.forEach(i => { if (!enOrden.has(i)) ordenFiltrado.push(i); });
       shuffledUnanswered = ordenFiltrado;
     } else {
-      // Entrada voluntaria: mezclar con semilla nueva
+      // Primera entrada voluntaria: mezclar con semilla nueva
       shuffledUnanswered = shuffle(unanswered, seccionId + '-' + Date.now());
     }
 
-    // Limpiar unansweredOrder del storage para que la próxima entrada voluntaria
-    // vuelva a mezclar normalmente
-    s.unansweredOrder = [];
+    // IMPORTANTE: Persistir el unansweredOrder calculado para que al volver a la sección
+    // (desde el menú, desde otra sección, o desde vacunas) el orden sea IDÉNTICO.
+    // Esto evita que las respuestas guardadas aparezcan asignadas a preguntas incorrectas.
+    // Solo se resetea cuando el usuario explícitamente reinicia el cuestionario (limpiarSeccion).
+    s.unansweredOrder = shuffledUnanswered.slice();
+    if (!window._fbSyncInProgress) {
+      saveJSON(STORAGE_KEY, state);
+    }
 
     // Concatenar: respondidas primero (fijas), luego sin responder
     _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
