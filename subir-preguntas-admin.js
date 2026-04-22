@@ -1,4 +1,4 @@
-//V2
+//V3
 // ════════════════════════════════════════════════════════════════
 // subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
 // Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
@@ -551,6 +551,22 @@
         border-color: rgba(14,165,233,0.3);
         color: #7dd3fc;
       }
+
+      #sp-btn-subir-reset {
+        width: 100%; margin-top: 12px;
+        padding: 12px 20px; border-radius: 12px;
+        background: rgba(14,165,233,0.08);
+        border: 1px solid rgba(14,165,233,0.25);
+        color: #38bdf8; font-size: 0.88rem; font-weight: 700; cursor: pointer;
+        letter-spacing: 0.04em; text-transform: uppercase;
+        transition: all 0.2s;
+        display: none; align-items: center; justify-content: center; gap: 10px;
+      }
+      #sp-btn-subir-reset:hover {
+        background: rgba(14,165,233,0.15);
+        border-color: rgba(14,165,233,0.45);
+        transform: translateY(-1px);
+      }
     `;
     document.head.appendChild(s);
   }
@@ -818,6 +834,9 @@
             <div id="sp-resultado-icon"></div>
             <div id="sp-resultado-msg"></div>
             <div id="sp-resultado-sub"></div>
+            <button id="sp-btn-subir-reset">
+              🔄 Subir otro cuestionario
+            </button>
           </div>
 
           <!-- ══════════════════════════════════════════════════════
@@ -1348,6 +1367,13 @@
       document.getElementById('sp-resultado-msg').textContent  = `${subidas} pregunta${subidas > 1 ? 's' : ''} subida${subidas > 1 ? 's' : ''} correctamente`;
       document.getElementById('sp-resultado-sub').innerHTML    = `Añadidas al final de <strong>${sec?.label}</strong> · Caché local actualizado · Progreso de usuarios intacto`;
 
+      // Mostrar botón para subir otro cuestionario
+      const btnSubirReset = document.getElementById('sp-btn-subir-reset');
+      if (btnSubirReset) {
+        btnSubirReset.style.display = 'flex';
+        btnSubirReset.onclick = () => _resetearPanelSubir();
+      }
+
       _toast(`✅ ${subidas} preguntas subidas a ${sec?.label}`, 'success');
 
     } catch (e) {
@@ -1599,6 +1625,64 @@
       selectVaciar.disabled  = false;
       _toast('❌ Error al vaciar: ' + e.message, 'error');
     }
+  }
+
+  // ── Resetear panel de subida para nueva operación ────────────
+  function _resetearPanelSubir() {
+    // Reset estado del módulo
+    _preguntasCargadas   = [];
+    _seccionDestino      = '';
+    _preguntasNuevas     = [];
+    _preguntasDuplicadas = [];
+    _cacheEnunciados     = null;
+
+    // Limpiar lista de archivos cargados
+    const listaArchivos = document.getElementById('sp-archivos-lista');
+    if (listaArchivos) listaArchivos.innerHTML = '';
+
+    // Resetear selector de destino e info
+    const selectDestino = document.getElementById('sp-select-destino');
+    if (selectDestino) selectDestino.value = '';
+    const destinoInfo = document.getElementById('sp-destino-info');
+    if (destinoInfo) destinoInfo.style.display = 'none';
+
+    // Ocultar y limpiar panel de resultados
+    const panelResultados = document.getElementById('sp-panel-resultados');
+    if (panelResultados) panelResultados.style.display = 'none';
+
+    // Ocultar y limpiar log + progreso
+    const logWrap = document.getElementById('sp-log-wrap');
+    if (logWrap) logWrap.style.display = 'none';
+    const logBox = document.getElementById('sp-log-box');
+    if (logBox) logBox.innerHTML = '';
+    const progWrap = document.getElementById('sp-progress-wrap');
+    if (progWrap) progWrap.style.display = 'none';
+    const progBar = document.getElementById('sp-progress-bar');
+    if (progBar) progBar.style.width = '0%';
+
+    // Ocultar resultado final y reset button
+    const rfinal = document.getElementById('sp-resultado-final');
+    if (rfinal) { rfinal.style.display = 'none'; rfinal.className = ''; }
+    const btnSubirReset = document.getElementById('sp-btn-subir-reset');
+    if (btnSubirReset) btnSubirReset.style.display = 'none';
+
+    // Resetear botón subir
+    const btnSubir = document.getElementById('sp-btn-subir');
+    if (btnSubir) {
+      btnSubir.disabled = true;
+      btnSubir.innerHTML = '<span>⬆️</span><span id="sp-btn-subir-txt">SUBIR AL FINAL DEL CUESTIONARIO</span>';
+    }
+
+    // Deshabilitar botón analizar
+    const btnAnalizar = document.getElementById('sp-btn-analizar');
+    if (btnAnalizar) btnAnalizar.disabled = true;
+
+    // Actualizar steps al inicio
+    _actualizarStep(1);
+    _actualizarCacheEstado();
+
+    // Scroll arriba del modal
+    document.getElementById('sp-content')?.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   // ── Resetear panel de vaciado para nueva operación ───────────
