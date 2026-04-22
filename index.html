@@ -1007,7 +1007,7 @@
            signOut, sendPasswordResetEmail, onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getFirestore, doc, setDoc, getDoc, getDocs, collection, query, where,
-           onSnapshot, updateDoc, serverTimestamp, orderBy, deleteDoc }
+           onSnapshot, updateDoc, serverTimestamp, orderBy, deleteDoc, writeBatch }
     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   window.__firebase_app       = { initializeApp };
@@ -1016,7 +1016,7 @@
                                   sendPasswordResetEmail, onAuthStateChanged };
   window.__firebase_firestore = { getFirestore, doc, setDoc, getDoc, getDocs,
                                   collection, query, where, onSnapshot,
-                                  updateDoc, serverTimestamp, orderBy, deleteDoc };
+                                  updateDoc, serverTimestamp, orderBy, deleteDoc, writeBatch };
   window.__firebaseReady = true;
   document.dispatchEvent(new Event('firebaseReady'));
 </script>
@@ -1024,15 +1024,15 @@
 <!-- Base de datos de preguntas -->
 <script>window.preguntasPorSeccion = {};</script>
 <!-- Script principal de la aplicación -->
-<script src="script.js?v=2"></script>
+<script src="script.js?v=94"></script>
 <!-- Editor admin de preguntas (módulo independiente, depende de script.js) -->
-<script src="editor-admin.js?v=1"></script>
+<script src="editor-admin.js?v=5"></script>
 <!-- Buscador de preguntas duplicadas (módulo independiente, depende de script.js) -->
-<script src="buscador-duplicados.js?v=1"></script>
-<!-- Subir preguntas nuevas (módulo independiente, depende de script.js) -->
-<script src="subir-preguntas-admin.js?v=2"></script>
-<!-- Calendario de Vacunación 2026 (módulo independiente, depende de script.js) -->
-<script src="calendario-vacunacion.js?v=11"></script>
+<script src="buscador-duplicados.js?v=9"></script>
+<!-- Calendario Nacional de Vacunación 2026 -->
+<script src="calendario-vacunacion.js?v=1"></script>
+<!-- subir preguntas a firebase -->
+<script src="subir-preguntas-admin.js?v=1"></script>
 
 <script>
         // Medidas de seguridad adicionales
