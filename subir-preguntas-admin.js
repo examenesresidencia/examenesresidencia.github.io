@@ -1,4 +1,4 @@
-//V2
+//V3
 // ════════════════════════════════════════════════════════════════
 // subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
 // Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
@@ -535,6 +535,22 @@
         background: linear-gradient(90deg, #dc2626, #f87171);
         border-radius: 99px; width: 0%; transition: width 0.3s ease;
       }
+
+      #sp-btn-vaciar-reset {
+        width: 100%; margin-top: 10px;
+        padding: 10px 20px; border-radius: 10px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.12);
+        color: #94a3b8; font-size: 0.82rem; font-weight: 700; cursor: pointer;
+        letter-spacing: 0.04em; text-transform: uppercase;
+        transition: all 0.2s;
+        display: none; align-items: center; justify-content: center; gap: 8px;
+      }
+      #sp-btn-vaciar-reset:hover {
+        background: rgba(14,165,233,0.1);
+        border-color: rgba(14,165,233,0.3);
+        color: #7dd3fc;
+      }
     `;
     document.head.appendChild(s);
   }
@@ -863,6 +879,9 @@
                     <div id="sp-vaciar-progress-bar"></div>
                   </div>
                 </div>
+                <button id="sp-btn-vaciar-reset">
+                  🔄 Nueva operación de vaciado
+                </button>
               </div>
             </div>
           </div>
@@ -1468,6 +1487,8 @@
         logV('warn', '⚠️ La sección ya está vacía en Firestore.');
         spinner.style.display = 'none';
         btnVaciar.innerHTML = '<span>✅</span><span>YA ESTABA VACÍO</span>';
+        const btnReset = document.getElementById('sp-btn-vaciar-reset');
+        if (btnReset) { btnReset.style.display = 'flex'; btnReset.onclick = () => _resetearPanelVaciar(); }
         _toast(`ℹ️ "${sec?.label}" ya estaba vacía en Firestore`, 'info');
         return;
       }
@@ -1549,6 +1570,13 @@
       document.getElementById('sp-vaciar-confirm-wrap').classList.remove('visible');
       document.getElementById('sp-vaciar-info').textContent = '';
 
+      // Mostrar botón de reinicio para una nueva operación
+      const btnReset = document.getElementById('sp-btn-vaciar-reset');
+      if (btnReset) {
+        btnReset.style.display = 'flex';
+        btnReset.onclick = () => _resetearPanelVaciar();
+      }
+
       _toast(`🗑 "${sec?.label}" vaciada — ${eliminadas} preguntas eliminadas`, 'success');
       _actualizarCacheEstado();
 
@@ -1561,6 +1589,39 @@
       selectVaciar.disabled  = false;
       _toast('❌ Error al vaciar: ' + e.message, 'error');
     }
+  }
+
+  // ── Resetear panel de vaciado para nueva operación ───────────
+  function _resetearPanelVaciar() {
+    const btnVaciar    = document.getElementById('sp-btn-vaciar');
+    const btnReset     = document.getElementById('sp-btn-vaciar-reset');
+    const confirmInput = document.getElementById('sp-vaciar-confirm-input');
+    const selectVaciar = document.getElementById('sp-vaciar-select');
+    const logWrap      = document.getElementById('sp-vaciar-log-wrap');
+    const progWrap     = document.getElementById('sp-vaciar-progress-wrap');
+    const progBar      = document.getElementById('sp-vaciar-progress-bar');
+    const progTxt      = document.getElementById('sp-vaciar-progress-txt');
+    const progPct      = document.getElementById('sp-vaciar-progress-pct');
+    const logBox       = document.getElementById('sp-vaciar-log-box');
+    const infoEl       = document.getElementById('sp-vaciar-info');
+    const confirmWrap  = document.getElementById('sp-vaciar-confirm-wrap');
+
+    // Limpiar y restaurar estado inicial
+    if (btnVaciar) {
+      btnVaciar.disabled = true;
+      btnVaciar.innerHTML = '<span>🗑</span><span id="sp-btn-vaciar-txt">VACIAR CUESTIONARIO</span>';
+    }
+    if (btnReset)     { btnReset.style.display = 'none'; }
+    if (confirmInput) { confirmInput.value = ''; confirmInput.classList.remove('ok'); confirmInput.disabled = false; }
+    if (selectVaciar) { selectVaciar.value = ''; selectVaciar.disabled = false; }
+    if (confirmWrap)  { confirmWrap.classList.remove('visible'); }
+    if (infoEl)       { infoEl.className = 'sp-vaciar-info'; infoEl.textContent = ''; }
+    if (logBox)       { logBox.innerHTML = ''; }
+    if (logWrap)      { logWrap.style.display = 'none'; }
+    if (progWrap)     { progWrap.style.display = 'none'; }
+    if (progBar)      { progBar.style.width = '0%'; }
+    if (progTxt)      { progTxt.textContent = 'Eliminando…'; }
+    if (progPct)      { progPct.textContent = '0%'; }
   }
 
   // ── Escape HTML ───────────────────────────────────────────────
