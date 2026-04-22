@@ -1,4 +1,4 @@
-//PRUEBA 1 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 2 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
 // Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
 // Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
@@ -6387,7 +6387,7 @@
             getDoc, getDocs, collection, query,
             where, onSnapshot, updateDoc,
             serverTimestamp, orderBy,
-            deleteDoc }               = window.__firebase_firestore;
+            deleteDoc, writeBatch }               = window.__firebase_firestore;
 
     _fbApp  = initializeApp({
       apiKey           : "AIzaSyAzbaxkDieSfiepIje0zkvheHmdRU2P18I",
@@ -6410,7 +6410,7 @@
       onAuthStateChanged,
       doc, setDoc, getDoc, getDocs, collection,
       query, where, onSnapshot, updateDoc,
-      serverTimestamp, orderBy, deleteDoc
+      serverTimestamp, orderBy, deleteDoc, writeBatch
     };
 
     // Observer de sesión
