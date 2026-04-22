@@ -462,7 +462,7 @@
               <button class="meq-btn-fmt" id="meq-btn-vacunas" type="button"
                 title="Insertar botón 'VER MÁS SOBRE VACUNAS' en la explicación"
                 style="background:rgba(56,189,248,0.08);border-color:rgba(56,189,248,0.3);color:#38bdf8;padding:0 8px;">
-                💉 Ver vacunas
+                💉
               </button>
             </div>
           </div>
