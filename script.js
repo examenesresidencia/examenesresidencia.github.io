@@ -845,6 +845,9 @@
             _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar
             _debugLog('✅ Firestore OK: ' + seccionId + ' → ' + preguntas.length + ' pregs');
             console.log('✅ Firestore→caché:', seccionId, '→', preguntas.length, 'preguntas');
+            if (esCompilado(seccionId) && window._extrapolacionAplicada) {
+                aplicarExtrapolacion(seccionId);
+              }
             resolve();
           } catch (e) {
             _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar en error
