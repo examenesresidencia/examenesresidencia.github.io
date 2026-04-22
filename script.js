@@ -8138,92 +8138,127 @@ function fbSaveProgressToCloud() {
       window._extrapolacionAplicada = false;
       return;
     }
-    // 1. Limpiar caché local de esa sección
+    // ── PASO 1: Capturar estado visual ANTES de tocar nada ──────────────────────
+    // Hacerlo aquí garantiza que los índices del DOM todavía son válidos.
+    const _estaViendo = (currentSection === seccionId);
+    const scrollAntes = _estaViendo
+      ? (window.pageYOffset || document.documentElement.scrollTop)
+      : 0;
+
+    // Capturar orden visual de las sin responder desde el DOM (antes de borrar el array)
+    let _unansweredOrdenDOM = [];
+    if (_estaViendo && state[seccionId]) {
+      const _cont0 = document.getElementById(`cuestionario-${seccionId}`);
+      if (_cont0) {
+        const _s0 = state[seccionId];
+        _cont0.querySelectorAll('[id^="puntaje-' + seccionId + '-"]').forEach(el => {
+          const idx = parseInt(el.id.replace(`puntaje-${seccionId}-`, ''), 10);
+          if (!isNaN(idx) && (!_s0.graded || !_s0.graded[idx])) _unansweredOrdenDOM.push(idx);
+        });
+      }
+    }
+
+    // Capturar selecciones en curso (opciones marcadas pero no confirmadas)
+    const _seleccionesEnCurso = {};
+    if (_estaViendo && state[seccionId]) {
+      const _contSel = document.getElementById(`cuestionario-${seccionId}`);
+      const _sSel    = state[seccionId];
+      const _pregsSel = window.preguntasPorSeccion?.[seccionId] || [];
+      _pregsSel.forEach((_, idx) => {
+        if (_sSel.graded && _sSel.graded[idx]) return;
+        const inputs  = Array.from(document.getElementsByName(`pregunta${seccionId}${idx}`));
+        const marcados = inputs.map((inp, i) => inp.checked ? i : null).filter(v => v !== null);
+        if (marcados.length > 0) _seleccionesEnCurso[idx] = marcados;
+      });
+    }
+
+    // ── PASO 2: Limpiar caché e invalidar sección ─────────────────────────────
     try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
     try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
     _seccionesYaCargadas.delete(seccionId);
     if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
-    window._extrapolacionAplicada = false;
+    // NO resetear _extrapolacionAplicada globalmente — solo marcar esta sección
+    // para que se re-extrapole sin perder las demás secciones ya cargadas.
+    if (window._extrapolacionPorPar) {
+      // Eliminar solo los pares que involucran esta sección como fuente o destino
+      for (const par of [...window._extrapolacionPorPar]) {
+        if (par.startsWith(seccionId + '|') || par.includes('|' + seccionId + '|')) {
+          window._extrapolacionPorPar.delete(par);
+        }
+      }
+    }
 
-    // 2. Recargar preguntas frescas desde Firestore
+    // ── PASO 3: Recargar preguntas frescas desde Firestore ───────────────────
     await cargarSeccion(seccionId);
-    aplicarExtrapolacion();
 
-    // 3. Recalificar si cambió la respuesta correcta y el usuario ya respondió
+    // Esperar a que las fuentes de extrapolación (Único, UBA, compilados) estén
+    // disponibles antes de extrapolaar, para que los _firestoreDocId existan
+    // en el array y las anclas funcionen correctamente.
+    if (window._fuentesExtrapolacionListas) {
+      await window._fuentesExtrapolacionListas;
+    }
+    aplicarExtrapolacion(undefined, { hacia: seccionId });
+
+    // ── PASO 4: Recalificar si cambió la respuesta correcta ──────────────────
     if (qIndex !== null && qIndex !== undefined && nuevaCorrecta) {
       _recalificarPregunta(seccionId, qIndex, nuevaCorrecta);
     }
 
-    // 4. Si el usuario está viendo esa sección ahora mismo, rerenderizar
-    if (currentSection === seccionId) {
-      // Preservar posición del scroll antes de re-renderizar
-      const scrollAntes = window.pageYOffset || document.documentElement.scrollTop;
-      // No hacer scroll automático al primer sin responder: el usuario no pidió entrar a la sección
+    // ── PASO 5: Re-renderizar si el usuario está viendo la sección ───────────
+    if (_estaViendo) {
       _scrollOnNextRender = false;
-      // Cerrar todas las explicaciones abiertas (fix 4: al actualizar contenido quedan cerradas)
+
+      // Cerrar explicaciones abiertas
       if (state[seccionId] && state[seccionId].explanationShown) {
         state[seccionId].explanationShown = {};
-        saveJSON(STORAGE_KEY, state);
       }
-      // Preservar el orden visual actual de las preguntas sin responder para que
-      // el re-render forzado por sync no vuelva a mezclarlas y altere el estado visual
-      // del usuario. getDisplayOrder usará este valor y lo vaciará al terminar,
-      // de modo que la próxima entrada voluntaria vuelva a mezclar con normalidad.
+
+      // Preservar el orden visual de las sin responder que capturamos antes
       if (state[seccionId]) {
-        const preguntasActuales = window.preguntasPorSeccion?.[seccionId] || [];
-        const s = state[seccionId];
-        const unansweredActual = [];
-        for (let i = 0; i < preguntasActuales.length; i++) {
-          if (!s.graded || !s.graded[i]) unansweredActual.push(i);
-        }
-        // Reconstruir el orden visual leyendo los puntaje-IDs del DOM en su orden actual
-        const cont = document.getElementById(`cuestionario-${seccionId}`);
-        if (cont) {
-          const puntajeEls = cont.querySelectorAll('[id^="puntaje-' + seccionId + '-"]');
-          const ordenDOM = [];
-          puntajeEls.forEach(el => {
-            const idx = parseInt(el.id.replace(`puntaje-${seccionId}-`, ''), 10);
-            if (!isNaN(idx) && (!s.graded || !s.graded[idx])) ordenDOM.push(idx);
-          });
-          s.unansweredOrder = ordenDOM.length > 0 ? ordenDOM : unansweredActual;
-        } else {
-          s.unansweredOrder = unansweredActual;
-        }
+        state[seccionId].unansweredOrder = _unansweredOrdenDOM.length > 0
+          ? _unansweredOrdenDOM
+          : [];
         saveJSON(STORAGE_KEY, state);
       }
 
-      // Capturar las selecciones en curso (opciones marcadas pero aún no confirmadas)
-      // para restaurarlas después del re-render y que el usuario no las pierda.
-      const _seleccionesEnCurso = {};
-      const _contActual = document.getElementById(`cuestionario-${seccionId}`);
-      if (_contActual && state[seccionId]) {
-        const _s = state[seccionId];
-        const _pregsActuales = window.preguntasPorSeccion?.[seccionId] || [];
-        _pregsActuales.forEach((_, idx) => {
-          if (_s.graded && _s.graded[idx]) return; // ya respondida, la restaura restoreSelectionsAndGrades
-          const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${idx}`));
-          const marcados = inputs.map((inp, i) => inp.checked ? i : null).filter(v => v !== null);
-          if (marcados.length > 0) _seleccionesEnCurso[idx] = marcados;
-        });
-      }
-
+      // Renderizar — generarCuestionario llama getDisplayOrder que usa las anclas
+      // de docId+texto para ubicar las respondidas en su lugar correcto
       generarCuestionario(seccionId);
 
-      // Restaurar las selecciones en curso después del render
-      if (Object.keys(_seleccionesEnCurso).length > 0) {
+      // Restaurar selecciones en curso y scroll DESPUÉS de que todos los chunks terminen.
+      // Usamos un flag en el contenedor para saber cuándo terminó el último chunk.
+      const _contFinal = document.getElementById(`cuestionario-${seccionId}`);
+      const _esperarRender = (cb) => {
+        if (!_contFinal) { cb(); return; }
+        // Observar hasta que el spinner de carga desaparezca (indica fin de chunks)
+        const _obs = new MutationObserver(() => {
+          if (!_contFinal.querySelector('.chunk-progress')) {
+            _obs.disconnect();
+            cb();
+          }
+        });
+        _obs.observe(_contFinal, { childList: true, subtree: true });
+        // Fallback: si no hay spinner (pocas preguntas), ejecutar en el próximo frame
         requestAnimationFrame(() => {
+          if (!_contFinal.querySelector('.chunk-progress')) {
+            _obs.disconnect();
+            cb();
+          }
+        });
+      };
+
+      _esperarRender(() => {
+        // Restaurar selecciones en curso
+        if (Object.keys(_seleccionesEnCurso).length > 0) {
           Object.entries(_seleccionesEnCurso).forEach(([idx, marcados]) => {
             const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${idx}`));
             marcados.forEach(i => { if (inputs[i]) inputs[i].checked = true; });
           });
-        });
-      }
-      // Restaurar scroll después del render (sin desplazar al usuario)
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          window.scrollTo({ top: scrollAntes, behavior: 'instant' });
-        });
+        }
+        // Restaurar scroll exactamente donde estaba
+        window.scrollTo({ top: scrollAntes, behavior: 'instant' });
       });
+
       fbToast('📥 Contenido actualizado por el admin', 'info');
     }
 
