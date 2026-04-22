@@ -2128,7 +2128,7 @@
     // original sin importar cuántas preguntas se agreguen, extrapoLen o reordenen.
     const preguntas = preguntasPorSeccion[seccionId] || [];
     function _normTexto(t) {
-      return (t || '').trim().replace(/^\d+[\.-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+      return (t || '').trim().replace(/^\d+[.\-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
     }
     // Migrar entradas antiguas (solo número) al nuevo formato { idx, texto }
     let _cambioDeMigracion = false;
@@ -2956,7 +2956,7 @@
       // su posición cambie por nuevas preguntas, extrapolaciones o recargas.
       // El texto se normaliza igual que en la extrapolación (sin número, minúsculas, sin espacios extra).
       const _textoNormResp = (preg.pregunta || '').trim()
-        .replace(/^\d+[\.-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+        .replace(/^\d+[.\-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
       const _yaEnAnswered = state[seccionId].answeredOrder.some(
         e => (typeof e === 'object' ? e.idx : e) === qIndex
       );
