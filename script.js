@@ -7192,16 +7192,6 @@
             ⚫ Panel de debug: OFF
           </button>
         </div>
-      </div>
-      <div class="admin-section">
-        <div class="admin-section-title">Solicitudes pendientes <span id="admin-badge-pending"></span></div>
-        <div id="admin-requests-list"><div class="admin-empty">Cargando…</div></div>
-      </div>
-      <div class="admin-section">
-        <div class="admin-section-title">Todos los usuarios</div>
-        <div id="admin-users-list"><div class="admin-empty">Cargando…</div></div>
-      </div>
-      <div class="admin-section">
         <div style="padding:0 0 4px;">
           <button id="btn-subir-preguntas" style="
             width:100%;padding:12px 16px;border:none;border-radius:10px;
@@ -7212,11 +7202,19 @@
             📤 Subir preguntas nuevas
           </button>
         </div>
+      </div>
+      <div class="admin-section">
+        <div class="admin-section-title">Solicitudes pendientes <span id="admin-badge-pending"></span></div>
+        <div id="admin-requests-list"><div class="admin-empty">Cargando…</div></div>
+      </div>
+      <div class="admin-section">
+        <div class="admin-section-title">Todos los usuarios</div>
+        <div id="admin-users-list"><div class="admin-empty">Cargando…</div></div>
       </div>`
 
     document.getElementById('fb-admin-close').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('btn-buscar-duplicados').onclick = () => fbAbrirBuscadorDuplicados();
-    document.getElementById('btn-subir-preguntas').onclick = () => fbAbrirSubirPreguntas();
+    document.getElementById('btn-subir-preguntas').onclick = () => window.fbAbrirSubirPreguntas();
 
     document.getElementById('admin-btn-debug-toggle').onclick = () => {
       _debugPanelEnabled = !_debugPanelEnabled;
