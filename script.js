@@ -780,7 +780,8 @@
             }
             let preguntas = snap.docs.map(d => {
               const { _idx, ...pregunta } = d.data();
-              pregunta._firestoreIdx = _idx; // preservar para el buscador de duplicados
+              pregunta._firestoreIdx  = _idx; // preservar para el buscador de duplicados
+              pregunta._firestoreDocId = d.id; // ID único del documento — ancla primaria para progreso
               return pregunta;
             });
 
@@ -2130,51 +2131,93 @@
     function _normTexto(t) {
       return (t || '').trim().replace(/^\d+[.\-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
     }
-    // Migrar entradas antiguas (solo número) al nuevo formato { idx, texto }
+    // Migrar entradas antiguas al nuevo formato { idx, docId, texto }
+    // - Entradas que son solo número → convertir al formato nuevo
+    // - Entradas { idx, texto } sin docId → agregar docId si la pregunta lo tiene
     let _cambioDeMigracion = false;
     s.answeredOrder = s.answeredOrder.map(entry => {
       if (typeof entry === 'number') {
         const p = preguntas[entry];
         _cambioDeMigracion = true;
-        return { idx: entry, texto: p ? _normTexto(p.pregunta) : '' };
+        return { idx: entry, docId: p?._firestoreDocId || null, texto: p ? _normTexto(p.pregunta) : '' };
+      }
+      // Completar docId si faltaba (sesiones anteriores sin ancla doble)
+      if (typeof entry === 'object' && !entry.docId && entry.idx < preguntas.length) {
+        const p = preguntas[entry.idx];
+        if (p && p._firestoreDocId) {
+          entry.docId = p._firestoreDocId;
+          _cambioDeMigracion = true;
+        }
       }
       return entry;
     });
     if (_cambioDeMigracion && !window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
 
-    // Construir mapa texto→índice actual para búsqueda rápida
+    // Construir mapas de búsqueda rápida: docId→índice y texto→índice
+    const _docIdAIdx = new Map();
     const _textoAIdx = new Map();
-    preguntas.forEach((p, i) => { _textoAIdx.set(_normTexto(p.pregunta), i); });
+    preguntas.forEach((p, i) => {
+      if (p._firestoreDocId) _docIdAIdx.set(p._firestoreDocId, i);
+      _textoAIdx.set(_normTexto(p.pregunta), i);
+    });
 
-    // Resolver cada entrada: verificar que idx sigue apuntando al texto correcto;
-    // si no, buscar el índice correcto por texto y reubicar en el array de preguntas.
+    // Resolver cada entrada usando ANCLA DOBLE:
+    // 1° buscar por docId (sobrevive ediciones de texto del admin)
+    // 2° si no hay docId, buscar por texto (fallback para preguntas extrapoladas)
+    // Si ninguna ancla resuelve, mantener el índice guardado como último recurso.
     let _cambioDeResolucion = false;
     const answered = [];
-    const _indicesYaUsados = new Set(); // evitar que dos entradas resuelvan al mismo índice
+    const _indicesYaUsados = new Set();
     s.answeredOrder.forEach(entry => {
       const textoGuardado = entry.texto || '';
+      const docIdGuardado = entry.docId || null;
       let idxActual = entry.idx;
+      let idxResuelto = undefined;
 
-      if (textoGuardado) {
-        const idxPorTexto = _textoAIdx.get(textoGuardado);
-        if (idxPorTexto !== undefined && idxPorTexto !== idxActual && !_indicesYaUsados.has(idxPorTexto)) {
-          // La pregunta se movió: actualizar el índice guardado
-          console.log('[ANCLA] Pregunta movida:', idxActual, '→', idxPorTexto, '| texto:', textoGuardado.slice(0, 60));
-          entry.idx = idxPorTexto;
-          // Reubicar también en graded, answers y shuffleMap para que todo sea coherente
-          if (s.graded[idxActual] !== undefined && s.graded[idxPorTexto] === undefined) {
-            s.graded[idxPorTexto] = s.graded[idxActual];
-            delete s.graded[idxActual];
-          }
-          if (s.answers[idxActual] !== undefined && s.answers[idxPorTexto] === undefined) {
-            s.answers[idxPorTexto] = s.answers[idxActual];
-            delete s.answers[idxActual];
-          }
-          if (s.shuffleMap && s.shuffleMap[idxActual] !== undefined && s.shuffleMap[idxPorTexto] === undefined) {
-            s.shuffleMap[idxPorTexto] = s.shuffleMap[idxActual];
-            delete s.shuffleMap[idxActual];
-          }
-          idxActual = idxPorTexto;
+      // Ancla primaria: docId
+      if (docIdGuardado) {
+        const porDocId = _docIdAIdx.get(docIdGuardado);
+        if (porDocId !== undefined && !_indicesYaUsados.has(porDocId)) {
+          idxResuelto = porDocId;
+        }
+      }
+      // Ancla secundaria: texto (solo si no resolvió por docId)
+      if (idxResuelto === undefined && textoGuardado) {
+        const porTexto = _textoAIdx.get(textoGuardado);
+        if (porTexto !== undefined && !_indicesYaUsados.has(porTexto)) {
+          idxResuelto = porTexto;
+        }
+      }
+
+      if (idxResuelto !== undefined && idxResuelto !== idxActual) {
+        console.log('[ANCLA] Pregunta reubicada:', idxActual, '→', idxResuelto,
+          '| docId:', docIdGuardado, '| texto:', textoGuardado.slice(0, 50));
+        entry.idx = idxResuelto;
+        // Reubicar graded, answers y shuffleMap al nuevo índice
+        if (s.graded[idxActual] !== undefined && s.graded[idxResuelto] === undefined) {
+          s.graded[idxResuelto] = s.graded[idxActual];
+          delete s.graded[idxActual];
+        }
+        if (s.answers && s.answers[idxActual] !== undefined && s.answers[idxResuelto] === undefined) {
+          s.answers[idxResuelto] = s.answers[idxActual];
+          delete s.answers[idxActual];
+        }
+        if (s.shuffleMap && s.shuffleMap[idxActual] !== undefined && s.shuffleMap[idxResuelto] === undefined) {
+          s.shuffleMap[idxResuelto] = s.shuffleMap[idxActual];
+          delete s.shuffleMap[idxActual];
+        }
+        idxActual = idxResuelto;
+        _cambioDeResolucion = true;
+      } else if (idxResuelto !== undefined) {
+        idxActual = idxResuelto;
+      }
+
+      // Actualizar también el texto guardado si el admin lo editó
+      // (así la próxima vez el texto refleja el estado actual)
+      if (idxActual < preguntasLen && preguntas[idxActual]) {
+        const textoActual = _normTexto(preguntas[idxActual].pregunta);
+        if (textoActual && textoActual !== textoGuardado) {
+          entry.texto = textoActual;
           _cambioDeResolucion = true;
         }
       }
@@ -2952,17 +2995,18 @@
       if (!state[seccionId].answeredOrder) {
         state[seccionId].answeredOrder = [];
       }
-      // ANCLA DE TEXTO: guardar { idx, texto } para poder recuperar la pregunta aunque
-      // su posición cambie por nuevas preguntas, extrapolaciones o recargas.
-      // El texto se normaliza igual que en la extrapolación (sin número, minúsculas, sin espacios extra).
+      // ANCLA DOBLE: guardar { idx, docId, texto }
+      // - docId: ID único del documento Firestore → sobrevive cambios de texto por edición admin
+      // - texto: fallback si el docId no está disponible (preguntas extrapoladas sin docId propio)
       const _textoNormResp = (preg.pregunta || '').trim()
         .replace(/^\d+[.\-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+      const _docIdResp = preg._firestoreDocId || null;
       const _yaEnAnswered = state[seccionId].answeredOrder.some(
         e => (typeof e === 'object' ? e.idx : e) === qIndex
       );
       if (!_yaEnAnswered) {
-        state[seccionId].answeredOrder.push({ idx: qIndex, texto: _textoNormResp });
-        console.log('📌 Pregunta', qIndex, 'agregada a answeredOrder con ancla de texto');
+        state[seccionId].answeredOrder.push({ idx: qIndex, docId: _docIdResp, texto: _textoNormResp });
+        console.log('📌 Pregunta', qIndex, 'agregada a answeredOrder con ancla doble (docId + texto)');
       }
       
       // Eliminar de unansweredOrder
@@ -8077,9 +8121,21 @@ function fbSaveProgressToCloud() {
 
   // ── Invalida caché de una sección y recarga en segundo plano ──
   async function _invalidarYRecargarSeccion(seccionId, qIndex, nuevaCorrecta) {
-    // 🔒 Si la sección está siendo cargada o ya fue cargada en esta sesión, no interrumpir
-    if (_seccionesEnCarga.has(seccionId) || _seccionesYaCargadas.has(seccionId)) {
-      console.log('[CONTENT-SYNC] Ignorando invalidación: sección ya cargada o en progreso para', seccionId);
+    // 🔒 Si la sección está siendo cargada ahora mismo, no interrumpir
+    if (_seccionesEnCarga.has(seccionId)) {
+      console.log('[CONTENT-SYNC] Ignorando invalidación: sección en carga activa para', seccionId);
+      return;
+    }
+    // Si ya fue cargada pero el usuario NO la está viendo ahora:
+    // solo limpiar el caché para que la próxima entrada traiga datos frescos.
+    // Si SÍ la está viendo: continuar y rerenderizar en tiempo real (ver paso 4 abajo).
+    if (_seccionesYaCargadas.has(seccionId) && currentSection !== seccionId) {
+      console.log('[CONTENT-SYNC] Sección cargada pero no visible → limpiando caché para próxima entrada:', seccionId);
+      try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
+      try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+      _seccionesYaCargadas.delete(seccionId);
+      if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+      window._extrapolacionAplicada = false;
       return;
     }
     // 1. Limpiar caché local de esa sección
