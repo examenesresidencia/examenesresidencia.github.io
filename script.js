@@ -560,6 +560,11 @@
   }
 
   // DESPUÉS:
+  // Guard para extrapolación dirigida (opciones.hacia): registra qué combinaciones
+  // fuente→especialidad ya fueron procesadas para evitar insertar clones duplicados
+  // cuando aplicarExtrapolacion se llama varias veces con la misma especialidad destino.
+  if (!window._extrapolacionPorPar) window._extrapolacionPorPar = new Set();
+
   function aplicarExtrapolacion(soloSeccion, opciones) {
     // opciones.hacia: si se pasa, fuerza extrapolar compilados ya cargados HACIA esa
     // especialidad destino. No usa ni modifica el guard global _extrapolacionAplicada.
@@ -606,11 +611,20 @@
             .replace(/\s+/g, ' ')           // colapsar espacios múltiples
             .toLowerCase();
         }
+
+        // FIX Bug 1: guard adicional por par (fuente, destino, índice) para evitar que
+        // llamadas repetidas a aplicarExtrapolacion({ hacia }) inserten el mismo clon dos veces,
+        // lo que producía opciones duplicadas en el render de la especialidad.
+        const parKey = `${seccionId}|${key}|${qIndex}`;
+        if (window._extrapolacionPorPar.has(parKey)) return;
+
         const enunciadosEspecialidad = new Set(
           preguntasPorSeccion[key].map(p => normalizarEnunciado(p.pregunta))
         );
         const yaExiste = enunciadosEspecialidad.has(normalizarEnunciado(preg.pregunta));
         if (yaExiste) return;
+
+        window._extrapolacionPorPar.add(parKey);
 
         // Clonar la pregunta: en la especialidad se comporta igual que cualquier otra
         // pregunta propia (orden aleatorio, integrada en la lista, no al final).
@@ -818,7 +832,16 @@
                 const idx = ed.qIndex;
                 if (!preguntas[idx]) return;
                 if (ed.pregunta    !== undefined) preguntas[idx].pregunta    = ed.pregunta;
-                if (ed.opciones    !== undefined) preguntas[idx].opciones    = ed.opciones;
+                if (ed.opciones    !== undefined) {
+                  // FIX Bug 2: sanear el array de opciones — si algún elemento es un objeto
+                  // (p.ej. un Timestamp de Firestore guardado por error), convertirlo a string
+                  // vacío y filtrar, evitando que aparezca como "2026-12-18 00:00:00" en el UI.
+                  preguntas[idx].opciones = ed.opciones.map(o =>
+                    (o === null || o === undefined) ? '' :
+                    (typeof o === 'object')         ? (typeof o.toDate === 'function' ? o.toDate().toISOString() : '') :
+                    String(o)
+                  ).filter(o => o !== '');
+                }
                 if (ed.correcta    !== undefined) preguntas[idx].correcta    = ed.correcta;
                 if (ed.explicacion !== undefined) preguntas[idx].explicacion = ed.explicacion;
                 if (ed.imagen      !== undefined) preguntas[idx].imagen      = ed.imagen;
@@ -1118,21 +1141,25 @@
     // IMPORTANTE: usar graded como fuente de verdad (no unansweredOrder que puede llegar vacío
     // desde la nube), para no corromper el state recién sincronizado ni disparar un saveJSON
     // que pisaría Firestore con datos incorrectos.
-    const gradedKeys = Object.keys(state[seccionId].graded || {}).map(Number);
-    const maxGradedIdx = gradedKeys.length > 0 ? Math.max(...gradedKeys) + 1 : 0;
-    const answeredLen = (state[seccionId].answeredOrder || []).length;
-    const unansweredLen = (state[seccionId].unansweredOrder || []).length;
-    // totalConocidas = cuántos índices de pregunta ya están registrados en alguna lista
-    const totalConocidas = Math.max(answeredLen + unansweredLen, maxGradedIdx);
-    if (preguntasLen > totalConocidas) {
-      // Insertar preguntas nuevas en posición aleatoria para mantener orden azaroso
-      for (let i = totalConocidas; i < preguntasLen; i++) {
+    // FIX Bug 3: verificar cada índice individualmente para no re-insertar preguntas
+    // ya respondidas (que vienen en answeredOrder o graded) cuando unansweredOrder
+    // llega vacío desde la nube (lo que hacía que totalConocidas fuera demasiado bajo
+    // y se volvieran a agregar índices ya respondidos, solapando preguntas en el DOM).
+    {
+      const answeredSet   = new Set(state[seccionId].answeredOrder || []);
+      const gradedSet     = new Set(Object.keys(state[seccionId].graded || {}).map(Number));
+      const unansweredSet = new Set(state[seccionId].unansweredOrder || []);
+      let huboNuevas = false;
+      for (let i = 0; i < preguntasLen; i++) {
+        if (answeredSet.has(i) || gradedSet.has(i) || unansweredSet.has(i)) continue;
+        // Índice genuinamente nuevo (no estaba en ninguna lista): insertar en posición aleatoria
         const pos = Math.floor(Math.random() * (state[seccionId].unansweredOrder.length + 1));
         state[seccionId].unansweredOrder.splice(pos, 0, i);
+        unansweredSet.add(i);
+        huboNuevas = true;
       }
-      // Solo guardar localmente si NO estamos en medio de una sincronización desde la nube,
-      // para evitar pisar el state correcto con datos incompletos.
-      if (!window._fbSyncInProgress) {
+      // Solo guardar localmente si hubo cambios y NO estamos en medio de una sync desde la nube
+      if (huboNuevas && !window._fbSyncInProgress) {
         saveJSON(STORAGE_KEY, state);
       }
     }
@@ -1285,6 +1312,7 @@
       if (!idxEnDOM.has(idx)) return; // aún no renderizada, saltar
       const name = `pregunta${seccionId}${idx}`;
       const inputs = Array.from(document.getElementsByName(name));
+      // Usar el índice resuelto por texto (getDisplayOrder ya actualizó s.answers al índice correcto)
       const guardadas = (s.answers && s.answers[idx]) || [];
       guardadas.forEach(mixedIdx => {
         if (inputs[mixedIdx]) inputs[mixedIdx].checked = true;
@@ -2091,13 +2119,78 @@
 
     // Especialidades / compilados (usuarios no-admin):
     // 1) Respondidas: orden fijo (el orden cronológico en que se respondieron)
-    const answered = s.answeredOrder.slice();
+    //
+    // RESOLUCIÓN POR TEXTO (Opción B):
+    // answeredOrder puede contener entradas antiguas (solo número) o nuevas ({ idx, texto }).
+    // Para cada entrada, verificamos si el texto sigue coincidiendo con el índice guardado.
+    // Si no coincide, buscamos en todo el array de preguntas la que tenga ese texto
+    // y reemplazamos el índice. Así las preguntas respondidas siempre ocupan su lugar
+    // original sin importar cuántas preguntas se agreguen, extrapoLen o reordenen.
+    const preguntas = preguntasPorSeccion[seccionId] || [];
+    function _normTexto(t) {
+      return (t || '').trim().replace(/^\d+[\.-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+    }
+    // Migrar entradas antiguas (solo número) al nuevo formato { idx, texto }
+    let _cambioDeMigracion = false;
+    s.answeredOrder = s.answeredOrder.map(entry => {
+      if (typeof entry === 'number') {
+        const p = preguntas[entry];
+        _cambioDeMigracion = true;
+        return { idx: entry, texto: p ? _normTexto(p.pregunta) : '' };
+      }
+      return entry;
+    });
+    if (_cambioDeMigracion && !window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+
+    // Construir mapa texto→índice actual para búsqueda rápida
+    const _textoAIdx = new Map();
+    preguntas.forEach((p, i) => { _textoAIdx.set(_normTexto(p.pregunta), i); });
+
+    // Resolver cada entrada: verificar que idx sigue apuntando al texto correcto;
+    // si no, buscar el índice correcto por texto y reubicar en el array de preguntas.
+    let _cambioDeResolucion = false;
+    const answered = [];
+    const _indicesYaUsados = new Set(); // evitar que dos entradas resuelvan al mismo índice
+    s.answeredOrder.forEach(entry => {
+      const textoGuardado = entry.texto || '';
+      let idxActual = entry.idx;
+
+      if (textoGuardado) {
+        const idxPorTexto = _textoAIdx.get(textoGuardado);
+        if (idxPorTexto !== undefined && idxPorTexto !== idxActual && !_indicesYaUsados.has(idxPorTexto)) {
+          // La pregunta se movió: actualizar el índice guardado
+          console.log('[ANCLA] Pregunta movida:', idxActual, '→', idxPorTexto, '| texto:', textoGuardado.slice(0, 60));
+          entry.idx = idxPorTexto;
+          // Reubicar también en graded, answers y shuffleMap para que todo sea coherente
+          if (s.graded[idxActual] !== undefined && s.graded[idxPorTexto] === undefined) {
+            s.graded[idxPorTexto] = s.graded[idxActual];
+            delete s.graded[idxActual];
+          }
+          if (s.answers[idxActual] !== undefined && s.answers[idxPorTexto] === undefined) {
+            s.answers[idxPorTexto] = s.answers[idxActual];
+            delete s.answers[idxActual];
+          }
+          if (s.shuffleMap && s.shuffleMap[idxActual] !== undefined && s.shuffleMap[idxPorTexto] === undefined) {
+            s.shuffleMap[idxPorTexto] = s.shuffleMap[idxActual];
+            delete s.shuffleMap[idxActual];
+          }
+          idxActual = idxPorTexto;
+          _cambioDeResolucion = true;
+        }
+      }
+
+      if (!_indicesYaUsados.has(idxActual) && idxActual < preguntasLen) {
+        answered.push(idxActual);
+        _indicesYaUsados.add(idxActual);
+      }
+    });
+    if (_cambioDeResolucion && !window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
 
     // Construir el conjunto de índices aún sin responder
     const unanswered = [];
     const graded = s.graded || {}; // protección: puede ser undefined al recargar
     for (let i = 0; i < preguntasLen; i++) {
-      if (!graded[i]) unanswered.push(i);
+      if (!graded[i] && !_indicesYaUsados.has(i)) unanswered.push(i);
     }
 
     // 2) Sin responder: normalmente se mezclan con semilla nueva cada vez que se entra.
@@ -2859,9 +2952,17 @@
       if (!state[seccionId].answeredOrder) {
         state[seccionId].answeredOrder = [];
       }
-      if (!state[seccionId].answeredOrder.includes(qIndex)) {
-        state[seccionId].answeredOrder.push(qIndex);
-        console.log('📌 Pregunta', qIndex, 'agregada a answeredOrder:', state[seccionId].answeredOrder);
+      // ANCLA DE TEXTO: guardar { idx, texto } para poder recuperar la pregunta aunque
+      // su posición cambie por nuevas preguntas, extrapolaciones o recargas.
+      // El texto se normaliza igual que en la extrapolación (sin número, minúsculas, sin espacios extra).
+      const _textoNormResp = (preg.pregunta || '').trim()
+        .replace(/^\d+[\.-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+      const _yaEnAnswered = state[seccionId].answeredOrder.some(
+        e => (typeof e === 'object' ? e.idx : e) === qIndex
+      );
+      if (!_yaEnAnswered) {
+        state[seccionId].answeredOrder.push({ idx: qIndex, texto: _textoNormResp });
+        console.log('📌 Pregunta', qIndex, 'agregada a answeredOrder con ancla de texto');
       }
       
       // Eliminar de unansweredOrder
@@ -2869,7 +2970,7 @@
         const indexInUnanswered = state[seccionId].unansweredOrder.indexOf(qIndex);
         if (indexInUnanswered !== -1) {
           state[seccionId].unansweredOrder.splice(indexInUnanswered, 1);
-          console.log('🗑️ Pregunta', qIndex, 'eliminada de unansweredOrder:', state[seccionId].unansweredOrder);
+          console.log('🗑️ Pregunta', qIndex, 'eliminada de unansweredOrder');
         }
       }
     } else if (esSimulacro) {
