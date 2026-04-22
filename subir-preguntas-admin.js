@@ -1,4 +1,4 @@
-//V3
+//V4
 // ════════════════════════════════════════════════════════════════
 // subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
 // Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
@@ -831,12 +831,12 @@
 
           <!-- ── Resultado final ────────────────────────────────── -->
           <div id="sp-resultado-final">
-            <div id="sp-resultado-icon"></div>
-            <div id="sp-resultado-msg"></div>
-            <div id="sp-resultado-sub"></div>
             <button id="sp-btn-subir-reset">
               🔄 Subir otro cuestionario
             </button>
+            <div id="sp-resultado-icon"></div>
+            <div id="sp-resultado-msg"></div>
+            <div id="sp-resultado-sub"></div>
           </div>
 
           <!-- ══════════════════════════════════════════════════════
@@ -884,6 +884,10 @@
                 <span id="sp-btn-vaciar-txt">VACIAR CUESTIONARIO</span>
               </button>
 
+              <button id="sp-btn-vaciar-reset">
+                🔄 Nueva operación de vaciado
+              </button>
+
               <div id="sp-vaciar-log-wrap">
                 <div id="sp-log-titulo" style="margin-top:14px;">
                   <div id="sp-vaciar-log-spinner" style="
@@ -908,9 +912,6 @@
                     <div id="sp-vaciar-progress-bar"></div>
                   </div>
                 </div>
-                <button id="sp-btn-vaciar-reset">
-                  🔄 Nueva operación de vaciado
-                </button>
               </div>
             </div>
           </div>
@@ -932,11 +933,17 @@
       if (!grupos[s.grupo]) grupos[s.grupo] = [];
       grupos[s.grupo].push(s);
     }
-    return Object.entries(grupos).map(([grupo, secs]) => `
+    return Object.entries(grupos).map(([grupo, secs]) => {
+      // Ordenar alfabéticamente solo el grupo de Especialidades
+      const secsOrdenadas = grupo === 'Especialidades'
+        ? [...secs].sort((a, b) => a.label.localeCompare(b.label, 'es'))
+        : secs;
+      return `
       <optgroup label="${grupo}">
-        ${secs.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}
+        ${secsOrdenadas.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}
       </optgroup>
-    `).join('');
+    `;
+    }).join('');
   }
 
   // ── Actualizar estado del caché en pantalla ───────────────────
