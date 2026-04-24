@@ -1,4 +1,4 @@
-//V1 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V2 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -8,6 +8,32 @@
   const UPLOAD_LOG_KEY   = 'fb_upload_log';
 
   const TODAS_LAS_SECCIONES = [
+    // ── Especialidades (A-Z) ──────────────────────────────────────
+    { id: 'cardiologia',    label: 'Cardiología',       grupo: 'Especialidades' },
+    { id: 'cirugia',        label: 'Cirugía',           grupo: 'Especialidades' },
+    { id: 'clinicamedica',  label: 'Clínica Médica',    grupo: 'Especialidades' },
+    { id: 'dermatologia',   label: 'Dermatología',      grupo: 'Especialidades' },
+    { id: 'digestivo',      label: 'Digestivo',         grupo: 'Especialidades' },
+    { id: 'endocrinologia', label: 'Endocrinología',    grupo: 'Especialidades' },
+    { id: 'ginecologia',    label: 'Ginecología',       grupo: 'Especialidades' },
+    { id: 'hematologia',    label: 'Hematología',       grupo: 'Especialidades' },
+    { id: 'infectologia',   label: 'Infectología',      grupo: 'Especialidades' },
+    { id: 'medicinalegal',  label: 'Medicina Legal',    grupo: 'Especialidades' },
+    { id: 'medicinafamiliar', label: 'Medicina Familiar', grupo: 'Especialidades' },
+    { id: 'nefrologia',     label: 'Nefrología',        grupo: 'Especialidades' },
+    { id: 'neurologia',     label: 'Neurología',        grupo: 'Especialidades' },
+    { id: 'neumonologia',   label: 'Neumonología',      grupo: 'Especialidades' },
+    { id: 'obstetricia',    label: 'Obstetricia',       grupo: 'Especialidades' },
+    { id: 'of',             label: 'Oftalmología',      grupo: 'Especialidades' },
+    { id: 'orl',            label: 'ORL',               grupo: 'Especialidades' },
+    { id: 'pediatria',      label: 'Pediatría',         grupo: 'Especialidades' },
+    { id: 'psiquiatria',    label: 'Psiquiatría',       grupo: 'Especialidades' },
+    { id: 'reumatologia',   label: 'Reumatología',      grupo: 'Especialidades' },
+    { id: 'saludpublica',   label: 'Salud Pública',     grupo: 'Especialidades' },
+    { id: 'toxicologia',    label: 'Toxicología',       grupo: 'Especialidades' },
+    { id: 'traumatologia',  label: 'Traumatología',     grupo: 'Especialidades' },
+    { id: 'urologia',       label: 'Urología',          grupo: 'Especialidades' },
+    // ── Exámenes Único ────────────────────────────────────────────
     { id: 'unico2016',      label: 'Único 2016',        grupo: 'Exámenes Único' },
     { id: 'unico2017',      label: 'Único 2017',        grupo: 'Exámenes Único' },
     { id: 'unico2018',      label: 'Único 2018',        grupo: 'Exámenes Único' },
@@ -18,10 +44,12 @@
     { id: 'unico2023',      label: 'Único 2023',        grupo: 'Exámenes Único' },
     { id: 'unico2024',      label: 'Único 2024',        grupo: 'Exámenes Único' },
     { id: 'unico2025',      label: 'Único 2025',        grupo: 'Exámenes Único' },
+    // ── Exámenes UBA ──────────────────────────────────────────────
     { id: 'uba2016',        label: 'UBA 2016',          grupo: 'Exámenes UBA' },
     { id: 'uba2017',        label: 'UBA 2017',          grupo: 'Exámenes UBA' },
     { id: 'uba2018',        label: 'UBA 2018',          grupo: 'Exámenes UBA' },
     { id: 'uba2019',        label: 'UBA 2019',          grupo: 'Exámenes UBA' },
+    // ── Compilados ────────────────────────────────────────────────
     { id: 'compilado1',     label: 'Compilado 1',       grupo: 'Compilados' },
     { id: 'compilado2',     label: 'Compilado 2',       grupo: 'Compilados' },
     { id: 'compilado3',     label: 'Compilado 3',       grupo: 'Compilados' },
@@ -32,30 +60,6 @@
     { id: 'compilado8',     label: 'Compilado 8',       grupo: 'Compilados' },
     { id: 'compilado9',     label: 'Compilado 9',       grupo: 'Compilados' },
     { id: 'compilado10',    label: 'Compilado 10',      grupo: 'Compilados' },
-    { id: 'pediatria',      label: 'Pediatría',         grupo: 'Especialidades' },
-    { id: 'cardiologia',    label: 'Cardiología',       grupo: 'Especialidades' },
-    { id: 'neurologia',     label: 'Neurología',        grupo: 'Especialidades' },
-    { id: 'endocrinologia', label: 'Endocrinología',    grupo: 'Especialidades' },
-    { id: 'neumonologia',   label: 'Neumonología',      grupo: 'Especialidades' },
-    { id: 'nefrologia',     label: 'Nefrología',        grupo: 'Especialidades' },
-    { id: 'digestivo',      label: 'Digestivo',         grupo: 'Especialidades' },
-    { id: 'hematologia',    label: 'Hematología',       grupo: 'Especialidades' },
-    { id: 'infectologia',   label: 'Infectología',      grupo: 'Especialidades' },
-    { id: 'clinicamedica',  label: 'Clínica Médica',    grupo: 'Especialidades' },
-    { id: 'ginecologia',    label: 'Ginecología',       grupo: 'Especialidades' },
-    { id: 'obstetricia',    label: 'Obstetricia',       grupo: 'Especialidades' },
-    { id: 'cirugia',        label: 'Cirugía',           grupo: 'Especialidades' },
-    { id: 'traumatologia',  label: 'Traumatología',     grupo: 'Especialidades' },
-    { id: 'urologia',       label: 'Urología',          grupo: 'Especialidades' },
-    { id: 'of',             label: 'Oftalmología',      grupo: 'Especialidades' },
-    { id: 'orl',            label: 'ORL',               grupo: 'Especialidades' },
-    { id: 'dermatologia',   label: 'Dermatología',      grupo: 'Especialidades' },
-    { id: 'psiquiatria',    label: 'Psiquiatría',       grupo: 'Especialidades' },
-    { id: 'reumatologia',   label: 'Reumatología',      grupo: 'Especialidades' },
-    { id: 'toxicologia',    label: 'Toxicología',       grupo: 'Especialidades' },
-    { id: 'medicinalegal',  label: 'Medicina Legal',    grupo: 'Especialidades' },
-    { id: 'saludpublica',   label: 'Salud Pública',     grupo: 'Especialidades' },
-    { id: 'medicinafamiliar', label: 'Medicina Familiar', grupo: 'Especialidades' },
   ];
 
   // ── Estado del módulo ─────────────────────────────────────────
@@ -1092,13 +1096,9 @@
       grupos[s.grupo].push(s);
     }
     return Object.entries(grupos).map(([grupo, secs]) => {
-      // Ordenar alfabéticamente solo el grupo de Especialidades
-      const secsOrdenadas = grupo === 'Especialidades'
-        ? [...secs].sort((a, b) => a.label.localeCompare(b.label, 'es'))
-        : secs;
       return `
       <optgroup label="${grupo}">
-        ${secsOrdenadas.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}
+        ${secs.map(s => `<option value="${s.id}">${s.label}</option>`).join('')}
       </optgroup>
     `;
     }).join('');
@@ -1525,6 +1525,11 @@
     document.getElementById('sp-log-spinner').style.display = 'block';
     document.getElementById('sp-progress-wrap').style.display = 'block';
     _actualizarStep(4);
+
+    // Scroll al log de progreso
+    setTimeout(() => {
+      logWrap.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 80);
 
     try {
       const seccionId = _seccionDestino;
