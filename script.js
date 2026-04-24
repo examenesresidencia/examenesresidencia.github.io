@@ -1,4 +1,4 @@
-//PRUEBA 9  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 9.1  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -3499,9 +3499,11 @@
       }
   });
 
-  let devtools = {open: false, orientation: null};
+  // DESACTIVADO — el detector de DevTools está controlado desde index.html (comentado allí).
+  // Activarlo aquí causaba recargas en móviles donde el teclado virtual cambia el tamaño
+  // de la ventana, lo que impedía que los cuestionarios se abrieran correctamente.
+  /* let devtools = {open: false, orientation: null};
   setInterval(function() {
-      // Admin y usuarios autorizados pueden usar DevTools sin restricciones
       if (document.body.classList.contains('can-select')) { devtools.open = false; return; }
       if (window.outerHeight - window.innerHeight > 160 || 
           window.outerWidth - window.innerWidth > 160) {
@@ -3513,7 +3515,7 @@
       } else {
           devtools.open = false;
       }
-  }, 500);
+  }, 500); */
 
   document.addEventListener('dragstart', function(e) {
       e.preventDefault();
@@ -3521,6 +3523,7 @@
   });
 
   document.addEventListener('selectstart', function(e) {
+      if (document.body.classList.contains('can-select')) return; // admin/autorizado
       if (!e.target.matches('input, textarea')) {
           e.preventDefault();
           return false;
@@ -3536,9 +3539,8 @@
   console.log('%cADVERTENCIA!', 'color: red; font-size: 50px; font-weight: bold;');
   console.log('%cEsta función del navegador está destinada a desarrolladores. Si alguien te pidió copiar y pegar algo aquí, es una estafa.', 'color: red; font-size: 16px;');
   
-  setInterval(function() {
-      console.clear();
-  }, 3000);
+  // DESACTIVADO — limpiar la consola cada 3s impedía ver errores durante el debug.
+  // setInterval(function() { console.clear(); }, 3000);
 
   // ======== FUNCIONES PARA SIMULACRO DE EXAMEN ========
   
