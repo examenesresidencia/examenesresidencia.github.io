@@ -1,7 +1,4 @@
-//V4
-// ════════════════════════════════════════════════════════════════
-// subir-preguntas-admin.js — Módulo de carga de preguntas (Admin)
-// Depende de: script.js (window.__fb, window._fbDb, window.fbIsAdmin)
+//V1 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -62,11 +59,15 @@
   ];
 
   // ── Estado del módulo ─────────────────────────────────────────
-  let _preguntasCargadas    = [];   // preguntas parseadas de los archivos .js
-  let _seccionDestino       = '';
-  let _preguntasNuevas      = [];   // sin duplicados — listas para subir
-  let _preguntasDuplicadas  = [];
-  let _cacheEnunciados      = null; // Set de enunciados normalizados de TODOS los cuestionarios
+  let _preguntasCargadas       = [];   // preguntas parseadas de los archivos .js
+  let _seccionDestino          = '';
+  let _preguntasNuevas         = [];   // sin duplicados — listas para subir
+  let _preguntasDuplicadas     = [];   // (legacy — ya no se usa directamente)
+  let _dupEnDestino            = [];   // repetidas exactamente en el cuestionario destino (bloqueadas)
+  let _dupEnOtros              = [];   // repetidas en otros cuestionarios pero NO en destino (checklist)
+  let _cacheEnunciados         = null; // Set de enunciados normalizados de TODOS los cuestionarios
+  let _modoComparacion         = 'destino'; // 'destino' | 'todo'
+  let _dupSeleccionadas        = new Set(); // índices de _dupEnOtros seleccionadas para subir
 
   // ── Normalizar enunciado ──────────────────────────────────────
   function _norm(texto) {
@@ -567,6 +568,97 @@
         border-color: rgba(14,165,233,0.45);
         transform: translateY(-1px);
       }
+
+      /* ── Modo de comparación ── */
+      #sp-modo-wrap {
+        display: flex; gap: 10px; margin-bottom: 14px;
+      }
+      .sp-modo-btn {
+        flex: 1; padding: 12px 14px; border-radius: 12px; cursor: pointer;
+        border: 1.5px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.03);
+        text-align: left; transition: all 0.2s;
+        display: flex; align-items: flex-start; gap: 10px;
+      }
+      .sp-modo-btn:hover { background: rgba(255,255,255,0.06); }
+      .sp-modo-btn.activo.destino {
+        background: rgba(14,165,233,0.1);
+        border-color: rgba(14,165,233,0.4);
+      }
+      .sp-modo-btn.activo.todo {
+        background: rgba(251,191,36,0.08);
+        border-color: rgba(251,191,36,0.35);
+      }
+      .sp-modo-radio {
+        width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; margin-top: 3px;
+        border: 2px solid rgba(255,255,255,0.2);
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.2s;
+      }
+      .sp-modo-btn.activo.destino .sp-modo-radio { border-color: #0ea5e9; background: rgba(14,165,233,0.2); }
+      .sp-modo-btn.activo.todo .sp-modo-radio    { border-color: #fbbf24; background: rgba(251,191,36,0.2); }
+      .sp-modo-radio::after {
+        content: ''; width: 7px; height: 7px; border-radius: 50%;
+        background: transparent; transition: background 0.15s;
+      }
+      .sp-modo-btn.activo.destino .sp-modo-radio::after { background: #0ea5e9; }
+      .sp-modo-btn.activo.todo    .sp-modo-radio::after { background: #fbbf24; }
+      .sp-modo-label { font-size: 0.84rem; font-weight: 700; color: #94a3b8; transition: color 0.2s; }
+      .sp-modo-btn.activo.destino .sp-modo-label { color: #7dd3fc; }
+      .sp-modo-btn.activo.todo    .sp-modo-label { color: #fde68a; }
+      .sp-modo-desc { font-size: 0.72rem; color: #475569; margin-top: 3px; line-height: 1.5; }
+
+      /* ── Nuevas stats cards (3 columnas) ── */
+      .sp-stat.amarilla { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2); }
+      .sp-stat.amarilla .sp-stat-num { color: #fbbf24; }
+      .sp-stat.gris { background: rgba(100,116,139,0.1); border: 1px solid rgba(100,116,139,0.2); }
+      .sp-stat.gris .sp-stat-num { color: #94a3b8; }
+
+      /* ── Tabs (tres columnas) ── */
+      .sp-tab.activo.amarilla { background: rgba(251,191,36,0.1); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
+      .sp-tab.activo.gris     { background: rgba(100,116,139,0.12); border-color: rgba(100,116,139,0.3); color: #94a3b8; }
+
+      /* ── Descripción debajo de tab activo ── */
+      #sp-tab-desc {
+        font-size: 0.75rem; color: #475569; margin-bottom: 10px;
+        padding: 8px 12px; background: rgba(255,255,255,0.02);
+        border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);
+        line-height: 1.55;
+      }
+
+      /* ── Barra de seleccionar todas (duplicadas en otros) ── */
+      #sp-dup-otros-controls {
+        display: none; align-items: center; justify-content: space-between;
+        padding: 9px 14px; background: rgba(251,191,36,0.06);
+        border: 1px solid rgba(251,191,36,0.15);
+        border-radius: 9px; margin-bottom: 8px;
+        gap: 10px;
+      }
+      #sp-dup-otros-controls.visible { display: flex; }
+      #sp-dup-check-all-label {
+        display: flex; align-items: center; gap: 8px; cursor: pointer;
+        font-size: 0.79rem; color: #fde68a; font-weight: 600;
+        user-select: none;
+      }
+      #sp-dup-check-all { width: 15px; height: 15px; accent-color: #fbbf24; cursor: pointer; }
+      #sp-dup-otros-selcnt {
+        font-size: 0.73rem; color: #92400e; background: rgba(251,191,36,0.15);
+        padding: 3px 9px; border-radius: 20px; font-weight: 700;
+      }
+
+      /* ── Checkbox en items de duplicadas en otros ── */
+      .sp-pregunta-item.seleccionable { cursor: pointer; }
+      .sp-pregunta-item.seleccionable:hover { background: rgba(251,191,36,0.04); }
+      .sp-pregunta-item.seleccionada { background: rgba(251,191,36,0.06) !important; }
+      .sp-item-check {
+        flex-shrink: 0; width: 16px; height: 16px;
+        accent-color: #fbbf24; cursor: pointer; margin-top: 3px;
+      }
+      .sp-dup-otros-badge {
+        display: inline-block; padding: 1px 7px; border-radius: 20px;
+        background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.25);
+        color: #fbbf24; font-size: 0.68rem; font-weight: 700; margin-top: 4px;
+      }
     `;
     document.head.appendChild(s);
   }
@@ -625,6 +717,32 @@
       if (Array.isArray(result) && result.length > 0) return result;
     } catch (_) {}
     throw new Error(`No se pudo parsear "${nombreArchivo}". Verificá que el archivo contenga una asignación a preguntasPorSeccion.`);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // Construir Set de enunciados solo del cuestionario destino
+  // ════════════════════════════════════════════════════════════════
+  function _construirCacheDestino(seccionId) {
+    const enunciados = new Set();
+    try {
+      const raw = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (cached?.preguntas) {
+          for (const p of cached.preguntas) {
+            const n = _norm(p.pregunta);
+            if (n) enunciados.add(n);
+          }
+        }
+      }
+    } catch (_) {}
+    if (window.preguntasPorSeccion?.[seccionId]) {
+      for (const p of window.preguntasPorSeccion[seccionId]) {
+        const n = _norm(p.pregunta);
+        if (n) enunciados.add(n);
+      }
+    }
+    return enunciados;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -719,6 +837,10 @@
     _seccionDestino      = '';
     _preguntasNuevas     = [];
     _preguntasDuplicadas = [];
+    _dupEnDestino        = [];
+    _dupEnOtros          = [];
+    _dupSeleccionadas    = new Set();
+    _modoComparacion     = 'destino';
     _cacheEnunciados     = null;
 
     const overlay = document.createElement('div');
@@ -773,14 +895,33 @@
             <div id="sp-destino-info"></div>
           </div>
 
-          <!-- ── Cache status + botón analizar ─────────────────── -->
+          <!-- ── Cache status + modo + botón analizar ──────────── -->
           <div class="sp-card">
-            <div class="sp-card-title" style="margin-bottom:10px;">🔍 <span>Análisis</span> de duplicados</div>
+            <div class="sp-card-title" style="margin-bottom:12px;">🔍 <span>C</span> — Modo de comparación</div>
+
+            <div id="sp-modo-wrap">
+              <button class="sp-modo-btn activo destino" id="sp-modo-destino" type="button">
+                <div class="sp-modo-radio"></div>
+                <div>
+                  <div class="sp-modo-label">🎯 Solo cuestionario destino</div>
+                  <div class="sp-modo-desc">Marca como nueva cualquier pregunta que no esté <em>en este cuestionario</em>. Ideal para especialidades donde las mismas preguntas aparecen en varios cuestionarios a la vez.</div>
+                </div>
+              </button>
+              <button class="sp-modo-btn todo" id="sp-modo-todo" type="button">
+                <div class="sp-modo-radio"></div>
+                <div>
+                  <div class="sp-modo-label">🌐 Toda la base de datos</div>
+                  <div class="sp-modo-desc">Marca como duplicada cualquier pregunta que ya exista en <em>cualquier cuestionario</em>. Ideal para exámenes únicos, UBA o compilados donde no querés ninguna repetición.</div>
+                </div>
+              </button>
+            </div>
+
             <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
               <div id="sp-cache-estado">Verificando caché local…</div>
               <button id="sp-btn-rescan">🔄 Forzar nuevo escaneo desde Firebase</button>
             </div>
             <button id="sp-btn-analizar" disabled>🔍 Analizar preguntas</button>
+            <div style="font-size:0.72rem;color:#334155;margin-top:7px;text-align:center;">Compará antes de subir · El análisis usa el caché local y no modifica nada en Firebase</div>
           </div>
 
           <!-- ── Panel resultados ───────────────────────────────── -->
@@ -794,16 +935,32 @@
                 <div class="sp-stat-num" id="sp-cnt-nuevas">0</div>
                 <div class="sp-stat-lbl">✅ Nuevas</div>
               </div>
-              <div class="sp-stat roja">
-                <div class="sp-stat-num" id="sp-cnt-dup">0</div>
-                <div class="sp-stat-lbl">🔁 Duplicadas</div>
+              <div class="sp-stat gris">
+                <div class="sp-stat-num" id="sp-cnt-dup-destino">0</div>
+                <div class="sp-stat-lbl">🔁 En este cuestionario</div>
+              </div>
+              <div class="sp-stat amarilla">
+                <div class="sp-stat-num" id="sp-cnt-dup-otros">0</div>
+                <div class="sp-stat-lbl">⚠️ En otros cuestionarios</div>
               </div>
             </div>
 
             <div id="sp-tabs">
-              <button class="sp-tab activo verde" id="sp-tab-nuevas">✅ Nuevas (<span id="sp-tab-cnt-nuevas">0</span>)</button>
-              <button class="sp-tab" id="sp-tab-dup">🔁 Duplicadas (<span id="sp-tab-cnt-dup">0</span>)</button>
+              <button class="sp-tab activo verde"  id="sp-tab-nuevas">✅ Nuevas (<span id="sp-tab-cnt-nuevas">0</span>)</button>
+              <button class="sp-tab gris"  id="sp-tab-dup-destino">🔁 En este cuest. (<span id="sp-tab-cnt-dup-destino">0</span>)</button>
+              <button class="sp-tab amarilla" id="sp-tab-dup-otros">⚠️ En otros (<span id="sp-tab-cnt-dup-otros">0</span>)</button>
             </div>
+            <div id="sp-tab-desc"></div>
+
+            <!-- Controles para seleccionar duplicadas en otros -->
+            <div id="sp-dup-otros-controls">
+              <label id="sp-dup-check-all-label">
+                <input type="checkbox" id="sp-dup-check-all">
+                Seleccionar todas para subir
+              </label>
+              <span id="sp-dup-otros-selcnt">0 seleccionadas</span>
+            </div>
+
             <div id="sp-lista-preguntas"></div>
 
             <!-- Botón subir -->
@@ -811,6 +968,7 @@
               <span>⬆️</span>
               <span id="sp-btn-subir-txt">SUBIR AL FINAL DEL CUESTIONARIO</span>
             </button>
+            <div style="font-size:0.72rem;color:#334155;margin-top:7px;text-align:center;" id="sp-btn-subir-hint">Las preguntas ✅ nuevas se suben siempre · Las ⚠️ que hayas tildado se suman al lote</div>
           </div>
 
           <!-- ── Log de subida ──────────────────────────────────── -->
@@ -989,8 +1147,33 @@
     document.getElementById('sp-btn-analizar').addEventListener('click', _analizarPreguntas);
 
     // Tabs
-    document.getElementById('sp-tab-nuevas').addEventListener('click', () => _mostrarTab('nuevas'));
-    document.getElementById('sp-tab-dup').addEventListener('click',    () => _mostrarTab('dup'));
+    document.getElementById('sp-tab-nuevas').addEventListener('click',      () => _mostrarTab('nuevas'));
+    document.getElementById('sp-tab-dup-destino').addEventListener('click', () => _mostrarTab('dup-destino'));
+    document.getElementById('sp-tab-dup-otros').addEventListener('click',   () => _mostrarTab('dup-otros'));
+
+    // Checkbox "seleccionar todas" en dup-otros
+    document.getElementById('sp-dup-check-all').addEventListener('change', function () {
+      if (this.checked) {
+        _dupEnOtros.forEach((_, i) => _dupSeleccionadas.add(i));
+      } else {
+        _dupSeleccionadas.clear();
+      }
+      // Re-renderizar la tab para reflejar cambios
+      _mostrarTab('dup-otros');
+      _actualizarBotonSubir();
+    });
+
+    // Botones de modo de comparación
+    document.getElementById('sp-modo-destino').addEventListener('click', () => {
+      _modoComparacion = 'destino';
+      document.getElementById('sp-modo-destino').classList.add('activo','destino');
+      document.getElementById('sp-modo-todo').classList.remove('activo','todo');
+    });
+    document.getElementById('sp-modo-todo').addEventListener('click', () => {
+      _modoComparacion = 'todo';
+      document.getElementById('sp-modo-todo').classList.add('activo','todo');
+      document.getElementById('sp-modo-destino').classList.remove('activo','destino');
+    });
 
     // Subir
     document.getElementById('sp-btn-subir').addEventListener('click', _subirPreguntas);
@@ -1113,57 +1296,88 @@
   function _analizarPreguntas() {
     if (!_preguntasCargadas.length || !_seccionDestino) return;
 
-    // Reconstruir caché de enunciados
-    const { enunciados } = _construirCacheEnunciados();
-    _cacheEnunciados = enunciados;
+    // Construir ambos cachés
+    const { enunciados: enunciadosTodo } = _construirCacheEnunciados();
+    const enunciadosDestino = _construirCacheDestino(_seccionDestino);
+    _cacheEnunciados = enunciadosTodo;
 
-    _preguntasNuevas     = [];
-    _preguntasDuplicadas = [];
+    _preguntasNuevas = [];
+    _dupEnDestino    = [];
+    _dupEnOtros      = [];
+    _dupSeleccionadas = new Set();
 
     for (const p of _preguntasCargadas) {
       const n = _norm(p.pregunta);
       if (!n) continue;
-      if (_cacheEnunciados.has(n)) {
-        _preguntasDuplicadas.push(p);
+
+      const estaEnDestino = enunciadosDestino.has(n);
+      const estaEnOtros   = enunciadosTodo.has(n) && !estaEnDestino;
+
+      if (estaEnDestino) {
+        // Bloqueada: ya está exactamente en el cuestionario destino
+        _dupEnDestino.push(p);
+      } else if (_modoComparacion === 'todo' && estaEnOtros) {
+        // En modo "todo": la encontró en otro cuestionario → checklist
+        _dupEnOtros.push(p);
       } else {
+        // Nueva: no está en destino (modo destino) o no está en ningún lado (modo todo)
         _preguntasNuevas.push(p);
       }
     }
 
-    // Actualizar UI
-    document.getElementById('sp-cnt-total').textContent  = _preguntasCargadas.length;
-    document.getElementById('sp-cnt-nuevas').textContent = _preguntasNuevas.length;
-    document.getElementById('sp-cnt-dup').textContent    = _preguntasDuplicadas.length;
-    document.getElementById('sp-tab-cnt-nuevas').textContent = _preguntasNuevas.length;
-    document.getElementById('sp-tab-cnt-dup').textContent    = _preguntasDuplicadas.length;
+    // Actualizar UI — counters
+    document.getElementById('sp-cnt-total').textContent          = _preguntasCargadas.length;
+    document.getElementById('sp-cnt-nuevas').textContent         = _preguntasNuevas.length;
+    document.getElementById('sp-cnt-dup-destino').textContent    = _dupEnDestino.length;
+    document.getElementById('sp-cnt-dup-otros').textContent      = _dupEnOtros.length;
+    document.getElementById('sp-tab-cnt-nuevas').textContent     = _preguntasNuevas.length;
+    document.getElementById('sp-tab-cnt-dup-destino').textContent = _dupEnDestino.length;
+    document.getElementById('sp-tab-cnt-dup-otros').textContent  = _dupEnOtros.length;
+
+    // Botón ⚠️ tab — ocultar si modo destino y no hay ninguna en otros
+    const tabOtros = document.getElementById('sp-tab-dup-otros');
+    tabOtros.style.display = (_modoComparacion === 'todo' || _dupEnOtros.length > 0) ? '' : 'none';
 
     document.getElementById('sp-panel-resultados').style.display = 'block';
-    document.getElementById('sp-btn-subir').disabled = _preguntasNuevas.length === 0;
-
-    const txtBtn = document.getElementById('sp-btn-subir-txt');
-    const sec = TODAS_LAS_SECCIONES.find(s => s.id === _seccionDestino);
-    txtBtn.textContent = _preguntasNuevas.length > 0
-      ? `SUBIR ${_preguntasNuevas.length} PREGUNTA${_preguntasNuevas.length > 1 ? 'S' : ''} NUEVAS → ${sec?.label}`
-      : 'NO HAY PREGUNTAS NUEVAS PARA SUBIR';
+    _actualizarBotonSubir();
 
     _mostrarTab('nuevas');
     _actualizarStep(3);
-
-    // Scroll al panel
     document.getElementById('sp-panel-resultados').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ── Actualizar texto y estado del botón subir ─────────────────
+  function _actualizarBotonSubir() {
+    const btnSubir = document.getElementById('sp-btn-subir');
+    const txtBtn   = document.getElementById('sp-btn-subir-txt');
+    if (!btnSubir) return;
+    const sec = TODAS_LAS_SECCIONES.find(s => s.id === _seccionDestino);
+    const totalSubir = _preguntasNuevas.length + _dupSeleccionadas.size;
+    btnSubir.disabled = totalSubir === 0;
+    if (totalSubir > 0) {
+      let txt = `SUBIR ${totalSubir} PREGUNTA${totalSubir > 1 ? 'S' : ''} → ${sec?.label}`;
+      if (_dupSeleccionadas.size > 0) txt += ` (${_preguntasNuevas.length} nuevas + ${_dupSeleccionadas.size} ⚠️ seleccionadas)`;
+      txtBtn.textContent = txt;
+    } else {
+      txtBtn.textContent = 'NO HAY PREGUNTAS PARA SUBIR';
+    }
   }
 
   // ── Mostrar tab ───────────────────────────────────────────────
   function _mostrarTab(cual) {
-    const lista = document.getElementById('sp-lista-preguntas');
-    const tabN  = document.getElementById('sp-tab-nuevas');
-    const tabD  = document.getElementById('sp-tab-dup');
+    const lista   = document.getElementById('sp-lista-preguntas');
+    const tabN    = document.getElementById('sp-tab-nuevas');
+    const tabD    = document.getElementById('sp-tab-dup-destino');
+    const tabO    = document.getElementById('sp-tab-dup-otros');
+    const descEl  = document.getElementById('sp-tab-desc');
+    const ctrlEl  = document.getElementById('sp-dup-otros-controls');
 
-    tabN.classList.remove('activo', 'verde', 'roja');
-    tabD.classList.remove('activo', 'verde', 'roja');
+    [tabN, tabD, tabO].forEach(t => { if(t) t.classList.remove('activo','verde','gris','amarilla','roja'); });
+    ctrlEl.classList.remove('visible');
 
     if (cual === 'nuevas') {
       tabN.classList.add('activo', 'verde');
+      descEl.textContent = '✅ Estas preguntas no existen en el cuestionario destino — se subirán automáticamente al hacer clic en "Subir".';
       lista.innerHTML = '';
       if (_preguntasNuevas.length === 0) {
         lista.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;font-size:0.85rem;">No hay preguntas nuevas.</div>';
@@ -1181,27 +1395,86 @@
           </div>`;
         lista.appendChild(div);
       });
-    } else {
-      tabD.classList.add('activo', 'roja');
+
+    } else if (cual === 'dup-destino') {
+      tabD.classList.add('activo', 'gris');
+      descEl.textContent = '🔁 Estas preguntas ya existen exactamente en este cuestionario — están bloqueadas y no se subirán. Si querés reemplazarlas, primero vaciarlas desde "Zona de peligro".';
       lista.innerHTML = '';
-      if (_preguntasDuplicadas.length === 0) {
-        lista.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;font-size:0.85rem;">No hay duplicadas.</div>';
+      if (_dupEnDestino.length === 0) {
+        lista.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;font-size:0.85rem;">Ninguna pregunta repetida en este cuestionario. ✅</div>';
         return;
       }
-      _preguntasDuplicadas.forEach((p, i) => {
+      _dupEnDestino.forEach((p, i) => {
         const div = document.createElement('div');
         div.className = 'sp-pregunta-item';
         div.innerHTML = `
-          <div class="sp-pregunta-badge roja"></div>
+          <div class="sp-pregunta-badge" style="background:#475569"></div>
           <span class="sp-pregunta-num">#${i + 1}</span>
           <div>
             <div class="sp-pregunta-txt">${_escapeHtml(p.pregunta || '(sin enunciado)')}</div>
             <div class="sp-pregunta-meta">${p.opciones?.length || 0} opciones · ${p._archivo || ''}</div>
-            <div class="sp-dup-origen">🔁 Ya existe en el cuestionario</div>
+            <div class="sp-dup-origen">🔁 Ya está en este cuestionario — bloqueada</div>
           </div>`;
         lista.appendChild(div);
       });
+
+    } else { // dup-otros
+      tabO.classList.add('activo', 'amarilla');
+      descEl.textContent = '⚠️ Estas preguntas ya existen en otro cuestionario pero NO en el destino. Podés tildar las que igual querés subir — por ejemplo, si la misma pregunta de Único 2023 también debe aparecer en Cardiología.';
+
+      if (_dupEnOtros.length > 0) ctrlEl.classList.add('visible');
+
+      lista.innerHTML = '';
+      if (_dupEnOtros.length === 0) {
+        lista.innerHTML = '<div style="padding:20px;text-align:center;color:#475569;font-size:0.85rem;">No hay preguntas repetidas en otros cuestionarios.</div>';
+        return;
+      }
+
+      _dupEnOtros.forEach((p, i) => {
+        const esSel = _dupSeleccionadas.has(i);
+        const div = document.createElement('div');
+        div.className = 'sp-pregunta-item seleccionable' + (esSel ? ' seleccionada' : '');
+        div.dataset.idx = i;
+        div.innerHTML = `
+          <input type="checkbox" class="sp-item-check" ${esSel ? 'checked' : ''} title="Incluir en la subida">
+          <span class="sp-pregunta-num">#${i + 1}</span>
+          <div>
+            <div class="sp-pregunta-txt">${_escapeHtml(p.pregunta || '(sin enunciado)')}</div>
+            <div class="sp-pregunta-meta">${p.opciones?.length || 0} opciones · ${p._archivo || ''}</div>
+            <div class="sp-dup-otros-badge">⚠️ Existe en otro cuestionario</div>
+          </div>`;
+        // Toggle al hacer clic
+        div.addEventListener('click', (e) => {
+          if (e.target.tagName === 'INPUT') return; // handled below
+          const cb = div.querySelector('.sp-item-check');
+          cb.checked = !cb.checked;
+          _toggleDupOtra(i, cb.checked, div);
+        });
+        div.querySelector('.sp-item-check').addEventListener('change', (e) => {
+          _toggleDupOtra(i, e.target.checked, div);
+        });
+        lista.appendChild(div);
+      });
+
+      _actualizarContadorOtras();
     }
+  }
+
+  // ── Toggle selección de una "dup en otros" ────────────────────
+  function _toggleDupOtra(idx, checked, divEl) {
+    if (checked) _dupSeleccionadas.add(idx);
+    else         _dupSeleccionadas.delete(idx);
+    if (divEl) divEl.classList.toggle('seleccionada', checked);
+    _actualizarContadorOtras();
+    _actualizarBotonSubir();
+  }
+
+  // ── Actualizar contador de seleccionadas ──────────────────────
+  function _actualizarContadorOtras() {
+    const el = document.getElementById('sp-dup-otros-selcnt');
+    if (el) el.textContent = `${_dupSeleccionadas.size} seleccionada${_dupSeleccionadas.size !== 1 ? 's' : ''}`;
+    const chkAll = document.getElementById('sp-dup-check-all');
+    if (chkAll) chkAll.checked = _dupSeleccionadas.size === _dupEnOtros.length && _dupEnOtros.length > 0;
   }
 
   // ── Log helper ────────────────────────────────────────────────
@@ -1229,7 +1502,11 @@
 
   // ── Subir preguntas a Firestore ───────────────────────────────
   async function _subirPreguntas() {
-    if (_preguntasNuevas.length === 0) return;
+    // Construir lista final: nuevas + duplicadas-en-otros seleccionadas
+    const dupSelArray = Array.from(_dupSeleccionadas).sort((a,b) => a-b).map(i => _dupEnOtros[i]);
+    const preguntasASubir = [..._preguntasNuevas, ...dupSelArray];
+
+    if (preguntasASubir.length === 0) return;
 
     const fsModule = window.__fb || window.__firebase_firestore;
     if (!fsModule) { _toast('❌ Firestore no disponible', 'error'); return; }
@@ -1253,7 +1530,7 @@
       const seccionId = _seccionDestino;
       const sec = TODAS_LAS_SECCIONES.find(s => s.id === seccionId);
       _log('info', `Iniciando subida a "${sec?.label}" (${seccionId})`);
-      _log('info', `${_preguntasNuevas.length} preguntas nuevas a subir`);
+      _log('info', `${preguntasASubir.length} preguntas a subir (${_preguntasNuevas.length} nuevas + ${dupSelArray.length} ⚠️ seleccionadas de otros cuestionarios)`);
 
       // 1. Obtener el _idx máximo actual en Firestore
       _log('info', 'Consultando el índice máximo actual en Firebase…');
@@ -1275,8 +1552,8 @@
       let subidas = 0;
       const errores = [];
 
-      for (let i = 0; i < _preguntasNuevas.length; i += BATCH_SIZE) {
-        const lote = _preguntasNuevas.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < preguntasASubir.length; i += BATCH_SIZE) {
+        const lote = preguntasASubir.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(db);
 
         lote.forEach((p, j) => {
@@ -1290,7 +1567,7 @@
 
         await batch.commit();
         subidas += lote.length;
-        _setProgreso(subidas, _preguntasNuevas.length, `Subiendo lote… ${subidas}/${_preguntasNuevas.length}`);
+        _setProgreso(subidas, preguntasASubir.length, `Subiendo lote… ${subidas}/${preguntasASubir.length}`);
         _log('ok', `✅ Lote ${Math.ceil((i + BATCH_SIZE) / BATCH_SIZE)}: ${lote.length} preguntas subidas (idx ${startIdx + i} → ${startIdx + i + lote.length - 1})`);
       }
 
@@ -1318,7 +1595,7 @@
         } else if (window.preguntasPorSeccion?.[seccionId]) {
           preguntasActuales = window.preguntasPorSeccion[seccionId];
         }
-        const preguntasConIdx = _preguntasNuevas.map((p, i) => {
+        const preguntasConIdx = preguntasASubir.map((p, i) => {
           const { _archivo, ...limpia } = p;
           return { ...limpia, _firestoreIdx: startIdx + i };
         });
@@ -1349,7 +1626,7 @@
 
       // 7. Emitir evento para que buscador-duplicados actualice su caché en memoria
       try {
-        const preguntasParaBuscador = _preguntasNuevas.map((p, i) => ({
+        const preguntasParaBuscador = preguntasASubir.map((p, i) => ({
           seccionId,
           docId   : String(startIdx + i).padStart(5, '0'),
           idx     : startIdx + i,
@@ -1361,7 +1638,7 @@
         }));
       } catch (_) {}
 
-      _setProgreso(_preguntasNuevas.length, _preguntasNuevas.length, '¡Subida completa!');
+      _setProgreso(preguntasASubir.length, preguntasASubir.length, '¡Subida completa!');
       _log('ok', `🎉 Subida finalizada: ${subidas} preguntas añadidas a "${sec?.label}"`);
       if (errores.length > 0) _log('warn', `⚠️ ${errores.length} errores durante la subida`);
 
@@ -1641,6 +1918,10 @@
     _seccionDestino      = '';
     _preguntasNuevas     = [];
     _preguntasDuplicadas = [];
+    _dupEnDestino        = [];
+    _dupEnOtros          = [];
+    _dupSeleccionadas    = new Set();
+    _modoComparacion     = 'destino';
     _cacheEnunciados     = null;
 
     // Limpiar lista de archivos cargados
@@ -1683,6 +1964,12 @@
     // Deshabilitar botón analizar
     const btnAnalizar = document.getElementById('sp-btn-analizar');
     if (btnAnalizar) btnAnalizar.disabled = true;
+
+    // Resetear modo de comparación a "destino"
+    const modoDestino = document.getElementById('sp-modo-destino');
+    const modoTodo    = document.getElementById('sp-modo-todo');
+    if (modoDestino) { modoDestino.classList.add('activo','destino'); }
+    if (modoTodo)    { modoTodo.classList.remove('activo','todo'); }
 
     // Actualizar steps al inicio
     _actualizarStep(1);
