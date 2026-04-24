@@ -1,12 +1,12 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js- V1
+// buscador-duplicados.js - V3
 // ────────────────────────────────────────────────────────────────
 
 
 (function () {
   'use strict';
 
-  // ── Lista completa de secciones a escanear ─────────────────────
+  // ── Lista completa de secciones a escanear (orden A-Z) ───────
   const TODAS_LAS_SECCIONES = [
     'unico2016','unico2017','unico2018','unico2019','unico2020',
     'unico2021','unico2022','unico2023','unico2024','unico2025',
@@ -18,7 +18,7 @@
     'ginecologia','obstetricia','cirugia','traumatologia','urologia',
     'of','orl','dermatologia','psiquiatria','reumatologia',
     'toxicologia','medicinalegal','saludpublica','medicinafamiliar'
-  ];
+  ].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 
   // ── Helpers locales ────────────────────────────────────────────
   function _bdToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
@@ -26,6 +26,7 @@
 
   // ── Cache del último escaneo ───────────────────────────────────
   let _dupGruposCache = [];
+  let _dupGruposInternoCache = []; // duplicados dentro de la misma sección
   const _DUP_CACHE_KEY = 'fb_dup_scan_cache_v2';
   const _DUP_CACHE_TTL = Infinity; // "nunca expira"
 
@@ -93,6 +94,19 @@
             <option value="">Todas las secciones</option>
             ${TODAS_LAS_SECCIONES.map(s => `<option value="${s}">${s}</option>`).join('')}
           </select>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:7px 13px;">
+            <span style="color:#94a3b8;font-size:0.78rem;font-weight:600;white-space:nowrap;">Buscar duplicados:</span>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:#e2e8f0;font-size:0.82rem;white-space:nowrap;">
+              <input type="radio" name="dup-modo" id="dup-modo-global" value="global" checked
+                style="accent-color:#7c3aed;cursor:pointer;">
+              🌐 Entre secciones
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:#e2e8f0;font-size:0.82rem;white-space:nowrap;">
+              <input type="radio" name="dup-modo" id="dup-modo-interna" value="interna"
+                style="accent-color:#7c3aed;cursor:pointer;">
+              📂 Dentro de un cuestionario
+            </label>
+          </div>
           <button id="dup-btn-scan" style="padding:9px 18px;border:none;border-radius:8px;
             background:linear-gradient(135deg,#7c3aed,#6d28d9);color:#fff;
             font-size:0.85rem;font-weight:700;cursor:pointer;white-space:nowrap;">
@@ -139,6 +153,9 @@
     document.getElementById('dup-btn-scan').onclick = () => _escanearDuplicados();
     document.getElementById('dup-filtro-texto').addEventListener('input', _aplicarFiltrosDuplicados);
     document.getElementById('dup-filtro-seccion').addEventListener('change', _aplicarFiltrosDuplicados);
+    document.querySelectorAll('input[name="dup-modo"]').forEach(radio => {
+      radio.addEventListener('change', _aplicarFiltrosDuplicados);
+    });
 
     document.getElementById('dup-btn-deselect-all').onclick = () => {
       document.querySelectorAll('.dup-checkbox:checked').forEach(cb => { cb.checked = false; });
@@ -172,12 +189,15 @@
         // Invalidar caché si se guardó con 0 secciones (escaneo fallido anterior)
         if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL && cached.seccionesEscaneadas > 0) {
           _dupGruposCache = cached.grupos;
+          _dupGruposInternoCache = cached.gruposInternos || [];
           const edad = Math.round((Date.now() - cached.ts) / 60000);
           const edadTexto = edad < 60 ? `${edad} min` : `${Math.round(edad / 60)} hs`;
           resumen.innerHTML = `
             Escaneadas: <strong style="color:#f1f5f9">${cached.seccionesEscaneadas}</strong> secciones ·
             <strong style="color:#f1f5f9">${cached.totalPreguntas.toLocaleString()}</strong> preguntas totales ·
-            Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>
+            Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos ·
+            Dentro de cuestionario: <strong style="color:${_dupGruposInternoCache.length > 0 ? '#fb923c' : '#4ade80'}">${_dupGruposInternoCache.length}</strong> grupos
+            <br><span class="dup-modo-badge" style="color:#a78bfa;font-size:0.75rem;">🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos</span>
             <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
               📦 Desde caché (hace ${edadTexto}) —
               <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
@@ -219,7 +239,8 @@
         return;
       }
 
-      const mapa = new Map();
+      const mapa = new Map();        // global: clave → [items de cualquier sección]
+      const mapaInterna = new Map(); // interna: "seccion::clave" → [items de esa sección]
       let totalPreguntas = 0;
       let seccionesEscaneadas = 0;
       const erroresSecciones = [];
@@ -248,7 +269,7 @@
             const clave = _normalizarEnunciado(data.pregunta);
             if (!clave) return;
             if (!mapa.has(clave)) mapa.set(clave, []);
-            mapa.get(clave).push({
+            const itemData = {
               seccionId,
               docId   : docSnap.id,
               idx     : data._idx ?? null,
@@ -256,7 +277,12 @@
               pregunta: data.pregunta || '(sin enunciado)',
               huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
               // opciones y correcta se omiten del caché para no exceder los 5MB de localStorage
-            });
+            };
+            mapa.get(clave).push(itemData);
+            // También indexamos por sección para detectar duplicados internos
+            const claveInterna = seccionId + '::' + clave;
+            if (!mapaInterna.has(claveInterna)) mapaInterna.set(claveInterna, []);
+            mapaInterna.get(claveInterna).push(itemData);
           });
         } catch (errSec) {
           console.error(`[DUP-SCAN] Error en ${seccionId}:`, errSec);
@@ -302,18 +328,26 @@
         lista.innerHTML = '';
       }
 
-      // Filtrar grupos con más de 1 entrada
+      // Filtrar grupos con más de 1 entrada — modo global (entre secciones)
       _dupGruposCache = [];
       mapa.forEach((items) => {
         if (items.length > 1) _dupGruposCache.push(items);
       });
       _dupGruposCache.sort((a, b) => b.length - a.length);
 
+      // Modo interno: duplicados DENTRO de la misma sección
+      _dupGruposInternoCache = [];
+      mapaInterna.forEach((items) => {
+        if (items.length > 1) _dupGruposInternoCache.push(items);
+      });
+      _dupGruposInternoCache.sort((a, b) => b.length - a.length);
+
       // Guardar en caché localStorage SOLO si hay datos reales
       try {
         localStorage.setItem(_DUP_CACHE_KEY, JSON.stringify({
           ts: Date.now(),
           grupos: _dupGruposCache,
+          gruposInternos: _dupGruposInternoCache,
           totalPreguntas,
           seccionesEscaneadas
         }));
@@ -328,7 +362,9 @@
       resumen.innerHTML = `
         Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
         <strong style="color:#f1f5f9">${totalPreguntas.toLocaleString()}</strong> preguntas totales ·
-        Grupos con duplicados: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong>
+        Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos ·
+        Dentro de cuestionario: <strong style="color:${_dupGruposInternoCache.length > 0 ? '#fb923c' : '#4ade80'}">${_dupGruposInternoCache.length}</strong> grupos
+        <br><span class="dup-modo-badge" style="color:#a78bfa;font-size:0.75rem;">🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos</span>
         <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
           ✅ Caché actualizada — sin expiración automática —
           <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
@@ -380,9 +416,23 @@
     const lista       = document.getElementById('dup-lista');
     const filtroTexto = (document.getElementById('dup-filtro-texto')?.value || '').toLowerCase();
     const filtroSecc  = document.getElementById('dup-filtro-seccion')?.value || '';
+    const modoInterna = document.querySelector('input[name="dup-modo"]:checked')?.value === 'interna';
     if (!lista) return;
 
-    let grupos = _dupGruposCache;
+    // Elegir la fuente de datos según el modo seleccionado
+    let grupos = modoInterna ? _dupGruposInternoCache : _dupGruposCache;
+
+    // Actualizar el badge de modo en el resumen
+    const resumen = document.getElementById('dup-resumen');
+    if (resumen) {
+      const badge = resumen.querySelector('.dup-modo-badge');
+      if (badge) {
+        badge.textContent = modoInterna
+          ? `📂 Modo: dentro del mismo cuestionario — ${_dupGruposInternoCache.length} grupos`
+          : `🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos`;
+        badge.style.color = modoInterna ? '#7dd3fc' : '#a78bfa';
+      }
+    }
 
     if (filtroTexto) {
       grupos = grupos.filter(g =>
@@ -390,11 +440,17 @@
       );
     }
     if (filtroSecc) {
-      grupos = grupos.filter(g => g.some(item => item.seccionId === filtroSecc));
+      if (modoInterna) {
+        // En modo interno, la sección ya está implícita en la clave; filtrar igual
+        grupos = grupos.filter(g => g.some(item => item.seccionId === filtroSecc));
+      } else {
+        grupos = grupos.filter(g => g.some(item => item.seccionId === filtroSecc));
+      }
     }
 
     if (grupos.length === 0) {
-      lista.innerHTML = '<div style="text-align:center;padding:40px;color:#4ade80;font-size:1.05rem;">✅ No se encontraron duplicados con estos filtros.</div>';
+      const modoLabel = modoInterna ? 'dentro del mismo cuestionario' : 'entre secciones';
+      lista.innerHTML = `<div style="text-align:center;padding:40px;color:#4ade80;font-size:1.05rem;">✅ No se encontraron duplicados ${modoLabel} con estos filtros.</div>`;
       return;
     }
 
@@ -410,7 +466,7 @@
       header.style.cssText = 'background:rgba(124,58,237,0.15);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;';
       header.innerHTML = `
         <div style="color:#c4b5fd;font-size:0.78rem;font-weight:700;letter-spacing:0.04em;">
-          GRUPO ${grupoIdx + 1} — ${items.length} copias con enunciado idéntico
+          GRUPO ${grupoIdx + 1} — ${items.length} copias con enunciado idéntico${items[0] && items.every(i => i.seccionId === items[0].seccionId) ? ` <span style="background:rgba(251,146,60,0.2);border:1px solid rgba(251,146,60,0.4);color:#fb923c;font-size:0.68rem;padding:1px 6px;border-radius:10px;margin-left:6px;">📂 ${items[0].seccionId}</span>` : ''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
           <button class="dup-btn-toggle-opciones" style="
