@@ -1,4 +1,10 @@
-//PRUEBA 8 <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 9  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
+//         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
+//         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
+//         El orden aleatorio se genera UNA SOLA VEZ al primer ingreso y queda congelado.
+// Fix v9: se elimina toda la lógica de extrapolación de preguntas desde exámenes únicos/UBA/compilados
+//         hacia especialidades. Cada cuestionario de especialidad ahora solo contiene sus propias preguntas.
 // Fix: preguntas sin responder se re-mezclan en cada entrada a la sección (nuevo orden aleatorio
 //      cada vez que se recarga o se vuelve desde el menú/otra sección). Las preguntas respondidas
 //      permanecen fijas arriba con sus respuestas correctamente restauradas.
@@ -559,95 +565,16 @@
     return seccionId;
   }
 
-  // DESPUÉS:
-  // Guard para extrapolación dirigida (opciones.hacia): registra qué combinaciones
-  // fuente→especialidad ya fueron procesadas para evitar insertar clones duplicados
-  // cuando aplicarExtrapolacion se llama varias veces con la misma especialidad destino.
+  // ── EXTRAPOLACIÓN DESACTIVADA (v9) ─────────────────────────────────────────
+  // La función aplicarExtrapolacion fue desactivada. Cada cuestionario de especialidad
+  // contiene únicamente sus propias preguntas subidas directamente a Firestore.
+  // La función se conserva como no-op para compatibilidad con cualquier llamada residual.
   if (!window._extrapolacionPorPar) window._extrapolacionPorPar = new Set();
 
   function aplicarExtrapolacion(soloSeccion, opciones) {
-    // opciones.hacia: si se pasa, fuerza extrapolar compilados ya cargados HACIA esa
-    // especialidad destino. No usa ni modifica el guard global _extrapolacionAplicada.
-    const especialidadDestino = opciones && opciones.hacia ? opciones.hacia : null;
-
-    if (!soloSeccion && !especialidadDestino) {
-      if (window._extrapolacionAplicada) return;
-      window._extrapolacionAplicada = true;
-    }
-
-    // Procesar exámenes únicos, UBA y compilados con la misma lógica de extrapolación.
-    // Cuando se usa opciones.hacia, procesar todas las fuentes ya en memoria
-    // (Únicos, UBA y compilados) para inyectar en la especialidad destino.
-    const fuentesOficiales = especialidadDestino
-      ? [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS].filter(id => !!preguntasPorSeccion[id])
-      : soloSeccion
-        ? [soloSeccion]
-        : [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
-
-    fuentesOficiales.forEach(seccionId => {
-      const preguntas = preguntasPorSeccion[seccionId];
-      if (!preguntas) return;
-
-      preguntas.forEach((preg, qIndex) => {
-        const etqEspecialidad = preg.etiquetas && preg.etiquetas.especialidad;
-        if (!etqEspecialidad) return;
-
-        // Resolver el key de la especialidad destino
-        const key = MAPA_ESPECIALIDAD_KEY[etqEspecialidad] ||
-                    etqEspecialidad.toLowerCase()
-                      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-                      .replace(/\s+/g, '');
-
-        // Si se pasó especialidadDestino, solo inyectar en esa especialidad
-        if (especialidadDestino && key !== especialidadDestino) return;
-
-        if (!preguntasPorSeccion[key]) return; // especialidad no existe en la BD
-
-        // Evitar duplicados: comparar por texto de pregunta normalizado (sin número, sin espacios extra).
-        // Esto evita duplicados aunque haya pequeñas diferencias de espacios o tildes.
-        function normalizarEnunciado(texto) {
-          return (texto || '').trim()
-            .replace(/^\d+[\.\-\)]\s*/, '') // quitar número inicial (ej: "39. " o "114. ")
-            .replace(/\s+/g, ' ')           // colapsar espacios múltiples
-            .toLowerCase();
-        }
-
-        // FIX Bug 1: guard adicional por par (fuente, destino, índice) para evitar que
-        // llamadas repetidas a aplicarExtrapolacion({ hacia }) inserten el mismo clon dos veces,
-        // lo que producía opciones duplicadas en el render de la especialidad.
-        const parKey = `${seccionId}|${key}|${qIndex}`;
-        if (window._extrapolacionPorPar.has(parKey)) return;
-
-        const enunciadosEspecialidad = new Set(
-          preguntasPorSeccion[key].map(p => normalizarEnunciado(p.pregunta))
-        );
-        const yaExiste = enunciadosEspecialidad.has(normalizarEnunciado(preg.pregunta));
-        if (yaExiste) return;
-
-        window._extrapolacionPorPar.add(parKey);
-
-        // Clonar la pregunta: en la especialidad se comporta igual que cualquier otra
-        // pregunta propia (orden aleatorio, integrada en la lista, no al final).
-        const clone = Object.assign({}, preg, {
-          _origenExamen : seccionId,  // marca de procedencia
-          _origenUnico  : seccionId,  // compatibilidad con código existente
-          // _sinMezclar NO se establece → las opciones se mezclan como el resto
-          etiquetas: Object.assign({}, preg.etiquetas, {
-            especialidad  : etqEspecialidad,
-            nombreArchivo : formatearNombreArchivo(seccionId),
-            numeroPregunta: `Preg. ${qIndex + 1}`,
-          }),
-        });
-
-        preguntasPorSeccion[key].push(clone);
-      });
-    });
-
-    console.log('✅ Extrapolación aplicada:', 
-      Object.keys(preguntasPorSeccion).map(k => 
-        `${k}: ${preguntasPorSeccion[k].length} pregs`
-      ).join(' | ')
-    );
+    // No-op: la extrapolación fue eliminada en v9.
+    // Las preguntas de exámenes únicos/UBA/compilados ya NO se copian a especialidades.
+    console.log('[EXTRAPOLACIÓN] Desactivada en v9 — función llamada pero ignorada');
   }
 
   // ── Carga dinámica de secciones ─────────────────────────────────────────────
@@ -662,10 +589,11 @@
   // por:
   //   <script>window.preguntasPorSeccion = {};</script>
 
-  // ── Migración única: limpiar cachés de especialidades que puedan tener duplicados ──
-  // Se ejecuta una sola vez por instalación (guarda marca en localStorage).
+  // ── Migración v9: limpiar cachés de especialidades con preguntas extrapoladas ──
+  // La extrapolación fue eliminada en v9. Esta migración limpia, UNA SOLA VEZ,
+  // cualquier caché que contenga preguntas clonadas (_origenExamen) de sesiones anteriores.
   (function limpiarCacheEspecialidadesConDuplicados() {
-    const MIGRATION_KEY = 'quiz_cache_dedup_migration_v1';
+    const MIGRATION_KEY = 'quiz_cache_dedup_migration_v2'; // v2 = migración para v9
     if (localStorage.getItem(MIGRATION_KEY)) return;
     const especialidades = Object.values(MAPA_ESPECIALIDAD_KEY).filter((v, i, a) => a.indexOf(v) === i);
     let limpiadas = 0;
@@ -676,15 +604,8 @@
         if (!raw) return;
         const cached = JSON.parse(raw);
         if (!cached || !cached.preguntas) return;
-        // Quitar clones extrapolados y deduplicar por enunciado
-        let limpias = cached.preguntas.filter(p => !p._origenExamen);
-        const vistos = new Set();
-        limpias = limpias.filter(p => {
-          const k = (p.pregunta || '').trim();
-          if (vistos.has(k)) return false;
-          vistos.add(k);
-          return true;
-        });
+        // Quitar clones extrapolados (marcados con _origenExamen)
+        const limpias = cached.preguntas.filter(p => !p._origenExamen);
         if (limpias.length !== cached.preguntas.length) {
           // Forzar recarga desde Firestore eliminando la caché obsoleta
           localStorage.removeItem(cacheKey);
@@ -694,7 +615,7 @@
     });
     localStorage.setItem(MIGRATION_KEY, '1');
     if (limpiadas > 0)
-      console.log('🧹 Migración dedup: se limpió caché de', limpiadas, 'especialidades con duplicados');
+      console.log('🧹 Migración v9: se limpió caché de', limpiadas, 'especialidades con preguntas extrapoladas');
   })();
 
   const _seccionesYaCargadas = new Set();
@@ -1137,15 +1058,14 @@
       state[seccionId].unansweredOrder = [];
     }
 
-    // Si hay preguntas extrapoladas nuevas que el estado guardado no conocía,
-    // agregarlas al unansweredOrder para que aparezcan en el cuestionario.
+    // Si hay preguntas nuevas que el estado guardado no conocía (añadidas por el admin
+    // después de que el usuario inició el intento), agregarlas a unansweredOrder en
+    // posición aleatoria para que aparezcan en el cuestionario sin alterar el resto.
     // IMPORTANTE: usar graded como fuente de verdad (no unansweredOrder que puede llegar vacío
     // desde la nube), para no corromper el state recién sincronizado ni disparar un saveJSON
     // que pisaría Firestore con datos incorrectos.
-    // FIX Bug 3: verificar cada índice individualmente para no re-insertar preguntas
-    // ya respondidas (que vienen en answeredOrder o graded) cuando unansweredOrder
-    // llega vacío desde la nube (lo que hacía que totalConocidas fuera demasiado bajo
-    // y se volvieran a agregar índices ya respondidos, solapando preguntas en el DOM).
+    // FIX: verificar cada índice individualmente para no re-insertar preguntas ya respondidas
+    // (que vienen en answeredOrder o graded) cuando unansweredOrder llega vacío desde la nube.
     {
       const answeredSet   = new Set(state[seccionId].answeredOrder || []);
       const gradedSet     = new Set(Object.keys(state[seccionId].graded || {}).map(Number));
@@ -2236,31 +2156,35 @@
       if (!graded[i] && !_indicesYaUsados.has(i)) unanswered.push(i);
     }
 
-    // 2) Sin responder: normalmente se mezclan con semilla nueva cada vez que se entra.
-    //    EXCEPCIÓN: si editor-admin guardó un unansweredOrder capturado del DOM justo
-    //    antes del re-render post-guardado, respetarlo para que restoreSelectionsAndGrades
-    //    pueda restaurar cada respuesta en la pregunta correcta (el shuffleMap está
-    //    asociado a ese orden exacto). Se borra inmediatamente después para que la
-    //    próxima entrada voluntaria vuelva a mezclar normalmente.
+    // 2) Sin responder: el orden se genera UNA SOLA VEZ (primer ingreso al intento)
+    //    y queda CONGELADO en s.unansweredOrder para toda la duración del intento.
+    //    Así la "pregunta 10 sin responder" siempre es la misma pregunta en cualquier
+    //    recarga: F5, login, volver al menú, recarga por edición del admin, etc.
+    //    Solo se regenera cuando unansweredOrder está genuinamente vacío (intento nuevo).
     let shuffledUnanswered;
     if (s.unansweredOrder && s.unansweredOrder.length > 0) {
-      // Filtrar por si alguna fue respondida entre medias o el total de preguntas cambió
+      // Usar el orden persistido — filtrar índices que ya fueron respondidos
       const unansweredSet = new Set(unanswered);
       const ordenFiltrado = s.unansweredOrder.filter(i => unansweredSet.has(i));
-      // Agregar al final cualquier índice nuevo que no estuviera en el orden guardado
+      // Agregar al final cualquier pregunta nueva (añadida por el admin después del inicio del intento)
       const enOrden = new Set(ordenFiltrado);
       unanswered.forEach(i => { if (!enOrden.has(i)) ordenFiltrado.push(i); });
       shuffledUnanswered = ordenFiltrado;
+      // Actualizar el orden persistido si cambió (respondidas eliminadas o nuevas añadidas)
+      if (JSON.stringify(shuffledUnanswered) !== JSON.stringify(s.unansweredOrder)) {
+        s.unansweredOrder = shuffledUnanswered.slice();
+        if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+      }
     } else {
-      // Entrada voluntaria normal: mezclar con semilla nueva
+      // Primer ingreso al intento (o intento nuevo): generar orden aleatorio y PERSISTIRLO
       shuffledUnanswered = shuffle(unanswered, seccionId + '-' + Date.now());
+      s.unansweredOrder = shuffledUnanswered.slice();
+      if (!window._fbSyncInProgress) {
+        saveJSON(STORAGE_KEY, state);
+      }
     }
-
-    // Limpiar siempre: si había un orden guardado ya lo usamos; la próxima entrada mezclará de cero.
-    s.unansweredOrder = [];
-    if (!window._fbSyncInProgress) {
-      saveJSON(STORAGE_KEY, state);
-    }
+    // NOTA: ya NO borramos unansweredOrder aquí. Queda congelado para toda la duración
+    // del intento. Solo se limpia en limpiarSeccion() al iniciar un intento nuevo.
 
     // Concatenar: respondidas primero (fijas), luego sin responder
     _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
@@ -8177,27 +8101,10 @@ function fbSaveProgressToCloud() {
     try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
     _seccionesYaCargadas.delete(seccionId);
     if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
-    // NO resetear _extrapolacionAplicada globalmente — solo marcar esta sección
-    // para que se re-extrapole sin perder las demás secciones ya cargadas.
-    if (window._extrapolacionPorPar) {
-      // Eliminar solo los pares que involucran esta sección como fuente o destino
-      for (const par of [...window._extrapolacionPorPar]) {
-        if (par.startsWith(seccionId + '|') || par.includes('|' + seccionId + '|')) {
-          window._extrapolacionPorPar.delete(par);
-        }
-      }
-    }
 
     // ── PASO 3: Recargar preguntas frescas desde Firestore ───────────────────
     await cargarSeccion(seccionId);
-
-    // Esperar a que las fuentes de extrapolación (Único, UBA, compilados) estén
-    // disponibles antes de extrapolaar, para que los _firestoreDocId existan
-    // en el array y las anclas funcionen correctamente.
-    if (window._fuentesExtrapolacionListas) {
-      await window._fuentesExtrapolacionListas;
-    }
-    aplicarExtrapolacion(undefined, { hacia: seccionId });
+    // Nota: la extrapolación fue eliminada en v9 — no se llama aplicarExtrapolacion.
 
     // ── PASO 4: Recalificar si cambió la respuesta correcta ──────────────────
     if (qIndex !== null && qIndex !== undefined && nuevaCorrecta) {
@@ -9074,10 +8981,9 @@ function fbSaveProgressToCloud() {
   // ════════════════════════════════════════════════════════════════
 
   // Cuando el usuario está aprobado y su progreso cargó, iniciamos todo
-  // Promesa global que resuelve cuando todas las fuentes de extrapolación
-  // (Únicos, UBA y compilados) están cargadas en memoria.
-  // showSection la espera si hay hash en la URL (recarga de página).
-  window._fuentesExtrapolacionListas = null;
+  // La extrapolación de preguntas desde exámenes únicos/UBA/compilados hacia especialidades
+  // fue ELIMINADA en v9. Cada especialidad solo contiene sus propias preguntas.
+  window._fuentesExtrapolacionListas = Promise.resolve(); // compatibilidad: resuelve inmediatamente
 
   document.addEventListener('fb:usuarioAprobadoActivo', () => {
     if (!_currentUser || !_currentUserData) return;
@@ -9091,17 +8997,6 @@ function fbSaveProgressToCloud() {
     _startContentVersionWatcher();
     // NOTA: quiz_beforeunload_pending se limpia dentro de fbSyncProgressFromCloud
     // (que ya fue llamado antes de disparar este evento), por lo que NO lo limpiamos aquí.
-
-    // Cargar TODAS las fuentes de extrapolación en background inmediatamente,
-    // sin delay. Así están disponibles antes de que el usuario abra cualquier
-    // especialidad, tanto en login normal como al recargar la página.
-    const todasLasFuentes = [...EXAMENES_UNICOS, ...EXAMENES_UBA, ...COMPILADOS];
-    window._fuentesExtrapolacionListas = Promise.all(
-      todasLasFuentes.map(id => cargarSeccion(id))
-    ).then(() => {
-      aplicarExtrapolacion();
-      console.log('[FUENTES] Únicos, UBA y compilados cargados y extrapolados en background');
-    });
 
     console.log('[MÓDULOS FB] Sesión única, heartbeat, inactividad y content-sync activos');
   });
