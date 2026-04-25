@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V8
+// editor-admin.js  — V9
 // ────────────────────────────────────────────────────────────────
 
 
@@ -462,7 +462,7 @@
               <button class="meq-btn-fmt" id="meq-btn-vacunas" type="button"
                 title="Insertar botón 'VER MÁS SOBRE VACUNAS' en la explicación"
                 style="background:rgba(56,189,248,0.08);border-color:rgba(56,189,248,0.3);color:#38bdf8;padding:0 8px;">
-                💉
+                💉 Ver vacunas
               </button>
             </div>
           </div>
@@ -812,11 +812,28 @@
                 updatedBy  : _currentUser.uid
               }, { merge: true });
 
-              // Invalidar caché de la sección fuente también
-              try { localStorage.removeItem('fb_edits_cache_' + seccionOrigen); } catch (_) {}
-              try { localStorage.removeItem('fb_q_cache_'    + seccionOrigen); } catch (_) {}
-              if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionOrigen);
-              if (window.preguntasPorSeccion)  delete window.preguntasPorSeccion[seccionOrigen];
+              // Parche quirúrgico en caché de la sección fuente
+              try {
+                const _ckOrigen = 'fb_q_cache_' + seccionOrigen;
+                const _rawOrigen = localStorage.getItem(_ckOrigen);
+                if (_rawOrigen) {
+                  const _co = JSON.parse(_rawOrigen);
+                  if (_co?.preguntas?.[qIndexOrigen]) {
+                    _co.preguntas[qIndexOrigen].pregunta    = nuevaPreg;
+                    _co.preguntas[qIndexOrigen].opciones    = nuevasOpciones;
+                    _co.preguntas[qIndexOrigen].correcta    = nuevaCorrecta;
+                    _co.preguntas[qIndexOrigen].explicacion = nuevaExpl;
+                    _co.ts = Date.now();
+                    localStorage.setItem(_ckOrigen, JSON.stringify(_co));
+                  }
+                }
+                localStorage.removeItem('fb_edits_cache_' + seccionOrigen);
+              } catch (_) {
+                try { localStorage.removeItem('fb_q_cache_' + seccionOrigen); } catch (_2) {}
+              }
+              if (typeof window._registrarEdicionPendiente === 'function') {
+                window._registrarEdicionPendiente(seccionOrigen, qIndexOrigen, cambioRespuesta ? nuevaCorrecta : null);
+              }
 
               console.log('🔗 Edición propagada a fuente:', seccionOrigen, '→ qIndex', qIndexOrigen);
               _eaToast(`✅ Guardado también en ${seccionOrigen}`, 'success');
@@ -828,13 +845,34 @@
           }
         }
 
+        // ── Parche quirúrgico: actualizar SOLO esa pregunta en el caché local ──
+        // No borra ni recarga toda la sección. 0 lecturas de Firestore para el admin.
+        try {
+          const _ck  = 'fb_q_cache_' + seccionId;
+          const _raw = localStorage.getItem(_ck);
+          if (_raw) {
+            const _c = JSON.parse(_raw);
+            if (_c?.preguntas?.[qIndex]) {
+              _c.preguntas[qIndex].pregunta    = nuevaPreg;
+              _c.preguntas[qIndex].opciones    = nuevasOpciones;
+              _c.preguntas[qIndex].correcta    = nuevaCorrecta;
+              _c.preguntas[qIndex].explicacion = nuevaExpl;
+              _c.ts = Date.now(); // renovar vigencia 24hs
+              localStorage.setItem(_ck, JSON.stringify(_c));
+              console.log('[EDITOR] Caché local parcheado → sección:', seccionId, '| qIndex:', qIndex);
+            }
+          }
+        } catch (_) {
+          try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_2) {}
+        }
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
-        try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
-        if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionId);
-        if (window.preguntasPorSeccion)  delete window.preguntasPorSeccion[seccionId];
 
-        if (typeof window._bumpContentVersion === 'function') {
-          await window._bumpContentVersion(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null);
+        // ── Notificación DIFERIDA: NO notifica usuarios en tiempo real ──
+        // Los usuarios reciben los cambios solo cuando el admin presione
+        // "Forzar actualización". El botón agrupa todas las ediciones en
+        // 1 sola escritura → ceil(N/30) lecturas por usuario, 1 re-renderización.
+        if (typeof window._registrarEdicionPendiente === 'function') {
+          window._registrarEdicionPendiente(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null);
         }
 
         // Guardar la posición de scroll ANTES de desbloquear
