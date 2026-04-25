@@ -1,4 +1,4 @@
-//V2 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V3 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -1537,20 +1537,31 @@
       _log('info', `Iniciando subida a "${sec?.label}" (${seccionId})`);
       _log('info', `${preguntasASubir.length} preguntas a subir (${_preguntasNuevas.length} nuevas + ${dupSelArray.length} ⚠️ seleccionadas de otros cuestionarios)`);
 
-      // 1. Obtener el _idx máximo actual en Firestore
-      _log('info', 'Consultando el índice máximo actual en Firebase…');
-      const itemsRef = collection(db, 'preguntas', seccionId, 'items');
-      const q = query(itemsRef, orderBy('_idx'));
-      const snap = await getDocs(q);
-
-      let maxIdx = -1;
-      snap.forEach(d => {
-        const idx = d.data()._idx;
-        if (typeof idx === 'number' && idx > maxIdx) maxIdx = idx;
-      });
-      const startIdx = maxIdx + 1;
+      // 1. Obtener el _idx máximo actual — leyendo solo el metadato (1 lectura)
+      //    En vez de descargar todas las preguntas para encontrar el número más alto,
+      //    leemos el campo 'total' del documento preguntas/{seccionId} que ya existe.
+      _log('info', 'Consultando el índice máximo actual en Firebase (1 lectura)…');
+      const { getDoc: getDocFn, doc: docRef2 } = fsModule;
+      let totalActual = 0;
+      try {
+        const metaSnap = await getDocFn(docRef2(db, 'preguntas', seccionId));
+        if (metaSnap.exists()) {
+          totalActual = metaSnap.data()?.total ?? 0;
+        } else {
+          // Primera subida a esta sección — no existe el metadato todavía
+          totalActual = 0;
+        }
+      } catch (metaErr) {
+        // Si falla la lectura del metadato, fallback seguro: empezar desde 0
+        _log('warn', `⚠️ No se pudo leer el metadato, se usará idx 0: ${metaErr.message}`);
+        totalActual = 0;
+      }
+      const maxIdx   = totalActual - 1;   // total=700 → maxIdx=699
+      const startIdx = totalActual;        // las nuevas empiezan desde 700
       _log('ok', `Índice máximo actual: ${maxIdx} → nuevas preguntas desde _idx: ${startIdx}`);
-      _log('info', `Total preguntas actuales en Firebase: ${snap.size}`);
+      _log('info', `Total preguntas actuales en Firebase (desde metadato): ${totalActual}`);
+      // Necesitamos snap.size para actualizar el metadato más abajo — usamos totalActual
+      const snapSize = totalActual;
 
       // 2. Subir en lotes de 400
       const BATCH_SIZE = 400;
@@ -1582,38 +1593,65 @@
         if (setDoc && docFn) {
           await setDoc(docFn(db, 'preguntas', seccionId), {
             seccionId,
-            total: snap.size + subidas,
+            total: snapSize + subidas,
             updatedAt: serverTimestamp ? serverTimestamp() : new Date()
           }, { merge: true });
-          _log('info', `Metadato de sección actualizado (total: ${snap.size + subidas})`);
+          _log('info', `Metadato de sección actualizado (total: ${snapSize + subidas})`);
         }
       } catch (_) {}
 
       // 4. Actualizar caché local con las nuevas preguntas
+      //    REGLA: solo se actualiza si ya existe un caché completo de esta sección.
+      //    Si no existe caché → no guardar nada. Cuando el usuario entre al cuestionario
+      //    descargará todo completo desde Firestore. Así evitamos un caché incompleto
+      //    (solo las nuevas sin las anteriores) que haría parecer que faltan preguntas.
       _log('info', 'Actualizando caché local…');
       try {
         const rawCache = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
-        let preguntasActuales = [];
+
+        // ── ¿Existe caché local completo? ──────────────────────────
+        let cacheExistente = null;
         if (rawCache) {
-          const c = JSON.parse(rawCache);
-          preguntasActuales = c?.preguntas || [];
-        } else if (window.preguntasPorSeccion?.[seccionId]) {
-          preguntasActuales = window.preguntasPorSeccion[seccionId];
+          try { cacheExistente = JSON.parse(rawCache); } catch (_) {}
         }
-        const preguntasConIdx = preguntasASubir.map((p, i) => {
-          const { _archivo, ...limpia } = p;
-          return { ...limpia, _firestoreIdx: startIdx + i };
-        });
-        const preguntasActualizadas = [...preguntasActuales, ...preguntasConIdx];
-        localStorage.setItem(CACHE_KEY_PREFIX + seccionId, JSON.stringify({
-          ts: Date.now(),
-          preguntas: preguntasActualizadas
-        }));
-        if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
-        window.preguntasPorSeccion[seccionId] = preguntasActualizadas;
-        _log('ok', `✅ Caché local actualizado: ${preguntasActualizadas.length} preguntas totales`);
+        // Fallback: si está en memoria (window.preguntasPorSeccion) pero no en localStorage
+        const enMemoria = window.preguntasPorSeccion?.[seccionId];
+
+        if (!cacheExistente && !enMemoria) {
+          // No hay caché — no guardar nada para no crear un caché incompleto
+          _log('info', 'Sin caché local previo — se omite la actualización. ' +
+            'El usuario descargará todo completo al entrar al cuestionario.');
+        } else {
+          // Hay caché existente — agregar solo las nuevas al final
+          const preguntasActuales = cacheExistente?.preguntas || enMemoria || [];
+          const preguntasNuevasConIdx = preguntasASubir.map((p, i) => {
+            const { _archivo, ...limpia } = p;
+            return { ...limpia, _firestoreIdx: startIdx + i };
+          });
+          const preguntasActualizadas = [...preguntasActuales, ...preguntasNuevasConIdx];
+
+          try {
+            localStorage.setItem(CACHE_KEY_PREFIX + seccionId, JSON.stringify({
+              ts       : Date.now(),
+              preguntas: preguntasActualizadas
+            }));
+            if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+            window.preguntasPorSeccion[seccionId] = preguntasActualizadas;
+            _log('ok', `✅ Caché local actualizado: ${preguntasActuales.length} anteriores + ` +
+              `${preguntasNuevasConIdx.length} nuevas = ${preguntasActualizadas.length} totales`);
+          } catch (storageErr) {
+            // localStorage lleno — limpiar el caché de esta sección para forzar
+            // descarga completa la próxima vez (mejor que un caché parcial)
+            try {
+              localStorage.removeItem(CACHE_KEY_PREFIX + seccionId);
+              if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+              _log('warn', '⚠️ localStorage lleno — caché de ' + seccionId +
+                ' eliminado. Se descargará completo al entrar al cuestionario.');
+            } catch (_) {}
+          }
+        }
       } catch (cacheErr) {
-        _log('warn', `⚠️ No se pudo actualizar el caché local: ${cacheErr.message}`);
+        _log('warn', `⚠️ Error inesperado al actualizar caché local: ${cacheErr.message}`);
       }
 
       // 5. Invalidar caché del buscador de duplicados para que refleje los cambios
