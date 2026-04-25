@@ -1,4 +1,4 @@
-//PRUEBA 9.1  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 10  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -7320,18 +7320,39 @@
             📤 Subir preguntas nuevas
           </button>
         </div>
+        <div style="padding:0 0 4px;">
+          <button id="btn-forzar-actualizacion" style="
+            width:100%;padding:12px 16px;border:none;border-radius:10px;
+            background:linear-gradient(135deg,#059669,#047857);
+            color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
+            box-shadow:0 4px 14px rgba(5,150,105,0.35);
+            transition:all 0.2s;letter-spacing:0.02em;">
+            🔄 Forzar actualización para todos los usuarios
+          </button>
+          <div style="color:#64748b;font-size:0.75rem;padding:5px 4px 0;">
+            Los usuarios verán las preguntas nuevas la próxima vez que abran la app o recarguen.
+          </div>
+        </div>
       </div>
       <div class="admin-section">
         <div class="admin-section-title">Solicitudes pendientes <span id="admin-badge-pending"></span></div>
         <div id="admin-requests-list"><div class="admin-empty">Cargando…</div></div>
       </div>
       <div class="admin-section">
-        <div class="admin-section-title">Todos los usuarios</div>
+        <div class="admin-section-title" style="display:flex;align-items:center;justify-content:space-between;">
+          Todos los usuarios
+          <button id="btn-refresh-users" style="padding:4px 10px;border:none;border-radius:6px;
+            background:rgba(255,255,255,0.08);color:#94a3b8;font-size:0.75rem;cursor:pointer;">
+            🔄 Actualizar
+          </button>
+        </div>
         <div id="admin-users-list"><div class="admin-empty">Cargando…</div></div>
       </div>`
 
     document.getElementById('fb-admin-close').onclick = () => { panel.style.display = 'none'; };
     document.getElementById('btn-buscar-duplicados').onclick = () => fbAbrirBuscadorDuplicados();
+    document.getElementById('btn-forzar-actualizacion').onclick = () => _forzarActualizacionGlobal();
+    document.getElementById('btn-refresh-users').onclick = () => fbCargarUsuarios();
     document.getElementById('btn-subir-preguntas').onclick = () => {
       if (typeof window.fbAbrirSubirPreguntas === 'function') {
         window.fbAbrirSubirPreguntas();
@@ -7378,6 +7399,65 @@
   // (el botón en el panel admin) las pueda llamar igual que antes.
   // ════════════════════════════════════════════════════════════════
 
+
+  // ════════════════════════════════════════════════════════════════
+  // FORZAR ACTUALIZACIÓN GLOBAL (botón admin)
+  // Escribe en meta/forceRefresh_{seccion} para cada sección que
+  // tenga un contentVersion vigente. Los usuarios lo detectan al
+  // arrancar y descargan solo las preguntas nuevas.
+  // Costo: 1 escritura por sección afectada (típicamente 1-3).
+  // ════════════════════════════════════════════════════════════════
+  async function _forzarActualizacionGlobal(seccionId) {
+    if (!window.__fb || !_fbDb) return;
+    const { doc, getDoc, setDoc, serverTimestamp } = window.__fb;
+
+    const btn = document.getElementById('btn-forzar-actualizacion');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Procesando…'; }
+
+    try {
+      let seccionesAActualizar = [];
+
+      if (seccionId) {
+        // Solo una sección específica
+        seccionesAActualizar = [seccionId];
+      } else {
+        // Todas las secciones que tengan un contentVersion en Firestore
+        // Leemos los que tenemos en caché local como referencia
+        seccionesAActualizar = Object.keys(localStorage)
+          .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
+          .map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''));
+      }
+
+      let actualizadas = 0;
+      for (const s of seccionesAActualizar) {
+        try {
+          // Leer el contentVersion actual de esa sección para obtener el startIdx
+          const snap = await getDoc(doc(_fbDb, 'meta', 'contentVersion_' + s));
+          if (!snap.exists()) continue;
+          const data = snap.data();
+
+          // Escribir un nuevo timestamp (cambia la versión → todos los usuarios lo detectarán)
+          await setDoc(doc(_fbDb, 'meta', 'contentVersion_' + s), {
+            ...data,
+            version  : Date.now(),
+            updatedAt: serverTimestamp(),
+            forzado  : true   // marca para debug
+          });
+          actualizadas++;
+        } catch (e) {
+          console.warn('[FORCE-REFRESH] Error en sección', s, ':', e.message);
+        }
+      }
+
+      fbToast('✅ Actualización global enviada — ' + actualizadas + ' sección(es). Los usuarios verán las novedades al abrir la app.', 'success');
+      console.log('[FORCE-REFRESH] Completado:', actualizadas, 'secciones actualizadas');
+    } catch (e) {
+      fbToast('❌ Error al forzar actualización: ' + e.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 Forzar actualización para todos los usuarios'; }
+    }
+  }
+
   function fbListenAdminRequests() {
     const { collection, query, where, onSnapshot, doc,
             updateDoc, deleteDoc, serverTimestamp } = window.__fb;
@@ -7422,11 +7502,17 @@
     });
   }
 
-  function fbListenAllUsers() {
-    const { collection, onSnapshot } = window.__fb;
-    onSnapshot(collection(_fbDb,'users'), (snap) => {
-      const list = document.getElementById('admin-users-list');
-      if (!list) return;
+  // getDocs en lugar de onSnapshot — 1 lectura al abrir el panel,
+  // no una conexión permanente que cobra lecturas cada vez que algo cambia.
+  async function fbCargarUsuarios() {
+    const list = document.getElementById('admin-users-list');
+    if (!list) return;
+    list.innerHTML = '<div class="admin-empty">Cargando…</div>';
+    const btn = document.getElementById('btn-refresh-users');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    try {
+      const { collection, getDocs } = window.__fb;
+      const snap = await getDocs(collection(_fbDb, 'users'));
       if (snap.empty) { list.innerHTML = '<div class="admin-empty">No hay usuarios registrados</div>'; return; }
       list.innerHTML = '';
       snap.forEach(docSnap => {
@@ -7445,8 +7531,15 @@
           <span class="admin-user-status ${statusClass}">${statusLabel}</span>`;
         list.appendChild(card);
       });
-    });
+    } catch(e) {
+      list.innerHTML = '<div class="admin-empty">❌ Error al cargar usuarios</div>';
+      console.warn('[ADMIN] Error cargando usuarios:', e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualizar'; }
+    }
   }
+  // Alias para compatibilidad con el panel (lo llamamos igual que antes en el init)
+  function fbListenAllUsers() { fbCargarUsuarios(); }
 
   // ── Sincronización de progreso con Firestore ─────────────────
 let _fbProgressUnsubscribe = null;
@@ -8231,6 +8324,121 @@ function fbSaveProgressToCloud() {
     }
   }
 
+
+  // ════════════════════════════════════════════════════════════════
+  // CHEQUEO DE VERSIÓN AL ARRANCAR
+  // Cada vez que el usuario abre la app, recarga (F5) o vuelve desde
+  // el celular, compara la versión local de cada sección en caché
+  // contra meta/contentVersion_{seccion} en Firestore.
+  // Si hay diferencia → descarga SOLO las preguntas nuevas (incremental).
+  // Costo: 1 lectura por sección en caché. Siempre. 0 lecturas extra si no hubo cambios.
+  // ════════════════════════════════════════════════════════════════
+  async function _chequearVersionesAlArrancar() {
+    if (!window.__firebase_firestore || !_fbDb) return;
+    const { doc, getDoc, collection, getDocs, query, where, orderBy } = window.__firebase_firestore;
+
+    // Obtener todas las secciones que el usuario tiene en caché local
+    let seccionesEnCache = [];
+    try {
+      seccionesEnCache = Object.keys(localStorage)
+        .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
+        .map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''));
+    } catch (_) { return; }
+
+    if (seccionesEnCache.length === 0) return;
+
+    console.log('[VERSION-CHECK] Chequeando', seccionesEnCache.length, 'secciones en caché…');
+
+    for (const seccionId of seccionesEnCache) {
+      try {
+        // 1 lectura: leer el "cartelito" de la sección
+        const snap = await getDoc(doc(_fbDb, 'meta', 'contentVersion_' + seccionId));
+        if (!snap.exists()) continue;
+
+        const data       = snap.data();
+        const version    = data.version  ?? null;
+        const startIdx   = data.startIdx ?? null;
+
+        // Versión que el usuario ya conoce (guardada en su localStorage)
+        let versionConocida = null;
+        try { versionConocida = localStorage.getItem(_CONTENT_VERSION_KEY + '_' + seccionId); } catch (_) {}
+
+        const hayNovedades = version && String(version) !== String(versionConocida);
+        if (!hayNovedades) {
+          console.log('[VERSION-CHECK] Sin cambios en', seccionId);
+          continue;
+        }
+
+        // Hay novedades — ver desde qué índice
+        console.log('[VERSION-CHECK] Novedades en', seccionId, '| startIdx:', startIdx);
+
+        if (startIdx !== null) {
+          // ── Descarga incremental: solo las preguntas nuevas ──────
+          const rawCache = localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId);
+          const cacheActual = rawCache ? JSON.parse(rawCache) : null;
+          const preguntasActuales = cacheActual?.preguntas || [];
+
+          // Verificar que realmente nos faltan: si ya tenemos >= startIdx preguntas, saltar
+          const maxIdxLocal = preguntasActuales.reduce((max, p) =>
+            Math.max(max, p._firestoreIdx ?? -1), -1);
+          if (maxIdxLocal >= startIdx && preguntasActuales.length > 0) {
+            console.log('[VERSION-CHECK] Ya tenemos hasta idx', maxIdxLocal, '— marcando versión y saltando');
+            try { localStorage.setItem(_CONTENT_VERSION_KEY + '_' + seccionId, String(version)); } catch (_) {}
+            continue;
+          }
+
+          // Descargar solo desde startIdx en adelante
+          const itemsRef = collection(_fbDb, 'preguntas', seccionId, 'items');
+          const q = query(itemsRef, where('_idx', '>=', startIdx), orderBy('_idx'));
+          const nuevasSnap = await getDocs(q);
+
+          if (nuevasSnap.empty) {
+            console.log('[VERSION-CHECK] Incremental: sin docs nuevos en', seccionId);
+          } else {
+            const nuevas = nuevasSnap.docs.map(d => {
+              const { _idx, ...pregunta } = d.data();
+              pregunta._firestoreIdx = _idx;
+              return pregunta;
+            });
+
+            // Actualizar caché localStorage con las nuevas preguntas agregadas
+            const preguntasActualizadas = [...preguntasActuales, ...nuevas];
+            try {
+              localStorage.setItem(PREGUNTAS_CACHE_PREFIX + seccionId, JSON.stringify({
+                ts: Date.now(),
+                preguntas: preguntasActualizadas
+              }));
+            } catch (_) {}
+
+            // Si ya estaba cargada en memoria, actualizar también
+            if (window.preguntasPorSeccion?.[seccionId]) {
+              window.preguntasPorSeccion[seccionId] = preguntasActualizadas;
+            }
+
+            console.log('[VERSION-CHECK] +' + nuevas.length + ' preguntas nuevas en', seccionId);
+          }
+        } else {
+          // startIdx null = edición de pregunta existente, no subida nueva
+          // Invalidar caché para que la próxima entrada descargue fresco
+          try {
+            localStorage.removeItem(PREGUNTAS_CACHE_PREFIX + seccionId);
+            if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+            _seccionesYaCargadas.delete(seccionId);
+          } catch (_) {}
+          console.log('[VERSION-CHECK] Edición detectada en', seccionId, '— caché invalidado');
+        }
+
+        // Guardar versión conocida para no volver a chequear hasta la próxima subida
+        try { localStorage.setItem(_CONTENT_VERSION_KEY + '_' + seccionId, String(version)); } catch (_) {}
+
+      } catch (err) {
+        console.warn('[VERSION-CHECK] Error chequeando', seccionId, ':', err.message);
+      }
+    }
+
+    console.log('[VERSION-CHECK] Chequeo completo.');
+  }
+
   // ── Inicia el listener en tiempo real sobre meta/contentVersion ──
   const _CONTENT_VERSION_KEY = 'fb_content_version_known'; // versión conocida por el cliente
 
@@ -8997,6 +9205,8 @@ function fbSaveProgressToCloud() {
     _inactStart();
     // Iniciar sincronización de contenido en tiempo real (todos los usuarios, incluso admin)
     _startContentVersionWatcher();
+    // Chequear si hay preguntas nuevas desde la última visita (incremental, sin borrar caché)
+    _chequearVersionesAlArrancar();
     // NOTA: quiz_beforeunload_pending se limpia dentro de fbSyncProgressFromCloud
     // (que ya fue llamado antes de disparar este evento), por lo que NO lo limpiamos aquí.
 
