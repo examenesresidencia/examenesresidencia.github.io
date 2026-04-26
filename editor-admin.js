@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V9
+// editor-admin.js  — V10
 // ────────────────────────────────────────────────────────────────
 
 
@@ -132,7 +132,7 @@
       #meq-editor-wysiwyg {
         min-height: 220px;
         max-height: 400px;
-        overflow-y: auto;
+        overflow-y: scroll;
         overflow-x: hidden;
         background: #0a1628;
         border: 1.5px solid rgba(56,189,248,0.18);
@@ -145,7 +145,7 @@
         outline: none;
         word-break: break-word;
         box-sizing: border-box;
-        scroll-behavior: smooth;
+        scroll-behavior: auto;
         scrollbar-width: thin;
         scrollbar-color: rgba(56,189,248,0.35) rgba(255,255,255,0.04);
       }
@@ -304,6 +304,27 @@
     const ed = document.getElementById('meq-editor-wysiwyg');
     if (ed) ed.focus();
     document.execCommand(command, false, value !== undefined ? value : null);
+    actualizarEstadoBotones();
+  }
+
+  // ── execCommand para listas (preserva selección) ──────────────
+  // El problema: focus() destruye la selección en algunos navegadores.
+  // Solución: restaurar el rango guardado DESPUÉS de enfocar.
+  function cmdList(command, savedRangeRef) {
+    const ed = document.getElementById('meq-editor-wysiwyg');
+    if (!ed) return;
+    ed.focus();
+    // Restaurar la selección guardada si pertenece al editor
+    if (savedRangeRef && savedRangeRef.current) {
+      try {
+        const sel = window.getSelection();
+        if (ed.contains(savedRangeRef.current.commonAncestorContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(savedRangeRef.current);
+        }
+      } catch (_) {}
+    }
+    document.execCommand(command, false, null);
     actualizarEstadoBotones();
   }
 
@@ -499,10 +520,17 @@
     }
     document.getElementById('edit-q-close').onclick  = cerrarModal;
     document.getElementById('edit-q-cancel').onclick = cerrarModal;
-    overlay.addEventListener('click', e => { if (e.target === overlay) cerrarModal(); });
+    // No cerrar al hacer clic fuera del modal — evita pérdida accidental de edición
 
     // ── Ref al editor ─────────────────────────────────────────────
     const editor = overlay.querySelector('#meq-editor-wysiwyg');
+
+    // Scroll suave con rueda del ratón — evita el salto por bloques
+    // que ocurre en contenteditable con overflow-y nativo.
+    editor.addEventListener('wheel', function(e) {
+      e.preventDefault();
+      editor.scrollBy({ top: e.deltaY * 0.8, behavior: 'smooth' });
+    }, { passive: false });
 
     // Actualizar estado de botones al mover cursor o cambiar selección
     editor.addEventListener('keyup',   actualizarEstadoBotones);
@@ -532,8 +560,8 @@
     overlay.querySelector('#meq-btn-center').onclick    = () => cmd('justifyCenter');
     overlay.querySelector('#meq-btn-right').onclick     = () => cmd('justifyRight');
     overlay.querySelector('#meq-btn-justify').onclick   = () => cmd('justifyFull');
-    overlay.querySelector('#meq-btn-ul').onclick        = () => cmd('insertUnorderedList');
-    overlay.querySelector('#meq-btn-ol').onclick        = () => cmd('insertOrderedList');
+    overlay.querySelector('#meq-btn-ul').onclick        = () => cmdList('insertUnorderedList', savedRangeRef);
+    overlay.querySelector('#meq-btn-ol').onclick        = () => cmdList('insertOrderedList',   savedRangeRef);
 
     // ── Botón 💉 Vacunas ──────────────────────────────────────────
     overlay.querySelector('#meq-btn-vacunas').addEventListener('click', function(e) {
@@ -557,12 +585,15 @@
 
     // Guardamos la selección (rango) para insertar la imagen en el lugar correcto
     let _savedRange = null;
+    // Objeto ref mutable para que cmdList (scope externo) acceda al rango actual
+    const savedRangeRef = { current: null };
     function guardarSeleccion() {
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0) {
         const r = sel.getRangeAt(0);
         if (editor.contains(r.commonAncestorContainer)) {
           _savedRange = r.cloneRange();
+          savedRangeRef.current = _savedRange;
         }
       }
     }
@@ -761,7 +792,6 @@
       const btn = document.getElementById('edit-q-save');
       btn.disabled = true; btn.textContent = 'Guardando…';
 
-      preg._enunciadoOriginal = preg.pregunta; // guardar antes de mutar, para búsqueda en fuente
       preg.pregunta    = nuevaPreg;
       preg.opciones    = nuevasOpciones;
       preg.correcta    = nuevaCorrecta;
@@ -783,67 +813,6 @@
         }, { merge: true });
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
-
-        // ── Propagar edición a la sección fuente si la pregunta fue extrapolada ──
-        // Si la pregunta vino de un examen único, UBA o compilado, guardar la misma
-        // edición también en esa fuente, usando el qIndex original (buscado por enunciado).
-        const seccionOrigen = preg._origenExamen || preg._origenUnico || null;
-        if (seccionOrigen && seccionOrigen !== seccionId) {
-          try {
-            const preguntasFuente = (window.preguntasPorSeccion || {})[seccionOrigen] || [];
-            // Buscar el índice original comparando el enunciado original (antes de la edición)
-            // Como ya mutamos preg.pregunta arriba, comparamos con nuevaPreg
-            const enunciadoNorm = t => (t || '').trim().replace(/^\d+[\.\-\)]\s*/, '').replace(/\s+/g,' ').toLowerCase();
-            const qIndexOrigen = preguntasFuente.findIndex(p =>
-              enunciadoNorm(p.pregunta) === enunciadoNorm(nuevaPreg) ||
-              // También buscar por enunciado anterior (por si el admin cambió el texto)
-              enunciadoNorm(p.pregunta) === enunciadoNorm(preg._enunciadoOriginal || '')
-            );
-
-            if (qIndexOrigen !== -1) {
-              await setDoc(doc(_fbDb, 'questions', `${seccionOrigen}_${qIndexOrigen}`), {
-                seccionId  : seccionOrigen,
-                qIndex     : qIndexOrigen,
-                pregunta   : nuevaPreg,
-                opciones   : nuevasOpciones,
-                correcta   : nuevaCorrecta,
-                explicacion: nuevaExpl,
-                updatedAt  : serverTimestamp(),
-                updatedBy  : _currentUser.uid
-              }, { merge: true });
-
-              // Parche quirúrgico en caché de la sección fuente
-              try {
-                const _ckOrigen = 'fb_q_cache_' + seccionOrigen;
-                const _rawOrigen = localStorage.getItem(_ckOrigen);
-                if (_rawOrigen) {
-                  const _co = JSON.parse(_rawOrigen);
-                  if (_co?.preguntas?.[qIndexOrigen]) {
-                    _co.preguntas[qIndexOrigen].pregunta    = nuevaPreg;
-                    _co.preguntas[qIndexOrigen].opciones    = nuevasOpciones;
-                    _co.preguntas[qIndexOrigen].correcta    = nuevaCorrecta;
-                    _co.preguntas[qIndexOrigen].explicacion = nuevaExpl;
-                    _co.ts = Date.now();
-                    localStorage.setItem(_ckOrigen, JSON.stringify(_co));
-                  }
-                }
-                localStorage.removeItem('fb_edits_cache_' + seccionOrigen);
-              } catch (_) {
-                try { localStorage.removeItem('fb_q_cache_' + seccionOrigen); } catch (_2) {}
-              }
-              if (typeof window._registrarEdicionPendiente === 'function') {
-                window._registrarEdicionPendiente(seccionOrigen, qIndexOrigen, cambioRespuesta ? nuevaCorrecta : null);
-              }
-
-              console.log('🔗 Edición propagada a fuente:', seccionOrigen, '→ qIndex', qIndexOrigen);
-              _eaToast(`✅ Guardado también en ${seccionOrigen}`, 'success');
-            } else {
-              console.warn('⚠️ No se encontró la pregunta en la fuente:', seccionOrigen, '— no se propagó.');
-            }
-          } catch (propErr) {
-            console.warn('⚠️ No se pudo propagar la edición a la fuente:', seccionOrigen, propErr.message);
-          }
-        }
 
         // ── Parche quirúrgico: actualizar SOLO esa pregunta en el caché local ──
         // No borra ni recarga toda la sección. 0 lecturas de Firestore para el admin.
@@ -935,6 +904,8 @@
   // ════════════════════════════════════════════════════════════════
   function fbInjectEditButtonIfAdmin(seccionId, qIndex, botonesDiv) {
     if (!_eaIsAdmin()) return;
+
+    // ── Botón Editar ──────────────────────────────────────────────
     const btnEdit = document.createElement('button');
     btnEdit.textContent = '✏️ Editar';
     btnEdit.style.cssText = [
@@ -948,6 +919,191 @@
     btnEdit.onmouseout  = () => { btnEdit.style.background = 'rgba(251,191,36,0.08)'; };
     btnEdit.addEventListener('click', () => abrirModalEdicionAdmin(seccionId, qIndex));
     botonesDiv.appendChild(btnEdit);
+
+    // ── Botón Eliminar ────────────────────────────────────────────
+    const btnDel = document.createElement('button');
+    btnDel.textContent = '🗑';
+    btnDel.title = 'Eliminar pregunta';
+    btnDel.style.cssText = [
+      'padding:6px 10px','border-radius:8px',
+      'border:1.5px solid rgba(239,68,68,0.35)',
+      'background:rgba(239,68,68,0.07)',
+      'color:#f87171','font-size:15px','cursor:pointer',
+      'font-weight:500','transition:background 0.15s,border-color 0.15s',
+      'line-height:1'
+    ].join(';');
+    btnDel.onmouseover = () => {
+      btnDel.style.background   = 'rgba(239,68,68,0.18)';
+      btnDel.style.borderColor  = 'rgba(239,68,68,0.65)';
+    };
+    btnDel.onmouseout = () => {
+      btnDel.style.background   = 'rgba(239,68,68,0.07)';
+      btnDel.style.borderColor  = 'rgba(239,68,68,0.35)';
+    };
+    btnDel.addEventListener('click', () => eliminarPreguntaAdmin(seccionId, qIndex));
+    botonesDiv.appendChild(btnDel);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // eliminarPreguntaAdmin
+  // Muestra confirmación, elimina de Firestore y parchea el caché
+  // local quirúrgicamente (sin releer la sección completa).
+  // ════════════════════════════════════════════════════════════════
+  async function eliminarPreguntaAdmin(seccionId, qIndex) {
+    if (!_eaIsAdmin()) return;
+
+    const preguntasPorSeccion = window.preguntasPorSeccion || {};
+    const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
+    const enunciado = preg ? preg.pregunta : `#${qIndex + 1}`;
+
+    // ── Modal de confirmación ─────────────────────────────────────
+    _eaAuthStyles();
+
+    // Evitar doble apertura
+    if (document.getElementById('fb-modal-delete-q')) return;
+
+    // Bloquear scroll de fondo
+    bloquearScrollFondo();
+
+    const dlg = document.createElement('div');
+    dlg.id = 'fb-modal-delete-q';
+    dlg.style.cssText = [
+      'position:fixed','inset:0','z-index:99999',
+      'background:rgba(10,22,40,0.92)','backdrop-filter:blur(10px)',
+      '-webkit-backdrop-filter:blur(10px)',
+      'display:flex','align-items:center','justify-content:center',
+      'padding:20px 16px','box-sizing:border-box',
+      'font-family:Segoe UI,system-ui,sans-serif'
+    ].join(';');
+
+    dlg.innerHTML = `
+      <div class="fb-card" style="max-width:500px;width:100%;box-sizing:border-box;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          <span style="font-size:2rem;line-height:1;">🗑</span>
+          <div>
+            <h3 style="color:#f87171;margin:0 0 4px;font-size:1.05rem;">Eliminar pregunta</h3>
+            <p style="color:#94a3b8;margin:0;font-size:0.8rem;">Sección: <strong style="color:#e2e8f0;">${seccionId}</strong> · Índice: <strong style="color:#e2e8f0;">${qIndex}</strong></p>
+          </div>
+        </div>
+
+        <div style="background:rgba(239,68,68,0.07);border:1.5px solid rgba(239,68,68,0.25);border-radius:10px;padding:12px 14px;margin-bottom:18px;">
+          <p style="color:#fca5a5;margin:0 0 8px;font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;">⚠️ Esta acción es irreversible</p>
+          <p style="color:#e2e8f0;margin:0;font-size:0.86rem;line-height:1.6;word-break:break-word;">
+            ${enunciado.length > 180 ? enunciado.slice(0, 180) + '…' : enunciado}
+          </p>
+        </div>
+
+        <p style="color:#94a3b8;font-size:0.82rem;margin:0 0 18px;line-height:1.5;">
+          Se eliminará el documento <code style="color:#38bdf8;background:rgba(56,189,248,0.08);padding:1px 5px;border-radius:4px;">${seccionId}_${qIndex}</code> de Firestore
+          y se actualizará el caché local sin necesidad de recargar la sección.
+        </p>
+
+        <p style="color:#64748b;font-size:0.78rem;margin:0 0 18px;">
+          ℹ️ Los índices de las preguntas siguientes no se renumeran en Firestore (solo en memoria y caché).
+          Si necesitás compactar los índices, hacélo desde la consola de Firebase.
+        </p>
+
+        <div id="fb-del-err" style="color:#f87171;font-size:0.82rem;margin-bottom:10px;display:none;"></div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button id="fb-del-confirm" style="
+            flex:1;padding:10px 0;border-radius:9px;border:none;
+            background:linear-gradient(135deg,#dc2626,#b91c1c);
+            color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
+            box-shadow:0 3px 12px rgba(220,38,38,0.35);transition:opacity 0.15s;
+          ">🗑 Sí, eliminar</button>
+          <button id="fb-del-cancel" style="
+            flex:1;padding:10px 0;border-radius:9px;
+            border:1.5px solid rgba(148,163,184,0.3);
+            background:rgba(255,255,255,0.04);
+            color:#94a3b8;font-size:0.9rem;font-weight:600;cursor:pointer;
+            transition:background 0.15s;
+          ">Cancelar</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(dlg);
+
+    function cerrarDlg() {
+      desbloquearScrollFondo();
+      dlg.remove();
+    }
+
+    document.getElementById('fb-del-cancel').onclick = cerrarDlg;
+
+    document.getElementById('fb-del-confirm').onclick = async () => {
+      const btnConfirm = document.getElementById('fb-del-confirm');
+      const errEl      = document.getElementById('fb-del-err');
+      btnConfirm.disabled = true;
+      btnConfirm.textContent = 'Eliminando…';
+      errEl.style.display = 'none';
+
+      try {
+        const { doc, deleteDoc } = window.__fb;
+        const _fbDb = window._fbDb;
+
+        // 1. Eliminar documento de Firestore
+        await deleteDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex}`));
+
+        // 2. Parche quirúrgico en caché de la sección actual:
+        //    Quitar la pregunta del array en memoria y en localStorage
+        //    sin tocar ningún otro índice de Firestore.
+        const pps = window.preguntasPorSeccion || {};
+        if (Array.isArray(pps[seccionId])) {
+          pps[seccionId].splice(qIndex, 1);
+        }
+
+        // Parche en localStorage
+        const _ck  = 'fb_q_cache_' + seccionId;
+        try {
+          const _raw = localStorage.getItem(_ck);
+          if (_raw) {
+            const _c = JSON.parse(_raw);
+            if (Array.isArray(_c?.preguntas)) {
+              _c.preguntas.splice(qIndex, 1);
+              _c.ts = Date.now();
+              localStorage.setItem(_ck, JSON.stringify(_c));
+            }
+          }
+        } catch (_) {
+          try { localStorage.removeItem(_ck); } catch (_2) {}
+        }
+
+        // Invalidar caché de ediciones pendientes de la sección
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+
+        // 3. Re-renderizar la sección sin recargar desde Firestore
+        const scrollAntes = window.scrollY;
+        cerrarDlg();
+
+        // Limpiar estado de quiz para esta sección (graded, explanationShown, etc.)
+        const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
+        let state = {};
+        try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
+        if (state[seccionId]) {
+          // Reasignar graded/shuffleMap/etc. quitando el índice eliminado
+          // (simplificado: limpiar solo el estado de esta sección)
+          delete state[seccionId];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        if (typeof window.generarCuestionario === 'function') {
+          window.generarCuestionario(seccionId);
+        }
+
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          window.scrollTo({ top: scrollAntes, behavior: 'instant' });
+        }));
+
+        _eaToast('🗑 Pregunta eliminada correctamente', 'success');
+        console.log(`🗑 Pregunta eliminada: ${seccionId}_${qIndex}`);
+
+      } catch (e) {
+        const errEl2 = document.getElementById('fb-del-err');
+        if (errEl2) { errEl2.textContent = 'Error al eliminar: ' + e.message; errEl2.style.display = 'block'; }
+        if (btnConfirm) { btnConfirm.disabled = false; btnConfirm.textContent = '🗑 Sí, eliminar'; }
+      }
+    };
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -984,5 +1140,6 @@
   window.abrirModalEdicionAdmin       = abrirModalEdicionAdmin;
   window.fbInjectEditButtonIfAdmin    = fbInjectEditButtonIfAdmin;
   window.fbInjectVacunasButtonIfAdmin = fbInjectVacunasButtonIfAdmin;
+  window.eliminarPreguntaAdmin        = eliminarPreguntaAdmin;
 
 })();
