@@ -1,4 +1,4 @@
-//V3 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V4 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -408,6 +408,94 @@
       #sp-resultado-icon { font-size: 2.4rem; margin-bottom: 10px; }
       #sp-resultado-msg  { color: #e2e8f0; font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
       #sp-resultado-sub  { color: #64748b; font-size: 0.82rem; }
+
+      /* ── Panel de limpiar caché ── */
+      #sp-cache-panel {
+        margin-top: 28px;
+        border-top: 1px solid rgba(255,255,255,0.06);
+        padding-top: 20px;
+      }
+      #sp-cache-toggle {
+        display: flex; align-items: center; gap: 10px;
+        background: none; border: none;
+        color: #475569; font-size: 0.78rem; font-weight: 600;
+        cursor: pointer; padding: 0; letter-spacing: 0.04em;
+        text-transform: uppercase; transition: color 0.2s;
+        width: 100%; text-align: left;
+      }
+      #sp-cache-toggle:hover { color: #38bdf8; }
+      #sp-cache-toggle-icon {
+        width: 22px; height: 22px; border-radius: 6px;
+        background: rgba(14,165,233,0.12);
+        border: 1px solid rgba(14,165,233,0.25);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.8rem; flex-shrink: 0;
+        transition: background 0.2s;
+      }
+      #sp-cache-toggle:hover #sp-cache-toggle-icon {
+        background: rgba(14,165,233,0.22);
+      }
+      #sp-cache-toggle-chevron {
+        margin-left: auto; font-size: 0.65rem; color: #334155;
+        transition: transform 0.2s;
+      }
+      #sp-cache-toggle.abierto #sp-cache-toggle-chevron { transform: rotate(180deg); }
+
+      #sp-cache-contenido {
+        display: none; margin-top: 14px;
+        background: rgba(14,165,233,0.04);
+        border: 1px solid rgba(14,165,233,0.15);
+        border-radius: 12px; padding: 18px 20px;
+      }
+      #sp-cache-contenido.visible { display: block; }
+
+      #sp-cache-select-wrap { margin-bottom: 14px; }
+      #sp-cache-select-label {
+        font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: #475569; margin-bottom: 8px;
+        display: block;
+      }
+      #sp-cache-select {
+        width: 100%; padding: 10px 14px;
+        background: rgba(255,255,255,0.05);
+        border: 1.5px solid rgba(14,165,233,0.2);
+        border-radius: 10px; color: #f1f5f9; font-size: 0.88rem;
+        outline: none; cursor: pointer; transition: border-color 0.2s;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 14px center;
+        padding-right: 36px;
+      }
+      #sp-cache-select:focus { border-color: #38bdf8; }
+      #sp-cache-select option, #sp-cache-select optgroup { background: #0f172a; color: #e2e8f0; }
+
+      #sp-cache-info {
+        font-size: 0.78rem; color: #475569; margin-bottom: 14px;
+        min-height: 18px; transition: color 0.2s; line-height: 1.6;
+        padding: 8px 12px; border-radius: 8px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.06);
+        display: none;
+      }
+      #sp-cache-info.visible { display: block; }
+      #sp-cache-info.ok { color: #34d399; border-color: rgba(52,211,153,0.2); background: rgba(52,211,153,0.05); }
+      #sp-cache-info.warn { color: #fbbf24; border-color: rgba(251,191,36,0.2); background: rgba(251,191,36,0.05); }
+
+      #sp-btn-cache-limpiar {
+        width: 100%; padding: 12px 20px; border: none; border-radius: 10px;
+        background: linear-gradient(135deg, #0284c7, #0891b2);
+        color: #fff; font-size: 0.88rem; font-weight: 800; cursor: pointer;
+        letter-spacing: 0.05em; text-transform: uppercase;
+        box-shadow: 0 4px 18px rgba(8,145,178,0.35);
+        transition: all 0.2s;
+        display: flex; align-items: center; justify-content: center; gap: 8px;
+      }
+      #sp-btn-cache-limpiar:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 24px rgba(8,145,178,0.48);
+      }
+      #sp-btn-cache-limpiar:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
 
       /* ── Panel de vaciado ── */
       #sp-vaciar-panel {
@@ -1002,6 +1090,36 @@
           </div>
 
           <!-- ══════════════════════════════════════════════════════
+               LIMPIAR CACHÉ — Forzar recarga de una sección
+               ══════════════════════════════════════════════════════ -->
+          <div id="sp-cache-panel">
+            <button id="sp-cache-toggle">
+              <span id="sp-cache-toggle-icon">🗑️</span>
+              Limpiar caché de un cuestionario
+              <span id="sp-cache-toggle-chevron">▼</span>
+            </button>
+            <div id="sp-cache-contenido">
+              <div style="color:#94a3b8;font-size:0.82rem;line-height:1.65;margin-bottom:16px;">
+                Elimina el caché local del cuestionario seleccionado. La próxima vez que
+                alguien entre a ese cuestionario, se descargarán <strong style="color:#7dd3fc;">
+                todas sus preguntas desde Firestore</strong> — sin tocar el resto de la base de datos.
+              </div>
+              <div id="sp-cache-select-wrap">
+                <label id="sp-cache-select-label" for="sp-cache-select">Cuestionario a limpiar</label>
+                <select id="sp-cache-select">
+                  <option value="">Seleccioná el cuestionario…</option>
+                  ${_buildSelectOptions()}
+                </select>
+              </div>
+              <div id="sp-cache-info"></div>
+              <button id="sp-btn-cache-limpiar" disabled>
+                <span>🗑️</span>
+                <span id="sp-btn-cache-limpiar-txt">LIMPIAR CACHÉ</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- ══════════════════════════════════════════════════════
                ZONA DE PELIGRO — Vaciar cuestionario
                ══════════════════════════════════════════════════════ -->
           <div id="sp-vaciar-panel">
@@ -1203,6 +1321,9 @@
 
     // ── Zona de peligro: Vaciar cuestionario ──────────────────────
     _inicializarEventosVaciar();
+
+    // ── Limpiar caché de sección ───────────────────────────────────
+    _inicializarEventosCache();
   }
 
   // ── Procesar archivos seleccionados ───────────────────────────
@@ -1716,6 +1837,98 @@
       btnSubir.disabled = false;
       btnSubir.innerHTML = '<span>⬆️</span><span>REINTENTAR SUBIDA</span>';
     }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════
+  // Limpiar caché de sección
+  // ════════════════════════════════════════════════════════════════
+
+  function _inicializarEventosCache() {
+    const toggle    = document.getElementById('sp-cache-toggle');
+    const contenido = document.getElementById('sp-cache-contenido');
+    toggle.addEventListener('click', () => {
+      const abierto = contenido.classList.toggle('visible');
+      toggle.classList.toggle('abierto', abierto);
+    });
+
+    const selectCache = document.getElementById('sp-cache-select');
+    const infoEl      = document.getElementById('sp-cache-info');
+    const btnLimpiar  = document.getElementById('sp-btn-cache-limpiar');
+    const btnTxt      = document.getElementById('sp-btn-cache-limpiar-txt');
+
+    selectCache.addEventListener('change', function () {
+      const secId = this.value;
+      if (!secId) {
+        infoEl.className = 'sp-cache-info';
+        infoEl.classList.remove('visible');
+        btnLimpiar.disabled = true;
+        return;
+      }
+
+      const sec = TODAS_LAS_SECCIONES.find(s => s.id === secId);
+      const cacheKey   = CACHE_KEY_PREFIX + secId;
+      const editsKey   = 'fb_edits_cache_' + secId;
+      const tienePrincipal = !!localStorage.getItem(cacheKey);
+      const tieneEdits     = !!localStorage.getItem(editsKey);
+
+      let cantPreguntas = 0;
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) cantPreguntas = JSON.parse(raw)?.preguntas?.length || 0;
+      } catch (_) {}
+
+      infoEl.classList.add('visible');
+      if (tienePrincipal) {
+        infoEl.className = 'sp-cache-info visible ok';
+        infoEl.innerHTML = `✅ Caché encontrado: <strong>${sec?.label}</strong> — ${cantPreguntas.toLocaleString()} preguntas almacenadas localmente${tieneEdits ? ' · más caché de ediciones admin' : ''}.<br>Al limpiar, la próxima vez que alguien entre al cuestionario se descargarán todas las preguntas desde Firestore.`;
+      } else {
+        infoEl.className = 'sp-cache-info visible warn';
+        infoEl.innerHTML = `⚠️ No hay caché local para <strong>${sec?.label}</strong>. Ya se descargará desde Firestore la próxima vez que alguien entre.`;
+      }
+
+      btnLimpiar.disabled = !tienePrincipal && !tieneEdits;
+      btnTxt.textContent  = `LIMPIAR CACHÉ DE ${sec?.label?.toUpperCase()}`;
+    });
+
+    btnLimpiar.addEventListener('click', function () {
+      const secId = selectCache.value;
+      if (!secId) return;
+
+      const sec      = TODAS_LAS_SECCIONES.find(s => s.id === secId);
+      const cacheKey = CACHE_KEY_PREFIX + secId;
+      const editsKey = 'fb_edits_cache_' + secId;
+
+      // Eliminar caché de preguntas y de ediciones admin
+      localStorage.removeItem(cacheKey);
+      localStorage.removeItem(editsKey);
+
+      // Si la sección ya estaba cargada en memoria, también limpiarla
+      // para que la próxima llamada a cargarSeccion() vaya a Firestore
+      if (window.preguntasPorSeccion) {
+        delete window.preguntasPorSeccion[secId];
+      }
+      if (window._seccionesYaCargadas) {
+        window._seccionesYaCargadas.delete(secId);
+      }
+
+      // Feedback
+      infoEl.className = 'sp-cache-info visible ok';
+      infoEl.innerHTML = `✅ Caché de <strong>${sec?.label}</strong> eliminado correctamente. La próxima vez que alguien entre al cuestionario se descargarán todas las preguntas desde Firestore.`;
+      btnLimpiar.disabled = true;
+      btnLimpiar.innerHTML = '<span>✅</span><span>CACHÉ ELIMINADO</span>';
+
+      _toast(`🗑️ Caché de "${sec?.label}" eliminado — se descargará completo al entrar`, 'success');
+      _actualizarCacheEstado();
+
+      // Restaurar botón tras 3 segundos
+      setTimeout(() => {
+        btnLimpiar.innerHTML = `<span>🗑️</span><span id="sp-btn-cache-limpiar-txt">LIMPIAR CACHÉ DE ${sec?.label?.toUpperCase()}</span>`;
+        selectCache.value = '';
+        infoEl.classList.remove('visible');
+        btnLimpiar.disabled = true;
+      }, 3000);
+    });
   }
 
   // ════════════════════════════════════════════════════════════════
