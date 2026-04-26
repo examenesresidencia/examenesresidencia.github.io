@@ -1,4 +1,4 @@
-//V4 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V5 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -1756,10 +1756,16 @@
               ts       : Date.now(),
               preguntas: preguntasActualizadas
             }));
-            if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
-            window.preguntasPorSeccion[seccionId] = preguntasActualizadas;
+            // Limpiar la referencia en memoria para que la próxima vez que el admin
+            // entre al cuestionario, cargarSeccion() lea el caché localStorage actualizado
+            // (con las 300 preguntas) en lugar de quedarse con las 200 que había en memoria.
+            // El caché localStorage NO se borra — 0 lecturas extra a Firestore.
+            if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+            if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionId);
             _log('ok', `✅ Caché local actualizado: ${preguntasActuales.length} anteriores + ` +
               `${preguntasNuevasConIdx.length} nuevas = ${preguntasActualizadas.length} totales`);
+            _log('info', 'Memoria liberada — al entrar al cuestionario se leerán las ' +
+              preguntasActualizadas.length + ' preguntas desde caché local (0 lecturas a Firestore)');
           } catch (storageErr) {
             // localStorage lleno — limpiar el caché de esta sección para forzar
             // descarga completa la próxima vez (mejor que un caché parcial)
