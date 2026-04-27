@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V10
+// editor-admin.js  — V11
 // ────────────────────────────────────────────────────────────────
 
 
@@ -298,34 +298,243 @@
     document.head.appendChild(st);
   }
 
-  // ── execCommand helper ────────────────────────────────────────
-  // Asegura el foco en el editor antes de ejecutar cualquier comando
-  function cmd(command, value) {
+  // ════════════════════════════════════════════════════════════════
+  // SISTEMA DE MULTI-SELECCIÓN CON CTRL
+  // ────────────────────────────────────────────────────────────────
+  // Permite acumular fragmentos de texto seleccionados manteniendo
+  // Ctrl presionado. Cada fragmento se resalta con un <span>
+  // temporal (data-meq-hl). Al aplicar un formato (toolbar o atajo)
+  // se aplica sobre todos los fragmentos acumulados y se limpian
+  // los highlights. Al soltar Ctrl se aplica el último formato usado.
+  // ════════════════════════════════════════════════════════════════
+
+  // Clase CSS para el highlight temporal
+  const MEQ_HL_CLASS   = 'meq-multisel-hl';
+  const MEQ_HL_ATTR    = 'data-meq-hl';
+  const MEQ_HL_STYLE   = 'background:rgba(56,189,248,0.28);border-radius:2px;';
+
+  // Inyectar estilos del highlight una sola vez
+  (function () {
+    if (document.getElementById('meq-multisel-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'meq-multisel-styles';
+    st.textContent = `
+      [${MEQ_HL_ATTR}] {
+        background: rgba(56,189,248,0.28) !important;
+        border-radius: 2px;
+        outline: 1.5px solid rgba(56,189,248,0.5);
+        outline-offset: 0px;
+      }
+      .meq-multisel-badge {
+        position: absolute;
+        top: -8px;
+        right: 6px;
+        background: #0891b2;
+        color: #fff;
+        font-size: 0.65rem;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 10px;
+        pointer-events: none;
+        z-index: 10;
+        letter-spacing: 0.04em;
+        white-space: nowrap;
+      }
+    `;
+    document.head.appendChild(st);
+  })();
+
+  // ── execCommand helper — siempre restaura la selección guardada ─
+  // El problema general: al hacer clic en un botón de la toolbar,
+  // el foco sale del editor y la selección se pierde o colapsa.
+  // focus() por sí solo no la restaura — hay que volver a poner
+  // el rango en el Selection explícitamente antes de execCommand.
+  // Esto afecta a TODOS los comandos, no solo a listas.
+  function cmd(command, value, savedRangeRef) {
     const ed = document.getElementById('meq-editor-wysiwyg');
-    if (ed) ed.focus();
+    if (!ed) return;
+    ed.focus();
+    // Restaurar rango guardado si pertenece al editor
+    if (savedRangeRef && savedRangeRef.current) {
+      try {
+        const r = savedRangeRef.current;
+        if (ed.contains(r.commonAncestorContainer)) {
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      } catch (_) {}
+    }
     document.execCommand(command, false, value !== undefined ? value : null);
     actualizarEstadoBotones();
   }
 
-  // ── execCommand para listas (preserva selección) ──────────────
-  // El problema: focus() destruye la selección en algunos navegadores.
-  // Solución: restaurar el rango guardado DESPUÉS de enfocar.
+  // cmdList es ahora un alias de cmd (misma lógica unificada)
   function cmdList(command, savedRangeRef) {
-    const ed = document.getElementById('meq-editor-wysiwyg');
-    if (!ed) return;
-    ed.focus();
-    // Restaurar la selección guardada si pertenece al editor
-    if (savedRangeRef && savedRangeRef.current) {
-      try {
-        const sel = window.getSelection();
-        if (ed.contains(savedRangeRef.current.commonAncestorContainer)) {
-          sel.removeAllRanges();
-          sel.addRange(savedRangeRef.current);
-        }
-      } catch (_) {}
+    cmd(command, undefined, savedRangeRef);
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // FORMATO INLINE DIRECTO SOBRE DOM
+  // ────────────────────────────────────────────────────────────────
+  // Para bold/italic/underline: manipula el DOM directamente con
+  // <strong>/<em>/<u>, igual que Word/Google Docs.
+  // Ventaja clave: los highlights de multi-selección NO se limpian
+  // entre formatos — el admin puede aplicar B, luego I, luego U
+  // sobre los mismos fragmentos sin volver a seleccionarlos.
+  // ════════════════════════════════════════════════════════════════
+
+  const _FMT_TAG = { bold: 'STRONG', italic: 'EM', underline: 'U' };
+
+  // ¿Todos los nodos de texto dentro de `node` tienen el tag `tag`?
+  function _fmtIsActive(tag, node) {
+    function tieneTag(n) {
+      let cur = n.nodeType === 3 ? n.parentNode : n;
+      while (cur && cur.getAttribute && !cur.getAttribute('contenteditable')) {
+        if (cur.nodeName === tag) return true;
+        cur = cur.parentNode;
+      }
+      return false;
     }
-    document.execCommand(command, false, null);
-    actualizarEstadoBotones();
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, null);
+    let t; let todos = true; let hayTexto = false;
+    while ((t = walker.nextNode())) {
+      if (!t.textContent.trim()) continue;
+      hayTexto = true;
+      if (!tieneTag(t)) { todos = false; break; }
+    }
+    return hayTexto && todos;
+  }
+
+  // Quitar todas las ocurrencias de `tag` dentro de `node` (unwrap)
+  function _fmtUnwrapAll(node, tag) {
+    Array.from(node.querySelectorAll ? node.querySelectorAll(tag) : []).forEach(el => {
+      const p = el.parentNode; if (!p) return;
+      while (el.firstChild) p.insertBefore(el.firstChild, el);
+      p.removeChild(el);
+    });
+  }
+
+  // Toggle de un formato inline sobre un Range nativo
+  function _fmtToggleRange(range, tag, ed) {
+    const r = range.cloneRange();
+    // Inspeccionar contenido
+    const tmp = document.createElement('span');
+    tmp.appendChild(r.cloneContents());
+    // También verificar si el ancestro común ya tiene el tag
+    let anc = r.commonAncestorContainer;
+    if (anc.nodeType === 3) anc = anc.parentNode;
+    let ancTiene = false;
+    let cur = anc;
+    while (cur && !cur.getAttribute('contenteditable')) {
+      if (cur.nodeName === tag) { ancTiene = true; break; }
+      cur = cur.parentNode;
+    }
+    const activo = ancTiene || _fmtIsActive(tag, tmp);
+
+    if (activo) {
+      // Quitar: envolver en marker, quitar tags dentro, desenvolver marker
+      const marker = document.createElement('span');
+      marker.setAttribute('data-meq-fmt-tmp', '1');
+      try { r.surroundContents(marker); }
+      catch (_) { const f = r.extractContents(); marker.appendChild(f); r.insertNode(marker); }
+      _fmtUnwrapAll(marker, tag);
+      const p = marker.parentNode;
+      if (p) { while (marker.firstChild) p.insertBefore(marker.firstChild, marker); p.removeChild(marker); }
+    } else {
+      // Aplicar: envolver en tag
+      const wrapper = document.createElement(tag);
+      try { r.surroundContents(wrapper); }
+      catch (_) { const f = r.extractContents(); wrapper.appendChild(f); r.insertNode(wrapper); }
+    }
+    ed.normalize();
+  }
+
+  // ── Aplicar formato sobre todos los spans de highlight ──────────
+  // Para comandos inline (bold/italic/underline): usa DOM directo y
+  // NO limpia los highlights, para poder acumular múltiples formatos.
+  // Para comandos de bloque (justify): usa execCommand y sí limpia.
+  function _meqAplicarFormato(command, value, ed) {
+    const spans = ed.querySelectorAll(`[${MEQ_HL_ATTR}]`);
+    if (!spans.length) return false;
+
+    const INLINE_DOM  = ['bold', 'italic', 'underline'];
+    const INLINE_EXEC = ['subscript', 'superscript', 'strikeThrough'];
+    const BLOCK_CMDS  = ['justifyLeft','justifyCenter','justifyRight','justifyFull',
+                         'insertUnorderedList','insertOrderedList'];
+
+    if (INLINE_DOM.includes(command)) {
+      // DOM directo — los highlights persisten para seguir acumulando formatos
+      spans.forEach(span => {
+        const r = document.createRange();
+        r.selectNodeContents(span);
+        _fmtToggleRange(r, _FMT_TAG[command], ed);
+      });
+      // NO limpiar highlights aquí — el admin puede seguir aplicando más formatos
+      actualizarEstadoBotones();
+      return true;
+    }
+
+    if (INLINE_EXEC.includes(command)) {
+      spans.forEach(span => {
+        const range = document.createRange();
+        range.selectNodeContents(span);
+        const sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(range); ed.focus();
+        document.execCommand(command, false, value !== undefined ? value : null);
+      });
+      _meqLimpiarHighlights(ed);
+      actualizarEstadoBotones();
+      return true;
+    }
+
+    if (BLOCK_CMDS.includes(command)) {
+      spans.forEach(span => {
+        const range = document.createRange();
+        range.setStart(span, 0); range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges(); sel.addRange(range); ed.focus();
+        document.execCommand(command, false, null);
+      });
+      _meqLimpiarHighlights(ed);
+      actualizarEstadoBotones();
+      return true;
+    }
+
+    return false;
+  }
+
+  // ── Limpiar todos los spans de highlight (desenvuelve el span) ─
+  function _meqLimpiarHighlights(ed) {
+    if (!ed) ed = document.getElementById('meq-editor-wysiwyg');
+    if (!ed) return;
+    ed.querySelectorAll(`[${MEQ_HL_ATTR}]`).forEach(span => {
+      // Reemplazar el span por sus hijos (unwrap)
+      const parent = span.parentNode;
+      if (!parent) return;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    });
+    // Actualizar badge
+    _meqActualizarBadge(ed, 0);
+  }
+
+  // ── Mostrar/ocultar badge de cuenta de fragmentos ──────────────
+  function _meqActualizarBadge(ed, count) {
+    const toolbar = ed ? ed.previousElementSibling : null;
+    if (!toolbar) return;
+    let badge = toolbar.querySelector('.meq-multisel-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'meq-multisel-badge';
+        toolbar.style.position = 'relative';
+        toolbar.appendChild(badge);
+      }
+      badge.textContent = `${count} fragmento${count > 1 ? 's' : ''} seleccionado${count > 1 ? 's' : ''}`;
+    } else {
+      if (badge) badge.remove();
+    }
   }
 
   // ── Actualizar estado visual (activo) de los botones ──────────
@@ -532,36 +741,188 @@
       editor.scrollBy({ top: e.deltaY * 0.8, behavior: 'smooth' });
     }, { passive: false });
 
+    // ── Estado de multi-selección (local a este modal) ────────────
+    let _multiFragmentos  = [];   // array de { range, span } acumulados con Ctrl
+    let _ctrlPresionado   = false;
+    let _ultimoComando    = null; // último comando aplicado (para "soltar Ctrl → aplicar")
+
     // Actualizar estado de botones al mover cursor o cambiar selección
     editor.addEventListener('keyup',   actualizarEstadoBotones);
     editor.addEventListener('mouseup', actualizarEstadoBotones);
 
+    // ── Detectar Ctrl presionado / suelto ─────────────────────────
+    // keydown global para detectar Ctrl incluso si el foco está en toolbar
+    function _onKeydownCtrl(e) {
+      if (e.key === 'Control' || e.key === 'Meta') _ctrlPresionado = true;
+    }
+    function _onKeyupCtrl(e) {
+      if (e.key !== 'Control' && e.key !== 'Meta') return;
+      _ctrlPresionado = false;
+      // Al soltar Ctrl los highlights SE MANTIENEN siempre.
+      // El usuario puede seguir aplicando formatos (B, I, U) con los botones
+      // de la toolbar o volviendo a presionar Ctrl+B/I/U.
+      // Los highlights solo se limpian al hacer clic sin selección (mousedown sin Ctrl)
+      // o al presionar Escape.
+    }
+    document.addEventListener('keydown', _onKeydownCtrl);
+    document.addEventListener('keyup',   _onKeyupCtrl);
+
+    // ── Acumular fragmento al hacer mouseup con Ctrl ───────────────
+    editor.addEventListener('mouseup', function(e) {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return; // sin selección real
+
+      if (!_ctrlPresionado) {
+        // Sin Ctrl y sin selección real (simple click): limpiar highlights
+        if (_multiFragmentos.length > 0 && (!sel || sel.isCollapsed)) {
+          _meqLimpiarHighlights(editor);
+          _multiFragmentos = [];
+          _ultimoComando   = null;
+        }
+        return;
+      }
+
+      // Con Ctrl: capturar el rango actual y envolverlo en un span de highlight
+      if (sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0).cloneRange();
+      if (!editor.contains(range.commonAncestorContainer)) return;
+      if (range.collapsed) return;
+
+      // Crear span highlight
+      const span = document.createElement('span');
+      span.setAttribute(MEQ_HL_ATTR, '1');
+
+      try {
+        // surroundContents falla si el rango cruza nodos de bloque distintos;
+        // en ese caso usamos extractContents + insertNode
+        range.surroundContents(span);
+      } catch (_) {
+        try {
+          const frag = range.extractContents();
+          span.appendChild(frag);
+          range.insertNode(span);
+        } catch (_2) { return; } // rango inválido, ignorar
+      }
+
+      _multiFragmentos.push({ span });
+      _meqActualizarBadge(editor, _multiFragmentos.length);
+
+      // Colapsar selección visible para no confundir al usuario
+      sel.removeAllRanges();
+    });
+
     // ── Atajos de teclado ─────────────────────────────────────────
-    // Ctrl+A y Ctrl+Z funcionan nativamente en contenteditable.
-    // Solo interceptamos B, I, U para evitar que el navegador
-    // use su propio comportamiento en lugar del nuestro.
     editor.addEventListener('keydown', e => {
+      // Escape: limpiar highlights acumulados
+      if (e.key === 'Escape' && _multiFragmentos.length > 0) {
+        _meqLimpiarHighlights(editor);
+        _multiFragmentos = [];
+        _ultimoComando   = null;
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
+        let command = null;
         switch (e.key.toLowerCase()) {
-          case 'b': e.preventDefault(); cmd('bold');      break;
-          case 'i': e.preventDefault(); cmd('italic');    break;
-          case 'u': e.preventDefault(); cmd('underline'); break;
+          case 'b': command = 'bold';      break;
+          case 'i': command = 'italic';    break;
+          case 'u': command = 'underline'; break;
+        }
+        if (!command) return;
+        e.preventDefault();
+
+        _ultimoComando = command;
+
+        if (_multiFragmentos.length > 0) {
+          // Con highlights: aplicar DOM directo, NO limpiar highlights
+          _meqAplicarFormato(command, undefined, editor);
+          // No resetear _multiFragmentos — el admin sigue acumulando formatos
+        } else {
+          // Sin highlights: aplicar sobre la selección nativa actual
+          _fmtInlineNativo(command, editor, savedRangeRef);
         }
       }
     });
 
+    // ── Aplicar formato inline sobre la selección nativa del editor ─
+    // Usado cuando NO hay multi-selección activa.
+    function _fmtInlineNativo(command, ed, rangeRef) {
+      const INLINE_DOM = ['bold', 'italic', 'underline'];
+      if (!INLINE_DOM.includes(command)) {
+        cmd(command, undefined, rangeRef);
+        return;
+      }
+      // Restaurar selección guardada
+      ed.focus();
+      if (rangeRef && rangeRef.current) {
+        try {
+          const r = rangeRef.current;
+          if (ed.contains(r.commonAncestorContainer)) {
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(r);
+          }
+        } catch (_) {}
+      }
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) { cmd(command, undefined, rangeRef); return; }
+      const range = sel.getRangeAt(0);
+      if (!ed.contains(range.commonAncestorContainer)) { cmd(command, undefined, rangeRef); return; }
+      _fmtToggleRange(range, _FMT_TAG[command], ed);
+      actualizarEstadoBotones();
+    }
+
+    // ── Helper interno: aplicar formato respetando multi-selección ─
+    function _cmdConMulti(command, value) {
+      _ultimoComando = command;
+      const INLINE_DOM = ['bold', 'italic', 'underline'];
+      if (_multiFragmentos.length > 0) {
+        _meqAplicarFormato(command, value, editor);
+        // Para inline DOM: mantener highlights vivos para acumular más formatos
+        if (!INLINE_DOM.includes(command)) {
+          _multiFragmentos = [];
+          _ultimoComando   = null;
+        }
+      } else {
+        if (INLINE_DOM.includes(command)) {
+          _fmtInlineNativo(command, editor, savedRangeRef);
+        } else {
+          cmd(command, value, savedRangeRef);
+        }
+      }
+    }
+    function _cmdListConMulti(command) {
+      _ultimoComando = command;
+      if (_multiFragmentos.length > 0) {
+        _meqAplicarFormato(command, undefined, editor);
+        _multiFragmentos = [];
+        _ultimoComando   = null;
+      } else {
+        cmd(command, undefined, savedRangeRef);
+      }
+    }
+
+    // ── Limpiar listeners globales al cerrar el modal ─────────────
+    const _cerrarModalOriginal = cerrarModal;
+    cerrarModal = function() {
+      document.removeEventListener('keydown', _onKeydownCtrl);
+      document.removeEventListener('keyup',   _onKeyupCtrl);
+      _meqLimpiarHighlights(editor);
+      _cerrarModalOriginal();
+    };
+
     // ── Botones de la toolbar ─────────────────────────────────────
-    overlay.querySelector('#meq-btn-bold').onclick      = () => cmd('bold');
-    overlay.querySelector('#meq-btn-italic').onclick    = () => cmd('italic');
-    overlay.querySelector('#meq-btn-underline').onclick = () => cmd('underline');
-    overlay.querySelector('#meq-btn-sub').onclick       = () => cmd('subscript');
-    overlay.querySelector('#meq-btn-sup').onclick       = () => cmd('superscript');
-    overlay.querySelector('#meq-btn-left').onclick      = () => cmd('justifyLeft');
-    overlay.querySelector('#meq-btn-center').onclick    = () => cmd('justifyCenter');
-    overlay.querySelector('#meq-btn-right').onclick     = () => cmd('justifyRight');
-    overlay.querySelector('#meq-btn-justify').onclick   = () => cmd('justifyFull');
-    overlay.querySelector('#meq-btn-ul').onclick        = () => cmdList('insertUnorderedList', savedRangeRef);
-    overlay.querySelector('#meq-btn-ol').onclick        = () => cmdList('insertOrderedList',   savedRangeRef);
+    overlay.querySelector('#meq-btn-bold').onclick      = () => _cmdConMulti('bold');
+    overlay.querySelector('#meq-btn-italic').onclick    = () => _cmdConMulti('italic');
+    overlay.querySelector('#meq-btn-underline').onclick = () => _cmdConMulti('underline');
+    overlay.querySelector('#meq-btn-sub').onclick       = () => _cmdConMulti('subscript');
+    overlay.querySelector('#meq-btn-sup').onclick       = () => _cmdConMulti('superscript');
+    overlay.querySelector('#meq-btn-left').onclick      = () => _cmdConMulti('justifyLeft');
+    overlay.querySelector('#meq-btn-center').onclick    = () => _cmdConMulti('justifyCenter');
+    overlay.querySelector('#meq-btn-right').onclick     = () => _cmdConMulti('justifyRight');
+    overlay.querySelector('#meq-btn-justify').onclick   = () => _cmdConMulti('justifyFull');
+    overlay.querySelector('#meq-btn-ul').onclick        = () => _cmdListConMulti('insertUnorderedList');
+    overlay.querySelector('#meq-btn-ol').onclick        = () => _cmdListConMulti('insertOrderedList');
 
     // ── Botón 💉 Vacunas ──────────────────────────────────────────
     overlay.querySelector('#meq-btn-vacunas').addEventListener('click', function(e) {
@@ -771,6 +1132,20 @@
             : '🖼 Imagen insertada. Guardá para confirmar.',
           'success'
         );
+
+        // Scroll del overlay hasta el botón "Guardar en Firestore"
+        // El overlay es el contenedor scrollable (overflow-y:auto), no el window.
+        // Usamos scrollTo sobre el overlay con la posición del botón relativa al overlay.
+        requestAnimationFrame(() => {
+          const btnSave = overlay.querySelector('#edit-q-save');
+          if (btnSave) {
+            const overlayRect = overlay.getBoundingClientRect();
+            const btnRect     = btnSave.getBoundingClientRect();
+            // Posición del botón relativa al scroll actual del overlay
+            const scrollTarget = overlay.scrollTop + (btnRect.bottom - overlayRect.bottom) + 24;
+            overlay.scrollTo({ top: scrollTarget, behavior: 'smooth' });
+          }
+        });
       });
     }); // fin btnImg.addEventListener
 
