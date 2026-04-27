@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════════════════
-   cronologia-embarazo.js  V2
+   cronologia-embarazo.js  V3
    Módulo independiente — depende de script.js (Firebase ya inicializado)
    Incluye DOS vistas intercambiables con pestañas superiores:
      · Vista 1 — Cronología por trimestres (acordeón vertical)
@@ -988,7 +988,7 @@
         panel._semanaActual = col;
 
         // Si hay un evento en este punto → abre o cierra el detalle
-        const hayEvento = !!EVENTOS_SEMANA[col];
+        const hayEvento = !!(datos.eventosSemana || EVENTOS_SEMANA_DEFAULT)[col];
         if(hayEvento){
           eventoSel = (eventoSel === col) ? null : col;
           panel._eventoSel = eventoSel;
@@ -1053,7 +1053,7 @@
           const rowEl2 = document.getElementById('lt-weeks-row');
           if(!rowEl2) return;
           const val = xToSemana(e.clientX, rowEl2);
-          if(EVENTOS_SEMANA[val]) window._ltClickCol(val, e);
+          if((datos.eventosSemana || EVENTOS_SEMANA_DEFAULT)[val]) window._ltClickCol(val, e);
         });
 
         /* También hacer clickeable cualquier punto de la fila (entre dots) */
