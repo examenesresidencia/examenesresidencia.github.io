@@ -1,5 +1,4 @@
-// V3 — hitos-desarrollo.js
-// Firebase + UI mejorada
+// V4 — Firebase + UI mejorada
 /* ══════════════════════════════════════════════════════════════════
    HITOS DEL DESARROLLO INFANTIL — Módulo independiente
    Depende de: script.js (window.fbIsAdmin, window.showSection,
@@ -1589,8 +1588,8 @@
     btn.id = 'hitos-menu-btn';
     btn.className = 'hitos-menu-subitem';
     btn.setAttribute('onclick', 'mostrarHitosDesarrollo()');
-    btn.style.cssText = 'padding:5px 14px 5px 28px!important;font-size:0.8rem!important;color:#0891b2!important;border-left:3px solid #0d7490!important;border-bottom:2px solid #cbd5e1!important;background:linear-gradient(90deg,rgba(13,116,144,0.1) 0%,rgba(13,116,144,0.03) 100%)!important;font-weight:600!important;cursor:pointer;display:flex!important;align-items:center;gap:6px;list-style:none!important;margin:0!important;';
-    btn.innerHTML = '<span style="color:#0d7490;opacity:0.7;font-size:0.9rem;">↳</span> 🧒 Hitos del Desarrollo';
+    btn.style.cssText = 'padding:4px 12px 4px 14px!important;font-size:0.78rem!important;color:#0891b2!important;border-left:3px solid #0d7490!important;border-bottom:2px solid #cbd5e1!important;background:linear-gradient(90deg,rgba(13,116,144,0.1) 0%,rgba(13,116,144,0.03) 100%)!important;font-weight:600!important;cursor:pointer;display:flex!important;align-items:center;gap:5px;list-style:none!important;margin:0 0 0 20px!important;width:calc(100% - 20px)!important;box-sizing:border-box!important;border-radius:0 0 4px 0!important;';
+    btn.innerHTML = '<span style="color:#0d7490;opacity:0.6;font-size:0.85rem;flex-shrink:0;">↳</span> 🧒 Hitos del Desarrollo';
     pediatriaLi.insertAdjacentElement('afterend', btn);
   }
 
