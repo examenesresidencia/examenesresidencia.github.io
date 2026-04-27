@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V11
+// editor-admin.js  — V12
 // ────────────────────────────────────────────────────────────────
 
 
@@ -852,8 +852,10 @@
         cmd(command, undefined, rangeRef);
         return;
       }
-      // Restaurar selección guardada
+      // Asegurar foco en el editor
       ed.focus();
+      // Restaurar selección guardada (crítico cuando se viene de un clic en toolbar)
+      let rangeToUse = null;
       if (rangeRef && rangeRef.current) {
         try {
           const r = rangeRef.current;
@@ -861,14 +863,32 @@
             const sel = window.getSelection();
             sel.removeAllRanges();
             sel.addRange(r);
+            rangeToUse = r;
           }
         } catch (_) {}
       }
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) { cmd(command, undefined, rangeRef); return; }
-      const range = sel.getRangeAt(0);
-      if (!ed.contains(range.commonAncestorContainer)) { cmd(command, undefined, rangeRef); return; }
-      _fmtToggleRange(range, _FMT_TAG[command], ed);
+      if (!rangeToUse) {
+        if (!sel || sel.isCollapsed) { cmd(command, undefined, rangeRef); return; }
+        rangeToUse = sel.getRangeAt(0);
+      }
+      if (!ed.contains(rangeToUse.commonAncestorContainer)) { cmd(command, undefined, rangeRef); return; }
+
+      // Clonar el rango ANTES de aplicar el formato para poder restaurarlo
+      const rangeClone = rangeToUse.cloneRange();
+      _fmtToggleRange(rangeToUse, _FMT_TAG[command], ed);
+
+      // Restaurar la selección visual tras el formato para que quede marcado
+      // y el usuario pueda aplicar otro formato consecutivo sin re-seleccionar
+      try {
+        const selAfter = window.getSelection();
+        selAfter.removeAllRanges();
+        selAfter.addRange(rangeClone);
+        // Actualizar savedRange para la siguiente operación
+        _savedRange = rangeClone;
+        if (rangeRef) rangeRef.current = rangeClone;
+      } catch (_) {}
+
       actualizarEstadoBotones();
     }
 
@@ -907,24 +927,38 @@
     cerrarModal = function() {
       document.removeEventListener('keydown', _onKeydownCtrl);
       document.removeEventListener('keyup',   _onKeyupCtrl);
+      document.removeEventListener('selectionchange', guardarSeleccion);
       _meqLimpiarHighlights(editor);
       _cerrarModalOriginal();
     };
 
     // ── Botones de la toolbar ─────────────────────────────────────
-    overlay.querySelector('#meq-btn-bold').onclick      = () => _cmdConMulti('bold');
-    overlay.querySelector('#meq-btn-italic').onclick    = () => _cmdConMulti('italic');
-    overlay.querySelector('#meq-btn-underline').onclick = () => _cmdConMulti('underline');
-    overlay.querySelector('#meq-btn-sub').onclick       = () => _cmdConMulti('subscript');
-    overlay.querySelector('#meq-btn-sup').onclick       = () => _cmdConMulti('superscript');
-    overlay.querySelector('#meq-btn-left').onclick      = () => _cmdConMulti('justifyLeft');
-    overlay.querySelector('#meq-btn-center').onclick    = () => _cmdConMulti('justifyCenter');
-    overlay.querySelector('#meq-btn-right').onclick     = () => _cmdConMulti('justifyRight');
-    overlay.querySelector('#meq-btn-justify').onclick   = () => _cmdConMulti('justifyFull');
-    overlay.querySelector('#meq-btn-ul').onclick        = () => _cmdListConMulti('insertUnorderedList');
-    overlay.querySelector('#meq-btn-ol').onclick        = () => _cmdListConMulti('insertOrderedList');
+    // CRÍTICO: preventDefault en mousedown evita que el botón robe el foco
+    // del editor y colapse la selección antes de que se ejecute el onclick.
+    // Esto es lo que mantiene el texto seleccionado al hacer clic en B/I/U.
+    const _fmtBtns = [
+      { id: '#meq-btn-bold',      fn: () => _cmdConMulti('bold') },
+      { id: '#meq-btn-italic',    fn: () => _cmdConMulti('italic') },
+      { id: '#meq-btn-underline', fn: () => _cmdConMulti('underline') },
+      { id: '#meq-btn-sub',       fn: () => _cmdConMulti('subscript') },
+      { id: '#meq-btn-sup',       fn: () => _cmdConMulti('superscript') },
+      { id: '#meq-btn-left',      fn: () => _cmdConMulti('justifyLeft') },
+      { id: '#meq-btn-center',    fn: () => _cmdConMulti('justifyCenter') },
+      { id: '#meq-btn-right',     fn: () => _cmdConMulti('justifyRight') },
+      { id: '#meq-btn-justify',   fn: () => _cmdConMulti('justifyFull') },
+      { id: '#meq-btn-ul',        fn: () => _cmdListConMulti('insertUnorderedList') },
+      { id: '#meq-btn-ol',        fn: () => _cmdListConMulti('insertOrderedList') },
+    ];
+    _fmtBtns.forEach(({ id, fn }) => {
+      const btn = overlay.querySelector(id);
+      if (!btn) return;
+      // Evitar pérdida de foco/selección al hacer clic en la toolbar
+      btn.addEventListener('mousedown', e => e.preventDefault());
+      btn.addEventListener('click', fn);
+    });
 
     // ── Botón 💉 Vacunas ──────────────────────────────────────────
+    overlay.querySelector('#meq-btn-vacunas').addEventListener('mousedown', e => e.preventDefault());
     overlay.querySelector('#meq-btn-vacunas').addEventListener('click', function(e) {
       e.preventDefault();
       // Enfocar editor y restaurar selección si la hay
@@ -974,6 +1008,16 @@
     }
     editor.addEventListener('mouseup', guardarSeleccion);
     editor.addEventListener('keyup',   guardarSeleccion);
+    // También guardar en selectionchange para capturar selecciones que no terminan con mouseup/keyup
+    document.addEventListener('selectionchange', function() {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const r = sel.getRangeAt(0);
+      if (editor.contains(r.commonAncestorContainer)) {
+        _savedRange = r.cloneRange();
+        savedRangeRef.current = _savedRange;
+      }
+    });
 
     btnImg.addEventListener('click', () => {
       guardarSeleccion();
