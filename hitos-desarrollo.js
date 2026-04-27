@@ -1,4 +1,4 @@
-// V2 — hitos-desarrollo.js
+// V3 — hitos-desarrollo.js
 // Firebase + UI mejorada
 /* ══════════════════════════════════════════════════════════════════
    HITOS DEL DESARROLLO INFANTIL — Módulo independiente
@@ -121,7 +121,7 @@
       alertas:   'No balbucea con consonantes (m, b, d). No responde a su nombre. No realiza imitación gestual. No señala.',
     },
     {
-      id: 'm12', edad: '12m / 1 A', label: '12 meses (1 año)',
+      id: 'm12', edad: '12m<br>1 año', label: '12 meses (1 año)',
       motGrueso: '<strong>Camina con ayuda</strong> (tomado de las manos). Se pone de pie solo. Sube escalones gateando.',
       motFino:   '<strong>Pinza radial superior</strong> (pulgar + índice en oposición). Toma objetos pequeños con precisión. Introduce objetos en recipientes.',
       dibujo:    'Garabateo espontáneo si se le da un lápiz (trayectorias sin intención).',
@@ -148,7 +148,7 @@
       alertas:   '⚠️ <strong>ALARMA:</strong> Vocabulario < 10 palabras. No señala para pedir. No imita acciones de adultos. Pérdida de palabras ya adquiridas (regresión → descartar TEA).',
     },
     {
-      id: 'm24', edad: '24m / 2 A', label: '2 años',
+      id: 'm24', edad: '24m<br>2 años', label: '2 años',
       motGrueso: '<strong>Corre bien</strong>. Sube y baja escaleras <strong>de a un escalón</strong> (mismo pie adelante). Patea pelota grande. Salta con los dos pies juntos.',
       motFino:   'Torre de 6 cubos. Maneja la cuchara sin derrames. Abre puertas girando perilla. Imita trazos verticales.',
       dibujo:    '<strong>Garabateo circular</strong>. Imita línea vertical. Trazos con intención pero sin forma reconocible.',
@@ -337,7 +337,7 @@
         display: none;
         max-width: 1400px;
         margin: 0 auto;
-        padding: 20px 20px 80px;
+        padding: 20px 16px 80px;
         animation: fadeIn 0.3s ease-out;
       }
       #hitos-panel.activo { display: block; }
@@ -346,29 +346,36 @@
       .hitos-header {
         background: linear-gradient(135deg, #155e75 0%, #0d7490 60%, #0891b2 100%);
         color: #fff;
-        border-radius: 12px;
-        padding: 28px 24px 22px;
-        margin: 0 auto 24px;
-        max-width: 680px;
+        border-radius: 10px;
+        padding: 22px 32px;
+        margin: 0 0 24px;
+        width: 100%;
+        box-sizing: border-box;
         text-align: center;
-        box-shadow: 0 10px 25px rgba(13,116,144,0.25);
+        box-shadow: 0 6px 20px rgba(13,116,144,0.2);
         position: relative;
         overflow: hidden;
       }
       .hitos-header::before {
         content: '';
         position: absolute;
-        top: -50%; right: -10%;
-        width: 220px; height: 220px;
+        top: -40%; right: -5%;
+        width: 180px; height: 180px;
         background: rgba(255,255,255,0.05);
         border-radius: 50%;
       }
       .hitos-header h1 {
-        font-size: 2rem;
+        font-size: 1.6rem;
         font-weight: 900;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         text-transform: uppercase;
-        margin-bottom: 0;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      @media (max-width: 600px) {
+        .hitos-header h1 { font-size: 1.1rem; white-space: normal; }
       }
 
       /* ══ Pie de fuentes (estático, al final) ══ */
@@ -560,6 +567,9 @@
         text-align: center; white-space: nowrap;
         background: linear-gradient(180deg, #f0f9ff 0%, #e0f2f7 100%);
         border-right: 3px solid #0d7490 !important; min-width: 80px;
+      }
+      .hitos-edad-valor {
+        display: block; line-height: 1.3;
       }
       .hitos-edad-label {
         display: block; font-size: 0.68rem; font-weight: 500;
@@ -762,6 +772,12 @@
       .hitos-modal-field textarea { min-height: 80px; }
       .hitos-modal-field textarea:focus,
       .hitos-modal-field input[type="text"]:focus { border-color: #0d7490; }
+      .hitos-field-preview {
+        min-height: 60px; padding: 10px 12px;
+        border: 2px solid #0d7490; border-radius: 6px;
+        font-size: 0.88rem; line-height: 1.5; color: #1e293b;
+        background: #f0f9ff;
+      }
       .hitos-modal-toolbar { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
       .hitos-toolbar-btn {
         padding: 4px 10px; border: 1px solid #cbd5e1;
@@ -819,19 +835,33 @@
 
       /* ══ Subitem del menú ══ */
       .hitos-menu-subitem {
-        padding: 7px 14px 7px 30px !important;
-        font-size: 0.85rem !important;
-        color: #0d7490 !important;
+        padding: 5px 14px 5px 32px !important;
+        font-size: 0.8rem !important;
+        color: #0891b2 !important;
         border-left: 3px solid #0d7490 !important;
-        background: #f0f9ff !important;
-        font-weight: 500 !important;
+        border-bottom: 2px solid #e2e8f0 !important;
+        background: linear-gradient(90deg, rgba(13,116,144,0.09) 0%, rgba(13,116,144,0.03) 100%) !important;
+        font-weight: 600 !important;
         cursor: pointer;
         transition: all 0.15s;
-        display: flex; align-items: center; gap: 6px;
+        display: flex !important; align-items: center; gap: 6px;
         list-style: none !important;
-        margin: 1px 0 !important;
+        margin: 0 !important;
+        position: relative;
+        letter-spacing: 0.01em;
       }
-      .hitos-menu-subitem:hover { background: #e0f2f7 !important; color: #155e75 !important; }
+      .hitos-menu-subitem::before {
+        content: '↳';
+        color: #0d7490;
+        font-size: 0.9rem;
+        opacity: 0.7;
+        flex-shrink: 0;
+      }
+      .hitos-menu-subitem:hover {
+        background: linear-gradient(90deg, rgba(13,116,144,0.18) 0%, rgba(13,116,144,0.06) 100%) !important;
+        color: #155e75 !important;
+        padding-left: 36px !important;
+      }
 
       @media (max-width: 640px) {
         .hitos-glosario-body { columns: 1; }
@@ -865,9 +895,8 @@
 
     let html = `
       <button class="hitos-btn-volver" onclick="window.mostrarMenuPrincipalHitos()">← Volver al Menú Principal</button>
-
-      <div class="hitos-header">
-        <h1>🧒 Hitos del Desarrollo Infantil</h1>
+      <div style="background:linear-gradient(135deg,#155e75 0%,#0d7490 60%,#0891b2 100%);color:#fff;border-radius:10px;padding:20px 32px;margin:0 0 24px;width:100%;box-sizing:border-box;text-align:center;box-shadow:0 6px 20px rgba(13,116,144,0.2);overflow:hidden;">
+        <h1 style="font-size:clamp(1.1rem,3vw,1.55rem);font-weight:900;letter-spacing:0.05em;text-transform:uppercase;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">🧒 Hitos del Desarrollo Infantil</h1>
       </div>
     `;
 
@@ -1050,7 +1079,7 @@
         tdsCol += `<td>${hl(h[col.key] || '—', q)}</td>`;
       });
       html += `<tr class="${par}">
-        <td class="hitos-td-edad">${hl(h.edad, q)}<span class="hitos-edad-label">${hl(h.label, q)}</span></td>
+        <td class="hitos-td-edad"><span class="hitos-edad-valor">${hl(h.edad, q)}</span><span class="hitos-edad-label">${hl(h.label, q)}</span></td>
         ${tdsCol}
         <td><div class="hitos-alarma">${hl(h.alertas || '', q)}</div></td>
         ${isAdmin ? `<td style="text-align:center;white-space:nowrap;">
@@ -1109,6 +1138,14 @@
   /* ── RENDER POR DOMINIO ───────────────────────────────────────── */
   function renderPorDominio(hitos, isAdmin, q) {
     let html = '';
+    if (isAdmin) {
+      html += `<div style="margin-bottom:12px;">
+        <button class="hitos-admin-btn verde" onclick="hitosAgregarFila()" style="font-size:0.85rem;padding:8px 16px;">
+          + Agregar nueva fila / etapa
+        </button>
+        <span style="font-size:0.78rem;color:#64748b;margin-left:10px;">Las filas nuevas aparecen en todas las vistas</span>
+      </div>`;
+    }
     const dominios = [
       ...estado.columnas,
       { key: 'alertas', label: 'Señales de Alarma', color: '#92400e', emoji: '⚠️' }
@@ -1237,6 +1274,22 @@
     ta.focus();
     const nuevoCursor = start + reemplazo.length;
     ta.setSelectionRange(nuevoCursor, nuevoCursor);
+  };
+
+  /* ── Toggle vista previa en campos de edición ──────────────── */
+  window.hitosTogglePreview = function (id) {
+    const ta = document.getElementById(id);
+    const preview = document.getElementById(id + '-preview');
+    if (!ta || !preview) return;
+    const showing = preview.style.display !== 'none';
+    if (showing) {
+      preview.style.display = 'none';
+      ta.style.display = '';
+    } else {
+      preview.innerHTML = ta.value || '<em style="color:#94a3b8;">Sin contenido</em>';
+      preview.style.display = '';
+      ta.style.display = 'none';
+    }
   };
 
   /* ── Tamaño de letra admin ──────────────────────────────────── */
@@ -1415,7 +1468,8 @@
           <div class="hitos-modal-body">
             <div class="hitos-modal-field">
               <label>Edad (etiqueta corta)</label>
-              <input type="text" id="hedit-edad" value="${h.edad || ''}">
+              <span style="font-size:0.72rem;color:#94a3b8;display:block;margin-bottom:4px;">Usá &lt;br&gt; para separar en 2 líneas (ej: <code>12m&lt;br&gt;1 año</code>)</span>
+              <textarea id="hedit-edad" style="min-height:48px;resize:none;">${h.edad || ''}</textarea>
             </div>
             <div class="hitos-modal-field">
               <label>Descripción de edad</label>
@@ -1428,7 +1482,12 @@
         <div class="hitos-modal-field">
           <label>${col.emoji} ${col.label}</label>
           ${renderToolbar(taId)}
+          <div style="display:flex;gap:6px;margin-bottom:4px;">
+            <button class="hitos-toolbar-btn" onclick="hitosTogglePreview('${taId}')" title="Alternar vista previa / código">👁 Vista previa</button>
+            <span style="font-size:0.72rem;color:#94a3b8;align-self:center;">Podés usar &lt;strong&gt;, &lt;em&gt;, &lt;br&gt; para formato</span>
+          </div>
           <textarea id="${taId}">${h[col.key] || ''}</textarea>
+          <div id="${taId}-preview" class="hitos-field-preview" style="display:none;"></div>
         </div>`;
     });
 
@@ -1436,7 +1495,12 @@
         <div class="hitos-modal-field">
           <label>⚠️ Señales de Alarma</label>
           ${renderToolbar('hedit-alertas')}
+          <div style="display:flex;gap:6px;margin-bottom:4px;">
+            <button class="hitos-toolbar-btn" onclick="hitosTogglePreview('hedit-alertas')" title="Alternar vista previa / código">👁 Vista previa</button>
+            <span style="font-size:0.72rem;color:#94a3b8;align-self:center;">Podés usar &lt;strong&gt;, &lt;em&gt;, &lt;br&gt; para formato</span>
+          </div>
           <textarea id="hedit-alertas">${h.alertas || ''}</textarea>
+          <div id="hedit-alertas-preview" class="hitos-field-preview" style="display:none;"></div>
         </div>
         <div class="hitos-modal-footer">
           <button class="hitos-admin-btn gris" onclick="hitosModalCerrar()">Cancelar</button>
@@ -1514,11 +1578,19 @@
     if (!pediatriaLi) return;
     if (document.getElementById('hitos-menu-btn')) return;
 
+    // Separador después del subítem (antes de Cardiología)
+    const sep = document.createElement('li');
+    sep.id = 'hitos-menu-sep';
+    sep.style.cssText = 'height:6px;background:transparent;border:none;padding:0;margin:0;pointer-events:none;list-style:none;';
+    pediatriaLi.insertAdjacentElement('afterend', sep);
+
+    // Subítem con estilo inline para resistir cache
     const btn = document.createElement('li');
     btn.id = 'hitos-menu-btn';
     btn.className = 'hitos-menu-subitem';
     btn.setAttribute('onclick', 'mostrarHitosDesarrollo()');
-    btn.innerHTML = '🧒 Hitos del Desarrollo';
+    btn.style.cssText = 'padding:5px 14px 5px 28px!important;font-size:0.8rem!important;color:#0891b2!important;border-left:3px solid #0d7490!important;border-bottom:2px solid #cbd5e1!important;background:linear-gradient(90deg,rgba(13,116,144,0.1) 0%,rgba(13,116,144,0.03) 100%)!important;font-weight:600!important;cursor:pointer;display:flex!important;align-items:center;gap:6px;list-style:none!important;margin:0!important;';
+    btn.innerHTML = '<span style="color:#0d7490;opacity:0.7;font-size:0.9rem;">↳</span> 🧒 Hitos del Desarrollo';
     pediatriaLi.insertAdjacentElement('afterend', btn);
   }
 
