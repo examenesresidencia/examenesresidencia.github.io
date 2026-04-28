@@ -1,4 +1,4 @@
-// V5 — Firebase + UI mejorada
+// V6 — Firebase + UI mejorada
 /* ══════════════════════════════════════════════════════════════════
    HITOS DEL DESARROLLO INFANTIL — Módulo independiente
    Depende de: script.js (window.fbIsAdmin, window.showSection,
@@ -777,6 +777,22 @@
         font-size: 0.88rem; line-height: 1.5; color: #1e293b;
         background: #f0f9ff;
       }
+      .hitos-rich-editor {
+        width: 100%; min-height: 80px; padding: 10px 12px;
+        border: 2px solid #e2e8f0; border-radius: 6px;
+        font-size: 0.88rem; font-family: inherit;
+        line-height: 1.5; outline: none;
+        transition: border-color 0.15s;
+        color: #1e293b; background: #fff;
+        box-sizing: border-box;
+        -webkit-user-select: text !important; user-select: text !important;
+        cursor: text;
+      }
+      .hitos-rich-editor:focus { border-color: #0d7490; }
+      .hitos-rich-editor:empty:before {
+        content: attr(data-placeholder);
+        color: #94a3b8; pointer-events: none;
+      }
       .hitos-modal-toolbar { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
       .hitos-toolbar-btn {
         padding: 4px 10px; border: 1px solid #cbd5e1;
@@ -1017,10 +1033,10 @@
   /* ── Toolbar de formato (para textareas en admin) ─────────────── */
   function renderToolbar(targetId) {
     return `<div class="hitos-modal-toolbar">
-      <button class="hitos-toolbar-btn" onclick="hitosFormatear('${targetId}','strong')" title="Negrita"><b>N</b></button>
-      <button class="hitos-toolbar-btn" onclick="hitosFormatear('${targetId}','em')" title="Cursiva"><i>K</i></button>
-      <button class="hitos-toolbar-btn" onclick="hitosFormatear('${targetId}','u')" title="Subrayado"><u>S</u></button>
-      <button class="hitos-toolbar-btn" onclick="hitosFormatear('${targetId}','br')" title="Salto de línea">↵ br</button>
+      <button class="hitos-toolbar-btn" onmousedown="event.preventDefault();hitosFormatear('${targetId}','strong')" title="Negrita"><b>N</b></button>
+      <button class="hitos-toolbar-btn" onmousedown="event.preventDefault();hitosFormatear('${targetId}','em')" title="Cursiva"><i>K</i></button>
+      <button class="hitos-toolbar-btn" onmousedown="event.preventDefault();hitosFormatear('${targetId}','u')" title="Subrayado"><u>S</u></button>
+      <button class="hitos-toolbar-btn" onmousedown="event.preventDefault();hitosFormatear('${targetId}','br')" title="Salto de línea">↵ br</button>
     </div>`;
   }
 
@@ -1252,37 +1268,23 @@
 
   /* ── Formateo de texto ──────────────────────────────────────── */
   window.hitosFormatear = function (id, tipo) {
-    const ta = document.getElementById(id);
-    if (!ta) return;
-    const start = ta.selectionStart, end = ta.selectionEnd;
-    const sel = ta.value.substring(start, end);
-    const mapas = {
-      strong: `<strong>${sel}</strong>`,
-      em:     `<em>${sel}</em>`,
-      u:      `<u>${sel}</u>`,
-      br:     `${sel}<br>`,
-    };
-    const reemplazo = mapas[tipo] || sel;
-    ta.value = ta.value.substring(0, start) + reemplazo + ta.value.substring(end);
-    ta.focus();
-    const nuevoCursor = start + reemplazo.length;
-    ta.setSelectionRange(nuevoCursor, nuevoCursor);
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.focus();
+    if (tipo === 'strong') {
+      document.execCommand('bold', false, null);
+    } else if (tipo === 'em') {
+      document.execCommand('italic', false, null);
+    } else if (tipo === 'u') {
+      document.execCommand('underline', false, null);
+    } else if (tipo === 'br') {
+      document.execCommand('insertLineBreak', false, null);
+    }
   };
 
-  /* ── Toggle vista previa en campos de edición ──────────────── */
+  /* ── Toggle vista previa (ya no necesario, el editor muestra texto real) */
   window.hitosTogglePreview = function (id) {
-    const ta = document.getElementById(id);
-    const preview = document.getElementById(id + '-preview');
-    if (!ta || !preview) return;
-    const showing = preview.style.display !== 'none';
-    if (showing) {
-      preview.style.display = 'none';
-      ta.style.display = '';
-    } else {
-      preview.innerHTML = ta.value || '<em style="color:#94a3b8;">Sin contenido</em>';
-      preview.style.display = '';
-      ta.style.display = 'none';
-    }
+    // No-op: el editor contenteditable ya muestra el texto formateado en tiempo real
   };
 
   /* ── Tamaño de letra admin ──────────────────────────────────── */
@@ -1475,12 +1477,7 @@
         <div class="hitos-modal-field">
           <label>${col.emoji} ${col.label}</label>
           ${renderToolbar(taId)}
-          <div style="display:flex;gap:6px;margin-bottom:4px;">
-            <button class="hitos-toolbar-btn" onclick="hitosTogglePreview('${taId}')" title="Alternar vista previa / código">👁 Vista previa</button>
-            <span style="font-size:0.72rem;color:#94a3b8;align-self:center;">Podés usar &lt;strong&gt;, &lt;em&gt;, &lt;br&gt; para formato</span>
-          </div>
-          <textarea id="${taId}">${h[col.key] || ''}</textarea>
-          <div id="${taId}-preview" class="hitos-field-preview" style="display:none;"></div>
+          <div id="${taId}" class="hitos-rich-editor" contenteditable="true" spellcheck="false">${h[col.key] || ''}</div>
         </div>`;
     });
 
@@ -1488,12 +1485,7 @@
         <div class="hitos-modal-field">
           <label>⚠️ Señales de Alarma</label>
           ${renderToolbar('hedit-alertas')}
-          <div style="display:flex;gap:6px;margin-bottom:4px;">
-            <button class="hitos-toolbar-btn" onclick="hitosTogglePreview('hedit-alertas')" title="Alternar vista previa / código">👁 Vista previa</button>
-            <span style="font-size:0.72rem;color:#94a3b8;align-self:center;">Podés usar &lt;strong&gt;, &lt;em&gt;, &lt;br&gt; para formato</span>
-          </div>
-          <textarea id="hedit-alertas">${h.alertas || ''}</textarea>
-          <div id="hedit-alertas-preview" class="hitos-field-preview" style="display:none;"></div>
+          <div id="hedit-alertas" class="hitos-rich-editor" contenteditable="true" spellcheck="false">${h.alertas || ''}</div>
         </div>
         <div class="hitos-modal-footer">
           <button class="hitos-admin-btn gris" onclick="hitosModalCerrar()">Cancelar</button>
@@ -1508,15 +1500,54 @@
     document.body.insertAdjacentHTML('beforeend', modalHTML);
   };
 
+  /* ── Serializa innerHTML de contenteditable a HTML limpio ──── */
+  function hitosSerializarEditor(id) {
+    const el = document.getElementById(id);
+    if (!el) return '';
+    // Clonar para no modificar el DOM visible
+    const clone = el.cloneNode(true);
+    // Normalizar etiquetas del browser a las nuestras
+    // Chrome usa <b>,<i>,<br> — los pasamos a <strong>,<em>,<br>
+    clone.querySelectorAll('b').forEach(n => {
+      const s = document.createElement('strong');
+      s.innerHTML = n.innerHTML;
+      n.replaceWith(s);
+    });
+    clone.querySelectorAll('i').forEach(n => {
+      const s = document.createElement('em');
+      s.innerHTML = n.innerHTML;
+      n.replaceWith(s);
+    });
+    // Quitar divs que el browser inserta como saltos de línea (excepto el root)
+    clone.querySelectorAll('div').forEach(n => {
+      const br = document.createElement('br');
+      n.replaceWith(br);
+    });
+    // Quitar spans y atributos de style que inserta execCommand
+    clone.querySelectorAll('span').forEach(n => {
+      const frag = document.createDocumentFragment();
+      while (n.firstChild) frag.appendChild(n.firstChild);
+      n.replaceWith(frag);
+    });
+    // Limpiar atributo style de etiquetas permitidas
+    ['strong','em','u','b','i'].forEach(tag => {
+      clone.querySelectorAll(tag).forEach(n => n.removeAttribute('style'));
+    });
+    let html = clone.innerHTML;
+    // Limpiar <br> al final
+    html = html.replace(/(<br\s*\/?>)+$/i, '').trim();
+    return html;
+  }
+
   window.hitosGuardarEdicion = async function (id) {
     const h = estado.hitosData.find(x => x.id === id);
     if (!h) return;
     h.edad  = document.getElementById('hedit-edad').value;
     h.label = document.getElementById('hedit-label').value;
     estado.columnas.forEach(col => {
-      h[col.key] = document.getElementById(`hedit-${col.key}`)?.value || '';
+      h[col.key] = hitosSerializarEditor(`hedit-${col.key}`);
     });
-    h.alertas = document.getElementById('hedit-alertas').value;
+    h.alertas = hitosSerializarEditor('hedit-alertas');
     hitosModalCerrar();
     await hitosGuardarDatos();
     renderHitos();
