@@ -1,4 +1,4 @@
-//PRUEBA 14  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 15  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2238,6 +2238,12 @@
         const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
         if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
         restoreSelectionsAndGrades(seccionId);
+        // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
+        // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
+        // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
+        if (!esExamenUnico(seccionId) && !esExamenUBA(seccionId) && seccionId !== 'simulador') {
+          actualizarSeparador(seccionId, cont);
+        }
         if (_scrollOnNextRender) {
           _scrollOnNextRender = false;
           scrollToFirstUnanswered(seccionId);
