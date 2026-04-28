@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V12
+// editor-admin.js  — V13
 // ────────────────────────────────────────────────────────────────
 
 
@@ -830,6 +830,17 @@
         }
         if (!command) return;
         e.preventDefault();
+
+        // Capturar el rango AHORA (keydown) antes de que cualquier cosa lo colapse.
+        // guardarSeleccion() se dispara en keyup, o sea DESPUÉS — demasiado tarde.
+        const selAhora = window.getSelection();
+        if (selAhora && selAhora.rangeCount > 0) {
+          const rAhora = selAhora.getRangeAt(0);
+          if (editor.contains(rAhora.commonAncestorContainer)) {
+            _savedRange = rAhora.cloneRange();
+            savedRangeRef.current = _savedRange;
+          }
+        }
 
         _ultimoComando = command;
 
