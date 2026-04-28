@@ -8137,15 +8137,19 @@ function fbSaveProgressToCloud() {
         ? 'contentVersion_' + seccionId
         : 'contentVersion';
       await setDoc(doc(_fbDb, 'meta', docId), {
-        version      : Date.now(),
+        version         : Date.now(),
         seccionId,
-        qIndex       : qIndex ?? null,
-        nuevaCorrecta: nuevaCorrecta ?? null,
-        startIdx     : opciones.startIdx ?? null, // null = edición normal, número = subida nueva
-        updatedAt    : serverTimestamp()
+        qIndex          : qIndex ?? null,
+        nuevaCorrecta   : nuevaCorrecta ?? null,
+        startIdx        : opciones.startIdx        ?? null,  // null = edición normal, número = subida nueva
+        esEdicionPuntual: opciones.esEdicionPuntual ?? false, // true = los datos viajan embebidos (0 lecturas extra)
+        preguntaData    : opciones.preguntaData     ?? null,  // { pregunta, opciones, correcta, explicacion }
+        updatedAt       : serverTimestamp()
       });
       console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId,
-        esSubidaNueva ? '| subida incremental desde idx:' + opciones.startIdx : '| edición');
+        esSubidaNueva ? '| subida incremental desde idx:' + opciones.startIdx
+                      : opciones.esEdicionPuntual ? '| edición puntual embebida qIndex:' + qIndex
+                                                  : '| edición');
     } catch (e) {
       console.warn('[CONTENT-SYNC] Error al actualizar versión:', e.message);
     }
@@ -8416,29 +8420,36 @@ function fbSaveProgressToCloud() {
     return chunks;
   }
 
-  async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas) {
+  async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, datosEmbebidos = null) {
     if (!window.__fb || !_fbDb) return;
     // Normalizar: aceptar un solo qIndex (número) o un array
     const indices = Array.isArray(qIndexes) ? qIndexes : [qIndexes];
     if (indices.length === 0) return;
 
     try {
-      const { collection, query, where, getDocs } = window.__fb;
+      let edicionesDescargadas = [];
 
-      // Partir en lotes de 30 (límite de whereIn en Firestore)
-      const lotes = _chunkArray(indices, 30);
-      const edicionesDescargadas = [];
+      // ── Camino rápido: datos embebidos en el snapshot (0 lecturas a Firestore) ──
+      // Solo disponible cuando el admin edita 1 sola pregunta (edición puntual estándar).
+      if (datosEmbebidos !== null && indices.length === 1) {
+        edicionesDescargadas = [{ qIndex: indices[0], ...datosEmbebidos }];
+        console.log('[EDIT-PATCH] Usando datos embebidos → sin lecturas a Firestore');
+      } else {
+        // ── Camino estándar: descargar desde Firestore ──
+        const { collection, query, where, getDocs } = window.__fb;
 
-      for (const lote of lotes) {
-        const docIds = lote.map(i => `${seccionId}_${i}`);
-        // 1 sola consulta por lote de hasta 30 preguntas
-        const q = query(
-          collection(_fbDb, 'questions'),
-          where('seccionId', '==', seccionId),
-          where('qIndex', 'in', lote)
-        );
-        const snap = await getDocs(q);
-        snap.forEach(d => edicionesDescargadas.push(d.data()));
+        // Partir en lotes de 30 (límite de whereIn en Firestore)
+        const lotes = _chunkArray(indices, 30);
+
+        for (const lote of lotes) {
+          const q = query(
+            collection(_fbDb, 'questions'),
+            where('seccionId', '==', seccionId),
+            where('qIndex', 'in', lote)
+          );
+          const snap = await getDocs(q);
+          snap.forEach(d => edicionesDescargadas.push(d.data()));
+        }
       }
 
       if (edicionesDescargadas.length === 0) {
@@ -8498,7 +8509,7 @@ function fbSaveProgressToCloud() {
         }
       }
 
-      const numLecturas = Math.ceil(indices.length / 30);
+      const numLecturas = datosEmbebidos !== null ? 0 : Math.ceil(indices.length / 30);
       console.log(
         `[EDIT-PATCH] ✅ ${edicionesDescargadas.length} pregunta(s) parcheada(s) en "${seccionId}"`,
         `| ${numLecturas} consulta(s) a Firestore | 1 re-renderización`
@@ -8559,12 +8570,14 @@ function fbSaveProgressToCloud() {
           const esEdicionPuntual = data.esEdicionPuntual === true;
           const qIndexes        = data.qIndexes ?? (qIndex !== null && qIndex !== undefined ? [qIndex] : []);
           const nuevasCorrectas = data.nuevasCorrectas ?? [];
+          const preguntaData    = data.preguntaData ?? null; // datos embebidos (0 lecturas extra)
           if (!seccionId) return;
           if (esEdicionPuntual && qIndexes.length > 0) {
-            // ✅ EFICIENTE: descarga solo las N preguntas editadas
-            // ceil(N/30) consultas a Firestore, 1 sola re-renderización
-            console.log(`[CONTENT-SYNC] ${motivo} → parche batch: ${qIndexes.length} pregunta(s) en "${seccionId}" | consultas: ${Math.ceil(qIndexes.length / 30)}`);
-            _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas);
+            // ✅ EFICIENTE: si los datos vienen embebidos, cero lecturas extra a Firestore
+            const datosEmbebidos = (preguntaData !== null && qIndexes.length === 1) ? preguntaData : null;
+            console.log(`[CONTENT-SYNC] ${motivo} → parche: ${qIndexes.length} pregunta(s) en "${seccionId}"` +
+              (datosEmbebidos ? ' | datos embebidos (0 lecturas)' : ` | consultas: ${Math.ceil(qIndexes.length / 30)}`));
+            _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, datosEmbebidos);
           } else {
             // Forzado global o subida masiva → recargar sección completa
             console.log(`[CONTENT-SYNC] ${motivo} → forzado global: recargando "${seccionId}"`);
