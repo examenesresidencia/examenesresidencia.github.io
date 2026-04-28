@@ -1,4 +1,4 @@
-//PRUEBA 13  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 14  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -1992,6 +1992,40 @@
     if (!s.answeredOrder) {
       s.answeredOrder = [];
     }
+
+    // ── REPARACIÓN AUTOMÁTICA: reconstruir answeredOrder desde graded ──────────
+    // Ocurre cuando el progreso se restaura desde Firestore pero answeredOrder
+    // quedó incompleto (ej: solo 7 de 138 entradas). graded es la fuente de verdad.
+    // Cualquier índice marcado en graded que no esté ya en answeredOrder se agrega al final.
+    {
+      const _gradedKeys = Object.keys(s.graded || {})
+        .map(k => parseInt(k, 10))
+        .filter(k => !isNaN(k) && s.graded[k] === true);
+
+      if (_gradedKeys.length > 0) {
+        const _idxEnAnswered = new Set(
+          s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx)
+        );
+        const _pregsLocales = preguntasPorSeccion[seccionId] || [];
+        let _huboReparacion = false;
+        _gradedKeys.forEach(idx => {
+          if (!_idxEnAnswered.has(idx) && idx < _pregsLocales.length) {
+            const p = _pregsLocales[idx];
+            const _textoN = (p ? (p.pregunta || '') : '').trim()
+              .replace(/^\d+[.\-\)]\s*/, '').replace(/\s+/g, ' ').toLowerCase();
+            s.answeredOrder.push({ idx, docId: p?._firestoreDocId || null, texto: _textoN });
+            _idxEnAnswered.add(idx);
+            _huboReparacion = true;
+          }
+        });
+        if (_huboReparacion) {
+          console.log('[REPARACIÓN] answeredOrder reconstruido desde graded: '
+            + _gradedKeys.length + ' respondidas → ' + s.answeredOrder.length + ' en answeredOrder');
+          if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+        }
+      }
+    }
+    // ── FIN REPARACIÓN ──────────────────────────────────────────────────────────
 
     // Verificar tipo de sección
     const esSimulacro = seccionId === 'simulador';
