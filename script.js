@@ -1,4 +1,4 @@
-//PRUEBA 12  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 13  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -8292,71 +8292,17 @@ function fbSaveProgressToCloud() {
     console.log('[CONTENT-SYNC] Sección recargada:', seccionId);
   }
 
-// ── Carga incremental: agrega solo preguntas nuevas desde startIdx ──
-  async function _cargarSeccionIncremental(seccionId, startIdx) {
-    if (!window.__firebase_firestore || !_fbDb) return;
-    try {
-      const { collection, getDocs, query, where, orderBy } = window.__firebase_firestore;
-      const itemsRef = collection(_fbDb, 'preguntas', seccionId, 'items');
-      const q = query(itemsRef, where('_idx', '>=', startIdx), orderBy('_idx'));
-      const snap = await getDocs(q);
-      if (snap.empty) {
-        console.log('[CONTENT-SYNC] Incremental: sin documentos nuevos desde idx', startIdx, 'en', seccionId);
-        return;
-      }
+  // _cargarSeccionIncremental eliminada — reemplazada por invalidación de caché
 
-      const nuevas = snap.docs.map(d => {
-        const { _idx, ...pregunta } = d.data();
-        pregunta._firestoreIdx = _idx;
-        return pregunta;
-      });
-
-      // Agregar al array en memoria
-      if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
-      const actuales = window.preguntasPorSeccion[seccionId] || [];
-      window.preguntasPorSeccion[seccionId] = [...actuales, ...nuevas];
-      _seccionesYaCargadas.add(seccionId);
-
-      // Actualizar caché localStorage
-      try {
-        const rawCache = localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId);
-        const cacheActual = rawCache ? JSON.parse(rawCache) : { preguntas: actuales };
-        localStorage.setItem(PREGUNTAS_CACHE_PREFIX + seccionId, JSON.stringify({
-          ts       : Date.now(),
-          preguntas: [...(cacheActual.preguntas || actuales), ...nuevas]
-        }));
-      } catch (_) {}
-
-      // Guardar version conocida de esta sección
-      try {
-        localStorage.setItem(
-          _CONTENT_VERSION_KEY + '_' + seccionId,
-          String(Date.now())
-        );
-      } catch (_) {}
-
-      console.log('[CONTENT-SYNC] Incremental OK:', seccionId,
-        '| +' + nuevas.length + ' preguntas desde idx', startIdx);
-
-      // Si el usuario está viendo esa sección ahora, mostrar toast (no rerenderizar,
-      // las preguntas nuevas aparecerán la próxima vez que entre a la sección)
-      if (currentSection === seccionId) {
-        fbToast('📥 ' + nuevas.length + ' preguntas nuevas añadidas al final', 'info');
-      }
-
-    } catch (e) {
-      console.warn('[CONTENT-SYNC] Error en carga incremental:', e.message);
-    }
-  }
 
 
   // ════════════════════════════════════════════════════════════════
   // CHEQUEO DE VERSIÓN AL ARRANCAR
-  // Cada vez que el usuario abre la app, recarga (F5) o vuelve desde
-  // el celular, compara la versión local de cada sección en caché
-  // contra meta/contentVersion_{seccion} en Firestore.
-  // Si hay diferencia → descarga SOLO las preguntas nuevas (incremental).
-  // Costo: 1 lectura por sección en caché. Siempre. 0 lecturas extra si no hubo cambios.
+  // Compara la versión local de cada sección en caché contra
+  // meta/contentVersion_{seccion} en Firestore.
+  // Si hay diferencia → invalida el caché para que la próxima entrada
+  // descargue todo limpio desde Firestore (sin lógica incremental).
+  // Costo: 1 lectura por sección en caché al arrancar.
   // ════════════════════════════════════════════════════════════════
   async function _chequearVersionesAlArrancar() {
     if (!window.__firebase_firestore || !_fbDb) return;
@@ -8397,61 +8343,15 @@ function fbSaveProgressToCloud() {
         // Hay novedades — ver desde qué índice
         console.log('[VERSION-CHECK] Novedades en', seccionId, '| startIdx:', startIdx);
 
-        if (startIdx !== null) {
-          // ── Descarga incremental: solo las preguntas nuevas ──────
-          const rawCache = localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId);
-          const cacheActual = rawCache ? JSON.parse(rawCache) : null;
-          const preguntasActuales = cacheActual?.preguntas || [];
-
-          // Verificar que realmente nos faltan: si ya tenemos >= startIdx preguntas, saltar
-          const maxIdxLocal = preguntasActuales.reduce((max, p) =>
-            Math.max(max, p._firestoreIdx ?? -1), -1);
-          if (maxIdxLocal >= startIdx && preguntasActuales.length > 0) {
-            console.log('[VERSION-CHECK] Ya tenemos hasta idx', maxIdxLocal, '— marcando versión y saltando');
-            try { localStorage.setItem(_CONTENT_VERSION_KEY + '_' + seccionId, String(version)); } catch (_) {}
-            continue;
-          }
-
-          // Descargar solo desde startIdx en adelante
-          const itemsRef = collection(_fbDb, 'preguntas', seccionId, 'items');
-          const q = query(itemsRef, where('_idx', '>=', startIdx), orderBy('_idx'));
-          const nuevasSnap = await getDocs(q);
-
-          if (nuevasSnap.empty) {
-            console.log('[VERSION-CHECK] Incremental: sin docs nuevos en', seccionId);
-          } else {
-            const nuevas = nuevasSnap.docs.map(d => {
-              const { _idx, ...pregunta } = d.data();
-              pregunta._firestoreIdx = _idx;
-              return pregunta;
-            });
-
-            // Actualizar caché localStorage con las nuevas preguntas agregadas
-            const preguntasActualizadas = [...preguntasActuales, ...nuevas];
-            try {
-              localStorage.setItem(PREGUNTAS_CACHE_PREFIX + seccionId, JSON.stringify({
-                ts: Date.now(),
-                preguntas: preguntasActualizadas
-              }));
-            } catch (_) {}
-
-            // Si ya estaba cargada en memoria, actualizar también
-            if (window.preguntasPorSeccion?.[seccionId]) {
-              window.preguntasPorSeccion[seccionId] = preguntasActualizadas;
-            }
-
-            console.log('[VERSION-CHECK] +' + nuevas.length + ' preguntas nuevas en', seccionId);
-          }
-        } else {
-          // startIdx null = edición de pregunta existente, no subida nueva
-          // Invalidar caché para que la próxima entrada descargue fresco
-          try {
-            localStorage.removeItem(PREGUNTAS_CACHE_PREFIX + seccionId);
-            if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
-            _seccionesYaCargadas.delete(seccionId);
-          } catch (_) {}
-          console.log('[VERSION-CHECK] Edición detectada en', seccionId, '— caché invalidado');
-        }
+        // Hay novedades (subida nueva O edición): siempre invalidar caché.
+        // La carga incremental causaba acumulación de preguntas repetidas en cada recarga.
+        // Al invalidar, la próxima entrada a la sección baja todo limpio desde Firestore.
+        try {
+          localStorage.removeItem(PREGUNTAS_CACHE_PREFIX + seccionId);
+          if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+          _seccionesYaCargadas.delete(seccionId);
+        } catch (_) {}
+        console.log('[VERSION-CHECK] Cambio detectado en', seccionId, '— caché invalidado, se descargaá fresco al próximo acceso');
 
         // Guardar versión conocida para no volver a chequear hasta la próxima subida
         try { localStorage.setItem(_CONTENT_VERSION_KEY + '_' + seccionId, String(version)); } catch (_) {}
