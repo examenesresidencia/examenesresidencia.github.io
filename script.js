@@ -1036,7 +1036,7 @@
     // FIX: verificar cada índice individualmente para no re-insertar preguntas ya respondidas
     // (que vienen en answeredOrder o graded) cuando unansweredOrder llega vacío desde la nube.
     {
-      const answeredSet   = new Set(state[seccionId].answeredOrder || []);
+      const answeredSet   = new Set((state[seccionId].answeredOrder || []).map(e => typeof e === 'number' ? e : e.idx));      
       const gradedSet     = new Set(Object.keys(state[seccionId].graded || {}).map(Number));
       const unansweredSet = new Set(state[seccionId].unansweredOrder || []);
       let huboNuevas = false;
