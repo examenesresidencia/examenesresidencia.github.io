@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V13
+// editor-admin.js  — V14
 // ────────────────────────────────────────────────────────────────
 
 
@@ -1245,33 +1245,52 @@
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
 
         // ── Parche quirúrgico: actualizar SOLO esa pregunta en el caché local ──
-        // No borra ni recarga toda la sección. 0 lecturas de Firestore para el admin.
+        // El caché del admin es el fb_q_cache_{seccionId} (mismo formato que los usuarios).
+        // Si existe → parcharlo. Si no existe → no hacer nada (se construirá la próxima
+        // vez que se entre a la sección, ya con la versión editada de Firestore).
+        let _cacheParcheado = false;
         try {
           const _ck  = 'fb_q_cache_' + seccionId;
           const _raw = localStorage.getItem(_ck);
           if (_raw) {
             const _c = JSON.parse(_raw);
-            if (_c?.preguntas?.[qIndex]) {
+            if (Array.isArray(_c?.preguntas) && _c.preguntas[qIndex]) {
               _c.preguntas[qIndex].pregunta    = nuevaPreg;
               _c.preguntas[qIndex].opciones    = nuevasOpciones;
               _c.preguntas[qIndex].correcta    = nuevaCorrecta;
               _c.preguntas[qIndex].explicacion = nuevaExpl;
               _c.ts = Date.now(); // renovar vigencia 24hs
               localStorage.setItem(_ck, JSON.stringify(_c));
-              console.log('[EDITOR] Caché local parcheado → sección:', seccionId, '| qIndex:', qIndex);
+              _cacheParcheado = true;
+              console.log('[EDITOR] Caché admin parcheado OK → sección:', seccionId, '| qIndex:', qIndex);
+            } else {
+              // Índice no encontrado en el caché: invalidar para forzar recarga limpia
+              localStorage.removeItem(_ck);
+              console.warn('[EDITOR] qIndex no encontrado en caché, invalidado:', seccionId, qIndex);
             }
+          } else {
+            // Sin caché: no hacer nada. La próxima entrada a la sección cargará
+            // desde Firestore donde ya está la versión editada.
+            console.log('[EDITOR] Sin caché para', seccionId, '— se cargará desde Firestore al próximo acceso');
           }
         } catch (_) {
           try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_2) {}
         }
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
 
-        // ── Notificación DIFERIDA: NO notifica usuarios en tiempo real ──
-        // Los usuarios reciben los cambios solo cuando el admin presione
-        // "Forzar actualización". El botón agrupa todas las ediciones en
-        // 1 sola escritura → ceil(N/30) lecturas por usuario, 1 re-renderización.
-        if (typeof window._registrarEdicionPendiente === 'function') {
-          window._registrarEdicionPendiente(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null);
+        // ── Notificación INMEDIATA: propaga la edición a todos los usuarios en tiempo real ──
+        // Los datos de la pregunta viajan embebidos en meta/contentVersion → el cliente
+        // los aplica directamente (0 lecturas extra a Firestore) y actualiza el DOM al instante.
+        if (typeof window._bumpContentVersion === 'function') {
+          window._bumpContentVersion(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null, {
+            esEdicionPuntual: true,
+            preguntaData: {
+              pregunta   : nuevaPreg,
+              opciones   : nuevasOpciones,
+              correcta   : nuevaCorrecta,
+              explicacion: nuevaExpl,
+            }
+          });
         }
 
         // Guardar la posición de scroll ANTES de desbloquear
@@ -1313,8 +1332,12 @@
           }
         }
 
-        if (typeof window.cargarSeccion === 'function')       await window.cargarSeccion(seccionId);
-        if (typeof window.generarCuestionario === 'function')  window.generarCuestionario(seccionId);
+        // Si el caché fue parcheado: no releer Firestore, solo re-renderizar desde memoria.
+        // Si fue invalidado (índice no encontrado): recargar desde Firestore (caso raro).
+        if (!_cacheParcheado && typeof window.cargarSeccion === 'function') {
+          await window.cargarSeccion(seccionId);
+        }
+        if (typeof window.generarCuestionario === 'function') window.generarCuestionario(seccionId);
 
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
