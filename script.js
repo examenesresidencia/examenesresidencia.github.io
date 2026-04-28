@@ -1,4 +1,4 @@
-//PRUEBA 11  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 12  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -647,23 +647,7 @@
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
         // Filtrar clones extrapolados que pudieran haberse guardado en caché en sesiones
         // anteriores. Los clones se identifican por tener _origenExamen definido.
-        // Así la extrapolación siempre parte de datos limpios y no acumula duplicados.
-        let preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
-
-        // Deduplicar por enunciado: aplica a exámenes Único/UBA Y a especialidades destino.
-        // En especialidades destino elimina duplicados nativos que pudieran haberse acumulado.
-        {
-          const vistos = new Set();
-          const antes = preguntasLimpias.length;
-          preguntasLimpias = preguntasLimpias.filter(p => {
-            const key = (p.pregunta || '').trim();
-            if (vistos.has(key)) return false;
-            vistos.add(key);
-            return true;
-          });
-          if (preguntasLimpias.length < antes)
-            console.log('🔁 Dedup caché [' + seccionId + ']: ' + antes + ' → ' + preguntasLimpias.length + ' preguntas');
-        }
+        const preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
 
         window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
@@ -705,21 +689,6 @@
               pregunta._firestoreDocId = d.id; // ID único del documento — ancla primaria para progreso
               return pregunta;
             });
-
-            // Deduplicar por enunciado: aplica a exámenes Único/UBA Y a especialidades destino.
-            // En especialidades destino elimina duplicados nativos que pudieran existir en Firestore.
-            {
-              const vistos = new Set();
-              const antes = preguntas.length;
-              preguntas = preguntas.filter(p => {
-                const key = (p.pregunta || '').trim();
-                if (vistos.has(key)) return false;
-                vistos.add(key);
-                return true;
-              });
-              if (preguntas.length < antes)
-                console.log('🔁 Dedup Firestore [' + seccionId + ']: ' + antes + ' → ' + preguntas.length + ' preguntas');
-            }
 
             if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
             window.preguntasPorSeccion[seccionId] = preguntas;
