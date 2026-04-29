@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V15
+// editor-admin.js  — V16
 // ────────────────────────────────────────────────────────────────
 
 
@@ -1270,8 +1270,18 @@
         // Los usuarios reciben los cambios solo cuando el admin presione
         // "Forzar actualización". El botón agrupa todas las ediciones en
         // 1 sola escritura → ceil(N/30) lecturas por usuario, 1 re-renderización.
-        if (typeof window._registrarEdicionPendiente === 'function') {
-          window._registrarEdicionPendiente(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null);
+        // Notificación INMEDIATA: los datos viajan embebidos en el snapshot →
+        // el cliente los aplica directamente al DOM (0 lecturas extra a Firestore).
+        if (typeof window._bumpContentVersion === 'function') {
+          window._bumpContentVersion(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null, {
+            esEdicionPuntual: true,
+            preguntaData: {
+              pregunta   : nuevaPreg,
+              opciones   : nuevasOpciones,
+              correcta   : nuevaCorrecta,
+              explicacion: nuevaExpl,
+            }
+          });
         }
 
         // Guardar la posición de scroll ANTES de desbloquear
