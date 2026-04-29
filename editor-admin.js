@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V16
+// editor-admin.js  — V17
 // ────────────────────────────────────────────────────────────────
 
 
@@ -770,17 +770,29 @@
     // ── Acumular fragmento al hacer mouseup con Ctrl ───────────────
     editor.addEventListener('mouseup', function(e) {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return; // sin selección real
 
       if (!_ctrlPresionado) {
-        // Sin Ctrl y sin selección real (simple click): limpiar highlights
-        if (_multiFragmentos.length > 0 && (!sel || sel.isCollapsed)) {
+        // Sin Ctrl y sin selección real (simple click): limpiar highlights SIEMPRE
+        if (!sel || sel.isCollapsed) {
           _meqLimpiarHighlights(editor);
           _multiFragmentos = [];
           _ultimoComando   = null;
+          return;
+        }
+        // Sin Ctrl pero CON selección: guardar el rango para que los botones
+        // B/I/U puedan aplicar el formato directamente sin necesitar Ctrl.
+        // El texto queda visualmente seleccionado; no se crea highlight.
+        if (sel.rangeCount > 0) {
+          const r = sel.getRangeAt(0);
+          if (editor.contains(r.commonAncestorContainer)) {
+            _savedRange = r.cloneRange();
+            savedRangeRef.current = _savedRange;
+          }
         }
         return;
       }
+
+      if (!sel || sel.isCollapsed) return; // con Ctrl pero sin selección real
 
       // Con Ctrl: capturar el rango actual y envolverlo en un span de highlight
       if (sel.rangeCount === 0) return;
