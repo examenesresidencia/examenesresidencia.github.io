@@ -719,8 +719,9 @@
                   console.log('✏️ Ediciones admin cargadas y cacheadas:', seccionId, '→', ediciones.length);
               }
 
+              // ed.qIndex es base 1 (Firestore) → convertir a base 0 para el array interno
               ediciones.forEach(ed => {
-                const idx = ed.qIndex;
+                const idx = ed.qIndex - 1;
                 if (!preguntas[idx]) return;
                 if (ed.pregunta    !== undefined) preguntas[idx].pregunta    = ed.pregunta;
                 if (ed.opciones    !== undefined) {
@@ -2169,51 +2170,10 @@
       // Usar el orden persistido — filtrar índices que ya fueron respondidos
       const unansweredSet = new Set(unanswered);
       const ordenFiltrado = s.unansweredOrder.filter(i => unansweredSet.has(i));
-
-      // ── SANITIZACIÓN: eliminar duplicados por texto normalizado ──────────────
-      // Puede ocurrir cuando una edición del admin desincronizó el array en memoria
-      // transitoriamente y un índice fantasma quedó grabado en unansweredOrder.
-      // Si dos índices tienen exactamente el mismo enunciado normalizado, conservar
-      // solo el que tiene el docId más reciente (o el de menor índice como fallback).
-      const _textosVistos = new Map(); // texto → índice ya aceptado
-      const ordenSaneado = [];
-      for (const i of ordenFiltrado) {
-        const p = preguntas[i];
-        if (!p) continue; // índice fuera de rango
-        const textoN = _normTexto(p.pregunta);
-        if (_textosVistos.has(textoN)) {
-          // Duplicado por texto: conservar el que tiene docId (más confiable) o el menor índice
-          const iAnterior = _textosVistos.get(textoN);
-          const pAnterior = preguntas[iAnterior];
-          const preferirNuevo = p._firestoreDocId && !pAnterior?._firestoreDocId;
-          if (preferirNuevo) {
-            // Reemplazar el anterior por el actual
-            ordenSaneado.splice(ordenSaneado.indexOf(iAnterior), 1, i);
-            _textosVistos.set(textoN, i);
-          }
-          // Si no, simplemente descartar el actual (el anterior ya está en ordenSaneado)
-          console.warn('[DEDUP] Índice fantasma eliminado de unansweredOrder:', i,
-            '| texto:', textoN.slice(0, 60));
-          continue;
-        }
-        _textosVistos.set(textoN, i);
-        ordenSaneado.push(i);
-      }
-
       // Agregar al final cualquier pregunta nueva (añadida por el admin después del inicio del intento)
-      // que no haya quedado en ordenSaneado ni tenga texto duplicado
-      const enOrden = new Set(ordenSaneado);
-      unanswered.forEach(i => {
-        if (enOrden.has(i)) return;
-        const p = preguntas[i];
-        if (!p) return;
-        const textoN = _normTexto(p.pregunta);
-        if (_textosVistos.has(textoN)) return; // evitar agregar duplicado nuevo
-        ordenSaneado.push(i);
-        enOrden.add(i);
-        _textosVistos.set(textoN, i);
-      });
-      shuffledUnanswered = ordenSaneado;
+      const enOrden = new Set(ordenFiltrado);
+      unanswered.forEach(i => { if (!enOrden.has(i)) ordenFiltrado.push(i); });
+      shuffledUnanswered = ordenFiltrado;
       // Actualizar el orden persistido si cambió (respondidas eliminadas o nuevas añadidas)
       if (JSON.stringify(shuffledUnanswered) !== JSON.stringify(s.unansweredOrder)) {
         s.unansweredOrder = shuffledUnanswered.slice();
@@ -5357,8 +5317,8 @@
     if (window.__fb && _currentUser) {
       try {
         const { doc, setDoc, serverTimestamp } = window.__fb;
-        await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex}`), {
-          seccionId, qIndex,
+        await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`), {
+          seccionId, qIndex: qIndex + 1,
           explicacion: nuevaExplicacion,
           updatedAt  : serverTimestamp(),
           updatedBy  : _currentUser.uid
@@ -8066,8 +8026,8 @@ function fbSaveProgressToCloud() {
             savingSpan.style.display = 'inline';
             try {
               const { doc, setDoc, serverTimestamp } = window.__fb;
-              await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex}`), {
-                seccionId, qIndex,
+              await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`), {
+                seccionId, qIndex: qIndex + 1,
                 correcta  : preg.correcta,
                 updatedAt : serverTimestamp(),
                 updatedBy : _currentUser.uid
@@ -8178,19 +8138,15 @@ function fbSaveProgressToCloud() {
         ? 'contentVersion_' + seccionId
         : 'contentVersion';
       await setDoc(doc(_fbDb, 'meta', docId), {
-        version         : Date.now(),
+        version      : Date.now(),
         seccionId,
-        qIndex          : qIndex ?? null,
-        nuevaCorrecta   : nuevaCorrecta ?? null,
-        startIdx        : opciones.startIdx        ?? null,  // null = edición normal, número = subida nueva
-        esEdicionPuntual: opciones.esEdicionPuntual ?? false, // true = los datos viajan embebidos (0 lecturas extra)
-        preguntaData    : opciones.preguntaData     ?? null,  // { pregunta, opciones, correcta, explicacion }
-        updatedAt       : serverTimestamp()
+        qIndex       : qIndex ?? null,
+        nuevaCorrecta: nuevaCorrecta ?? null,
+        startIdx     : opciones.startIdx ?? null, // null = edición normal, número = subida nueva
+        updatedAt    : serverTimestamp()
       });
       console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId,
-        esSubidaNueva ? '| subida incremental desde idx:' + opciones.startIdx
-                      : opciones.esEdicionPuntual ? '| edición puntual embebida qIndex:' + qIndex
-                                                  : '| edición');
+        esSubidaNueva ? '| subida incremental desde idx:' + opciones.startIdx : '| edición');
     } catch (e) {
       console.warn('[CONTENT-SYNC] Error al actualizar versión:', e.message);
     }
@@ -8461,36 +8417,30 @@ function fbSaveProgressToCloud() {
     return chunks;
   }
 
-  async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, datosEmbebidos = null) {
+  async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas) {
     if (!window.__fb || !_fbDb) return;
     // Normalizar: aceptar un solo qIndex (número) o un array
     const indices = Array.isArray(qIndexes) ? qIndexes : [qIndexes];
     if (indices.length === 0) return;
 
     try {
-      let edicionesDescargadas = [];
+      const { collection, query, where, getDocs } = window.__fb;
 
-      // ── Camino rápido: datos embebidos en el snapshot (0 lecturas a Firestore) ──
-      // Solo disponible cuando el admin edita 1 sola pregunta (edición puntual estándar).
-      if (datosEmbebidos !== null && indices.length === 1) {
-        edicionesDescargadas = [{ qIndex: indices[0], ...datosEmbebidos }];
-        console.log('[EDIT-PATCH] Usando datos embebidos → sin lecturas a Firestore');
-      } else {
-        // ── Camino estándar: descargar desde Firestore ──
-        const { collection, query, where, getDocs } = window.__fb;
+      // Partir en lotes de 30 (límite de whereIn en Firestore)
+      const lotes = _chunkArray(indices, 30);
+      const edicionesDescargadas = [];
 
-        // Partir en lotes de 30 (límite de whereIn en Firestore)
-        const lotes = _chunkArray(indices, 30);
-
-        for (const lote of lotes) {
-          const q = query(
-            collection(_fbDb, 'questions'),
-            where('seccionId', '==', seccionId),
-            where('qIndex', 'in', lote)
-          );
-          const snap = await getDocs(q);
-          snap.forEach(d => edicionesDescargadas.push(d.data()));
-        }
+      for (const lote of lotes) {
+        // Convertir índices base 0 (array interno) a base 1 (Firestore)
+        const loteBase1 = lote.map(i => i + 1);
+        // 1 sola consulta por lote de hasta 30 preguntas
+        const q = query(
+          collection(_fbDb, 'questions'),
+          where('seccionId', '==', seccionId),
+          where('qIndex', 'in', loteBase1)
+        );
+        const snap = await getDocs(q);
+        snap.forEach(d => edicionesDescargadas.push(d.data()));
       }
 
       if (edicionesDescargadas.length === 0) {
@@ -8499,8 +8449,9 @@ function fbSaveProgressToCloud() {
       }
 
       // Parchar en memoria (array ya cargado en window.preguntasPorSeccion)
+      // ed.qIndex viene en base 1 (Firestore) → convertir a base 0 para el array interno
       edicionesDescargadas.forEach(ed => {
-        const idx = ed.qIndex;
+        const idx = ed.qIndex - 1;
         if (window.preguntasPorSeccion?.[seccionId]?.[idx]) {
           const p = window.preguntasPorSeccion[seccionId][idx];
           if (ed.pregunta    !== undefined) p.pregunta    = ed.pregunta;
@@ -8512,6 +8463,7 @@ function fbSaveProgressToCloud() {
       });
 
       // Parchar en caché localStorage — sin borrar ni recargar toda la sección
+      // ed.qIndex es base 1 (Firestore) → convertir a base 0 para el array del caché
       try {
         const cacheKey = PREGUNTAS_CACHE_PREFIX + seccionId;
         const raw = localStorage.getItem(cacheKey);
@@ -8519,7 +8471,7 @@ function fbSaveProgressToCloud() {
           const cached = JSON.parse(raw);
           if (cached?.preguntas) {
             edicionesDescargadas.forEach(ed => {
-              const idx = ed.qIndex;
+              const idx = ed.qIndex - 1;
               if (!cached.preguntas[idx]) return;
               if (ed.pregunta    !== undefined) cached.preguntas[idx].pregunta    = ed.pregunta;
               if (ed.opciones    !== undefined) cached.preguntas[idx].opciones    = ed.opciones;
@@ -8550,7 +8502,7 @@ function fbSaveProgressToCloud() {
         }
       }
 
-      const numLecturas = datosEmbebidos !== null ? 0 : Math.ceil(indices.length / 30);
+      const numLecturas = Math.ceil(indices.length / 30);
       console.log(
         `[EDIT-PATCH] ✅ ${edicionesDescargadas.length} pregunta(s) parcheada(s) en "${seccionId}"`,
         `| ${numLecturas} consulta(s) a Firestore | 1 re-renderización`
@@ -8611,14 +8563,12 @@ function fbSaveProgressToCloud() {
           const esEdicionPuntual = data.esEdicionPuntual === true;
           const qIndexes        = data.qIndexes ?? (qIndex !== null && qIndex !== undefined ? [qIndex] : []);
           const nuevasCorrectas = data.nuevasCorrectas ?? [];
-          const preguntaData    = data.preguntaData ?? null; // datos embebidos (0 lecturas extra)
           if (!seccionId) return;
           if (esEdicionPuntual && qIndexes.length > 0) {
-            // ✅ EFICIENTE: si los datos vienen embebidos, cero lecturas extra a Firestore
-            const datosEmbebidos = (preguntaData !== null && qIndexes.length === 1) ? preguntaData : null;
-            console.log(`[CONTENT-SYNC] ${motivo} → parche: ${qIndexes.length} pregunta(s) en "${seccionId}"` +
-              (datosEmbebidos ? ' | datos embebidos (0 lecturas)' : ` | consultas: ${Math.ceil(qIndexes.length / 30)}`));
-            _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, datosEmbebidos);
+            // ✅ EFICIENTE: descarga solo las N preguntas editadas
+            // ceil(N/30) consultas a Firestore, 1 sola re-renderización
+            console.log(`[CONTENT-SYNC] ${motivo} → parche batch: ${qIndexes.length} pregunta(s) en "${seccionId}" | consultas: ${Math.ceil(qIndexes.length / 30)}`);
+            _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas);
           } else {
             // Forzado global o subida masiva → recargar sección completa
             console.log(`[CONTENT-SYNC] ${motivo} → forzado global: recargando "${seccionId}"`);
