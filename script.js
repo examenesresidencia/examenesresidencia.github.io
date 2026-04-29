@@ -1,4 +1,4 @@
-//PRUEBA 15  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 16  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -8131,22 +8131,26 @@ function fbSaveProgressToCloud() {
     if (!window.__fb || !_fbDb) return;
     try {
       const { doc, setDoc, serverTimestamp } = window.__fb;
-      // Si vienen preguntas nuevas, escribir en documento propio de la sección
-      // meta/contentVersion_{seccionId} — así múltiples subidas no se pisan entre sí
-      const esSubidaNueva = opciones.startIdx !== undefined && opciones.startIdx !== null;
+      const esSubidaNueva    = opciones.startIdx !== undefined && opciones.startIdx !== null;
+      const esEdicionPuntual = opciones.esEdicionPuntual === true;
       const docId = esSubidaNueva
         ? 'contentVersion_' + seccionId
         : 'contentVersion';
       await setDoc(doc(_fbDb, 'meta', docId), {
-        version      : Date.now(),
+        version         : Date.now(),
         seccionId,
-        qIndex       : qIndex ?? null,
-        nuevaCorrecta: nuevaCorrecta ?? null,
-        startIdx     : opciones.startIdx ?? null, // null = edición normal, número = subida nueva
-        updatedAt    : serverTimestamp()
+        qIndex          : qIndex ?? null,
+        nuevaCorrecta   : nuevaCorrecta ?? null,
+        startIdx        : opciones.startIdx ?? null,
+        esEdicionPuntual: esEdicionPuntual,
+        // Datos embebidos: el cliente los aplica directamente (0 lecturas extra a Firestore)
+        preguntaData    : opciones.preguntaData ?? null,
+        updatedAt       : serverTimestamp()
       });
       console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId,
-        esSubidaNueva ? '| subida incremental desde idx:' + opciones.startIdx : '| edición');
+        esSubidaNueva    ? '| subida incremental desde idx:' + opciones.startIdx :
+        esEdicionPuntual ? '| edición puntual embebida (0 lecturas en clientes)' :
+                           '| edición');
     } catch (e) {
       console.warn('[CONTENT-SYNC] Error al actualizar versión:', e.message);
     }
@@ -8417,39 +8421,92 @@ function fbSaveProgressToCloud() {
     return chunks;
   }
 
-  async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas) {
-    if (!window.__fb || !_fbDb) return;
-    // Normalizar: aceptar un solo qIndex (número) o un array
+  // Update quirúrgico: toca solo los nodos DOM de la pregunta editada.
+  // No re-renderiza el cuestionario completo — preserva scroll, selecciones y explicaciones abiertas.
+  function _updatePreguntaEnDOM(seccionId, qIndex, ed) {
+    const puntajeEl = document.getElementById(`puntaje-${seccionId}-${qIndex}`);
+    if (!puntajeEl) return; // la pregunta no está visible en pantalla
+
+    const pregDiv = puntajeEl.closest('.pregunta');
+    if (!pregDiv) return;
+
+    // 1. Enunciado
+    if (ed.pregunta !== undefined) {
+      const enunciadoEl = pregDiv.querySelector('.enunciado-texto, .pregunta-texto, p.enunciado');
+      if (enunciadoEl) enunciadoEl.textContent = ed.pregunta;
+    }
+
+    // 2. Opciones — solo si la pregunta no fue respondida aún
+    const sState = state[seccionId];
+    const yaRespondida = sState?.graded?.[qIndex];
+    if (!yaRespondida && ed.opciones !== undefined) {
+      const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${qIndex}`));
+      inputs.forEach((inp, i) => {
+        const label = inp.closest('label') || inp.parentElement;
+        if (!label) return;
+        const textoEl = label.querySelector('.opcion-texto') || label.querySelector('span:last-child');
+        if (textoEl && ed.opciones[i] !== undefined) textoEl.textContent = ed.opciones[i];
+      });
+    }
+
+    // 3. Explicación — solo si está abierta en este momento
+    if (ed.explicacion !== undefined) {
+      const explContainer = pregDiv.querySelector('.explicacion-contenedor');
+      if (explContainer && explContainer.style.display !== 'none') {
+        explContainer.innerHTML = ed.explicacion;
+        if (typeof window.fbInjectVacunasButtonIfAdmin === 'function') {
+          window.fbInjectVacunasButtonIfAdmin(seccionId, explContainer);
+        }
+      }
+    }
+
+    // 4. Destello sutil de borde celeste para que el usuario note el cambio
+    pregDiv.style.transition  = 'box-shadow 0.4s ease, border-color 0.4s ease';
+    pregDiv.style.boxShadow   = '0 0 0 2px rgba(56,189,248,0.55)';
+    pregDiv.style.borderColor = 'rgba(56,189,248,0.45)';
+    setTimeout(() => {
+      pregDiv.style.boxShadow   = '';
+      pregDiv.style.borderColor = '';
+    }, 1800);
+  }
+
+  async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, datosEmbebidos = null) {
+    if (!_fbDb) return;
     const indices = Array.isArray(qIndexes) ? qIndexes : [qIndexes];
     if (indices.length === 0) return;
 
     try {
-      const { collection, query, where, getDocs } = window.__fb;
+      let edicionesDescargadas = [];
 
-      // Partir en lotes de 30 (límite de whereIn en Firestore)
-      const lotes = _chunkArray(indices, 30);
-      const edicionesDescargadas = [];
-
-      for (const lote of lotes) {
-        // Convertir índices base 0 (array interno) a base 1 (Firestore)
-        const loteBase1 = lote.map(i => i + 1);
-        // 1 sola consulta por lote de hasta 30 preguntas
-        const q = query(
-          collection(_fbDb, 'questions'),
-          where('seccionId', '==', seccionId),
-          where('qIndex', 'in', loteBase1)
-        );
-        const snap = await getDocs(q);
-        snap.forEach(d => edicionesDescargadas.push(d.data()));
+      // ── CAMINO RÁPIDO: datos embebidos en el snapshot (0 lecturas a Firestore) ──
+      // El admin guarda → los datos viajan dentro del propio meta/contentVersion
+      // → el cliente los aplica directamente al DOM en < 1 segundo.
+      if (datosEmbebidos && indices.length === 1) {
+        edicionesDescargadas = [{ qIndex: indices[0] + 1, ...datosEmbebidos }];
+        console.log('[EDIT-PATCH] Usando datos embebidos del snapshot (0 lecturas a Firestore)');
+      } else {
+        // ── CAMINO NORMAL: descargar desde Firestore (botón Forzar actualización) ──
+        if (!window.__fb) return;
+        const { collection, query, where, getDocs } = window.__fb;
+        const lotes = _chunkArray(indices, 30);
+        for (const lote of lotes) {
+          const loteBase1 = lote.map(i => i + 1);
+          const q = query(
+            collection(_fbDb, 'questions'),
+            where('seccionId', '==', seccionId),
+            where('qIndex', 'in', loteBase1)
+          );
+          const snap = await getDocs(q);
+          snap.forEach(d => edicionesDescargadas.push(d.data()));
+        }
       }
 
       if (edicionesDescargadas.length === 0) {
-        console.warn('[EDIT-PATCH] Ningún documento encontrado para', seccionId, indices);
+        console.warn('[EDIT-PATCH] Ningún dato encontrado para', seccionId, indices);
         return;
       }
 
-      // Parchar en memoria (array ya cargado en window.preguntasPorSeccion)
-      // ed.qIndex viene en base 1 (Firestore) → convertir a base 0 para el array interno
+      // ── Parchar en memoria (ed.qIndex base 1 → array base 0) ──
       edicionesDescargadas.forEach(ed => {
         const idx = ed.qIndex - 1;
         if (window.preguntasPorSeccion?.[seccionId]?.[idx]) {
@@ -8462,8 +8519,7 @@ function fbSaveProgressToCloud() {
         }
       });
 
-      // Parchar en caché localStorage — sin borrar ni recargar toda la sección
-      // ed.qIndex es base 1 (Firestore) → convertir a base 0 para el array del caché
+      // ── Parchar en caché localStorage (ed.qIndex base 1 → array base 0) ──
       try {
         const cacheKey = PREGUNTAS_CACHE_PREFIX + seccionId;
         const raw = localStorage.getItem(cacheKey);
@@ -8479,37 +8535,44 @@ function fbSaveProgressToCloud() {
               if (ed.explicacion !== undefined) cached.preguntas[idx].explicacion = ed.explicacion;
               if (ed.imagen      !== undefined) cached.preguntas[idx].imagen      = ed.imagen;
             });
-            cached.ts = Date.now(); // renovar vigencia 24hs desde ahora
+            cached.ts = Date.now();
             localStorage.setItem(cacheKey, JSON.stringify(cached));
           }
         }
         localStorage.removeItem('fb_edits_cache_' + seccionId);
       } catch (_) {}
 
-      // Recalificar preguntas cuya respuesta correcta cambió
+      // ── Recalificar si cambió la respuesta correcta ──
       if (Array.isArray(nuevasCorrectas)) {
         nuevasCorrectas.forEach(({ qIndex, correcta }) => {
-          if (correcta && Array.isArray(correcta)) {
-            _recalificarPregunta(seccionId, qIndex, correcta);
-          }
+          if (correcta && Array.isArray(correcta)) _recalificarPregunta(seccionId, qIndex, correcta);
         });
       }
 
-      // Re-renderizar UNA SOLA VEZ si la sección está visible
+      // ── Actualizar el DOM ──
       if (currentSection === seccionId) {
-        if (typeof window.generarCuestionario === 'function') {
-          window.generarCuestionario(seccionId);
+        if (datosEmbebidos && indices.length === 1) {
+          // Update quirúrgico: solo los nodos de esa pregunta.
+          // El usuario no pierde scroll ni selecciones en curso.
+          _updatePreguntaEnDOM(seccionId, indices[0], edicionesDescargadas[0]);
+          if (typeof fbToast === 'function') fbToast('✏️ Pregunta actualizada por el admin', 'info');
+        } else {
+          // Lote: re-renderizar una sola vez
+          if (typeof window.generarCuestionario === 'function') {
+            window.generarCuestionario(seccionId);
+          }
         }
+      } else {
+        if (typeof fbToast === 'function') fbToast(`✏️ Se actualizó una pregunta de ${seccionId}`, 'info');
       }
 
-      const numLecturas = Math.ceil(indices.length / 30);
-      console.log(
-        `[EDIT-PATCH] ✅ ${edicionesDescargadas.length} pregunta(s) parcheada(s) en "${seccionId}"`,
-        `| ${numLecturas} consulta(s) a Firestore | 1 re-renderización`
-      );
+      const via = datosEmbebidos
+        ? '0 lecturas (datos embebidos)'
+        : Math.ceil(indices.length / 30) + ' consulta(s) a Firestore';
+      console.log(`[EDIT-PATCH] ✅ ${edicionesDescargadas.length} pregunta(s) parcheada(s) en "${seccionId}" | ${via}`);
 
     } catch (e) {
-      console.warn('[EDIT-PATCH] Error en parche batch, fallback a recarga completa:', e.message);
+      console.warn('[EDIT-PATCH] Error en parche, fallback a recarga completa:', e.message);
       _invalidarYRecargarSeccion(seccionId, null, null);
     }
   }
@@ -8563,12 +8626,14 @@ function fbSaveProgressToCloud() {
           const esEdicionPuntual = data.esEdicionPuntual === true;
           const qIndexes        = data.qIndexes ?? (qIndex !== null && qIndex !== undefined ? [qIndex] : []);
           const nuevasCorrectas = data.nuevasCorrectas ?? [];
+          // Datos embebidos: viajan dentro del snapshot, 0 lecturas extra a Firestore
+          const preguntaData    = data.preguntaData ?? null;
           if (!seccionId) return;
           if (esEdicionPuntual && qIndexes.length > 0) {
             // ✅ EFICIENTE: descarga solo las N preguntas editadas
             // ceil(N/30) consultas a Firestore, 1 sola re-renderización
             console.log(`[CONTENT-SYNC] ${motivo} → parche batch: ${qIndexes.length} pregunta(s) en "${seccionId}" | consultas: ${Math.ceil(qIndexes.length / 30)}`);
-            _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas);
+            _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, preguntaData);
           } else {
             // Forzado global o subida masiva → recargar sección completa
             console.log(`[CONTENT-SYNC] ${motivo} → forzado global: recargando "${seccionId}"`);
