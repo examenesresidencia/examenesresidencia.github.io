@@ -2169,10 +2169,51 @@
       // Usar el orden persistido — filtrar índices que ya fueron respondidos
       const unansweredSet = new Set(unanswered);
       const ordenFiltrado = s.unansweredOrder.filter(i => unansweredSet.has(i));
+
+      // ── SANITIZACIÓN: eliminar duplicados por texto normalizado ──────────────
+      // Puede ocurrir cuando una edición del admin desincronizó el array en memoria
+      // transitoriamente y un índice fantasma quedó grabado en unansweredOrder.
+      // Si dos índices tienen exactamente el mismo enunciado normalizado, conservar
+      // solo el que tiene el docId más reciente (o el de menor índice como fallback).
+      const _textosVistos = new Map(); // texto → índice ya aceptado
+      const ordenSaneado = [];
+      for (const i of ordenFiltrado) {
+        const p = preguntas[i];
+        if (!p) continue; // índice fuera de rango
+        const textoN = _normTexto(p.pregunta);
+        if (_textosVistos.has(textoN)) {
+          // Duplicado por texto: conservar el que tiene docId (más confiable) o el menor índice
+          const iAnterior = _textosVistos.get(textoN);
+          const pAnterior = preguntas[iAnterior];
+          const preferirNuevo = p._firestoreDocId && !pAnterior?._firestoreDocId;
+          if (preferirNuevo) {
+            // Reemplazar el anterior por el actual
+            ordenSaneado.splice(ordenSaneado.indexOf(iAnterior), 1, i);
+            _textosVistos.set(textoN, i);
+          }
+          // Si no, simplemente descartar el actual (el anterior ya está en ordenSaneado)
+          console.warn('[DEDUP] Índice fantasma eliminado de unansweredOrder:', i,
+            '| texto:', textoN.slice(0, 60));
+          continue;
+        }
+        _textosVistos.set(textoN, i);
+        ordenSaneado.push(i);
+      }
+
       // Agregar al final cualquier pregunta nueva (añadida por el admin después del inicio del intento)
-      const enOrden = new Set(ordenFiltrado);
-      unanswered.forEach(i => { if (!enOrden.has(i)) ordenFiltrado.push(i); });
-      shuffledUnanswered = ordenFiltrado;
+      // que no haya quedado en ordenSaneado ni tenga texto duplicado
+      const enOrden = new Set(ordenSaneado);
+      unanswered.forEach(i => {
+        if (enOrden.has(i)) return;
+        const p = preguntas[i];
+        if (!p) return;
+        const textoN = _normTexto(p.pregunta);
+        if (_textosVistos.has(textoN)) return; // evitar agregar duplicado nuevo
+        ordenSaneado.push(i);
+        enOrden.add(i);
+        _textosVistos.set(textoN, i);
+      });
+      shuffledUnanswered = ordenSaneado;
       // Actualizar el orden persistido si cambió (respondidas eliminadas o nuevas añadidas)
       if (JSON.stringify(shuffledUnanswered) !== JSON.stringify(s.unansweredOrder)) {
         s.unansweredOrder = shuffledUnanswered.slice();
