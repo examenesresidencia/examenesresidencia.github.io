@@ -230,6 +230,8 @@
 <div class="columna">
 <h2>Seleccione el año</h2>
 <ul>
+<li onclick="mostrarCuestionario('unico2025t1')">2025 T1 POST-COPIA</li>
+<li onclick="mostrarCuestionario('unico2025t2')">2025 T2 POST-COPIA</li>
 <li onclick="mostrarCuestionario('unico2025')">2025</li>
 <li onclick="mostrarCuestionario('unico2024')">2024</li>
 <li onclick="mostrarCuestionario('unico2023')">2023</li>
@@ -690,6 +692,38 @@
 <button class="btn-reiniciar" onclick="reiniciarExamen('unico2025')">🔄 Reiniciar Examen</button>
 </div>
 </div>
+
+<!-- Cuestionario de Examen único 2025 t1 postcopia-->
+<div class="pagina-cuestionario" id="unico2025t1">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2025</h1>
+<div id="cuestionario-unico2025t1"></div>
+<button id="mostrar-total-unico2025t1">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2025t1"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2025t1')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+
+<!-- Cuestionario de Examen único 2025 t2 postcopia -->
+<div class="pagina-cuestionario" id="unico2025t2">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<h1>Examen único 2025</h1>
+<div id="cuestionario-unico2025t2"></div>
+<button id="mostrar-total-unico2025t2">Mostrar Puntuación Total</button>
+<div class="resultado-final" id="resultado-total-unico2025t2"></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;">
+<button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
+<button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
+<button class="btn-reiniciar" onclick="reiniciarExamen('unico2025t2')">🔄 Reiniciar Examen</button>
+</div>
+</div>
+
+
 <!-- Cuestionarios EXAMEN UBA -->
 <!-- Cuestionario de Examen UBA 2016 -->
 <div class="pagina-cuestionario" id="uba2016">
@@ -1027,13 +1061,13 @@
 <!-- Base de datos de preguntas -->
 <script>window.preguntasPorSeccion = {};</script>
 <!-- Script principal de la aplicación -->
-<script src="script.js?v=16"></script>
+<script src="script.js?v=17"></script>
 <!-- Editor admin de preguntas (módulo independiente, depende de script.js) -->
 <script src="editor-admin.js?v=16"></script>
 <!-- Buscador de preguntas duplicadas (módulo independiente, depende de script.js) -->
-<script src="buscador-duplicados.js?v=3"></script>
+<script src="buscador-duplicados.js?v=4"></script>
 <!-- subir preguntas a firebase -->
-<script src="subir-preguntas-admin.js?v=5"></script>
+<script src="subir-preguntas-admin.js?v=6"></script>
 <!-- Calendario Nacional de Vacunación 2026 -->
 <script src="calendario-vacunacion.js?v=11"></script>
 <!-- Cronología del Embarazo (módulo independiente, depende de script.js) -->
@@ -1044,13 +1078,13 @@
     <button onclick="cerrarAlgoritmoCACervical()" style="background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15); color:#94a3b8; padding:7px 16px; border-radius:8px; cursor:pointer; font-size:0.85rem; font-family:inherit; transition:all 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.13)'" onmouseout="this.style.background='rgba(255,255,255,0.07)'">← Volver al Menú</button>
     <span style="color:#64748b; font-size:0.82rem; font-family:'Segoe UI',sans-serif;">Algoritmo · Cáncer de Cuello Uterino</span>
   </div>
-  <iframe id="iframe-ca-cervical" src="CA_Cuello_algoritmo_V6_subir.html" style="flex:1; border:none; width:100%; background:#0a1628;"></iframe>
+  <iframe id="iframe-ca-cervical" src="CA_Cuello_algoritmo_V7_github" style="flex:1; border:none; width:100%; background:#0a1628;"></iframe>
 </div>
 
 <!-- Amenorrea Secundaria · Algoritmo diagnóstico (módulo independiente, depende de script.js) -->
 <script src="amenorrea-secundaria.js?v=3"></script>
 <!--hitos del desarrollo (módulo independiente, NO depende de script.js) -->
-<script src="hitos-desarrollo.js?v=6"></script>
+<script src="hitos-desarrollo.js?v=5"></script>
 
 
 <script>
