@@ -300,8 +300,7 @@
   // Secciones con orden FIJO de preguntas y opciones sin mezclar.
   // Las etiquetas 2 y 3 NO se muestran aquí (evitar redundancia con el nombre del archivo).
   const EXAMENES_UNICOS = [
-    'unico2016','unico2017','unico2018','unico2019','unico2020',
-    'unico2021','unico2022','unico2023','unico2024','unico2025'
+    'unico2016','unico2017','unico2018','unico2019','unico2020','unico2021','unico2022','unico2023','unico2024','unico2025','unico2025t1','unico2025t2'
   ];
   function esExamenUnico(seccionId) {
     return EXAMENES_UNICOS.includes(seccionId);
@@ -4112,8 +4111,7 @@
     'dermatologia','psiquiatria','reumatologia','toxicologia',
     'medicinalegal','saludpublica','medicinafamiliar',
     // Examen Único
-    'unico2016','unico2017','unico2018','unico2019','unico2020',
-    'unico2021','unico2022','unico2023','unico2024','unico2025',
+    'unico2016','unico2017','unico2018','unico2019','unico2020','unico2021','unico2022','unico2023','unico2024','unico2025','unico2025t1','unico2025t2',
     // Examen UBA
     'uba2016','uba2017','uba2018','uba2019',
     // Compilados (OTROS)
