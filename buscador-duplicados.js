@@ -9,7 +9,7 @@
   // ── Lista completa de secciones a escanear (orden A-Z) ───────
   const TODAS_LAS_SECCIONES = [
     'unico2016','unico2017','unico2018','unico2019','unico2020',
-    'unico2021','unico2022','unico2023','unico2024','unico2025',
+    'unico2021','unico2022','unico2023','unico2024','unico2025','unico2025t1','unico2025t2',
     'uba2016','uba2017','uba2018','uba2019',
     'compilado1','compilado2','compilado3','compilado4','compilado5',
     'compilado6','compilado7','compilado8','compilado9','compilado10',
