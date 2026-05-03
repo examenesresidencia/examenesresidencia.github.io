@@ -155,6 +155,8 @@
 <h2>GINECO-OBSTETRICIA</h2>
 <ul>
 <li onclick="mostrarCuestionario('ginecologia')">Ginecología</li>
+<li onclick="mostrarAmenorreaSecundaria()" class="crono-menu-li" style="margin-left:18px;">Amenorreas Secundarias</li>
+<li onclick="mostrarAlgoritmoCACervical()" class="crono-menu-li" style="margin-left:18px;">Algoritmo de CA cervical</li>
 <li onclick="mostrarCuestionario('obstetricia')">Obstetricia</li>
 <li onclick="mostrarCronologiaEmbarazo()" class="crono-menu-li">Cronología del Embarazo</li>
 </ul>
@@ -1036,6 +1038,17 @@
 <script src="calendario-vacunacion.js?v=11"></script>
 <!-- Cronología del Embarazo (módulo independiente, depende de script.js) -->
 <script src="cronologia-embarazo.js?v=3"></script>
+<!-- Algoritmo CA Cervical (módulo independiente) -->
+<div id="algoritmo-ca-cervical-panel" style="display:none; width:100%; height:100vh; position:fixed; top:0; left:0; z-index:9000; background:#0a1628; flex-direction:column;">
+  <div style="display:flex; align-items:center; padding:10px 16px; background:#0d1f38; border-bottom:1px solid rgba(255,255,255,0.08); gap:12px; flex-shrink:0;">
+    <button onclick="cerrarAlgoritmoCACervical()" style="background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15); color:#94a3b8; padding:7px 16px; border-radius:8px; cursor:pointer; font-size:0.85rem; font-family:inherit; transition:all 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.13)'" onmouseout="this.style.background='rgba(255,255,255,0.07)'">← Volver al Menú</button>
+    <span style="color:#64748b; font-size:0.82rem; font-family:'Segoe UI',sans-serif;">Algoritmo · Cáncer de Cuello Uterino</span>
+  </div>
+  <iframe id="iframe-ca-cervical" src="CA_Cuello_algoritmo_V6_subir.html" style="flex:1; border:none; width:100%; background:#0a1628;"></iframe>
+</div>
+
+<!-- Amenorrea Secundaria · Algoritmo diagnóstico (módulo independiente, depende de script.js) -->
+<script src="amenorrea-secundaria.js?v=3"></script>
 <!--hitos del desarrollo (módulo independiente, NO depende de script.js) -->
 <script src="hitos-desarrollo.js?v=6"></script>
 
@@ -1120,6 +1133,17 @@
         document.addEventListener('fb:sesionCerrada', function() {
             document.body.classList.remove('can-select');
         });
+
+        // ── Algoritmo CA Cervical ──────────────────────────
+        function mostrarAlgoritmoCACervical() {
+          document.getElementById('menu-principal').style.display = 'none';
+          const panel = document.getElementById('algoritmo-ca-cervical-panel');
+          panel.style.display = 'flex';
+        }
+        function cerrarAlgoritmoCACervical() {
+          document.getElementById('algoritmo-ca-cervical-panel').style.display = 'none';
+          document.getElementById('menu-principal').style.display = 'block';
+        }
 
         // 6. Prevenir impresión con CSS y JS
         window.addEventListener('beforeprint', function(e) {
