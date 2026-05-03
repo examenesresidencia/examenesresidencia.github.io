@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Algoritmo — Cáncer de Cuello Uterino</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0b0e14;
+  --bg2: #131720;
+  --bg3: #1a2030;
+  --border: #252d3d;
+  --text: #d8e4f5;
+  --text2: #7a91b0;
+  --text3: #4a5e7a;
+
+  --blue:   #1a4a7a; --blue-b: #2d6fbf; --blue-t: #90c4ff;
+  --teal:   #0d3d32; --teal-b: #1a9e7a; --teal-t: #7ee8c8;
+  --green:  #163a10; --green-b: #3d9020; --green-t: #9edc6a;
+  --amber:  #3d2800; --amber-b: #c8820a; --amber-t: #ffd080;
+  --red:    #3a0f0f; --red-b:   #d43030; --red-t:   #ffb0b0;
+  --coral:  #3a1a00; --coral-b: #d46a20; --coral-t: #ffcf9a;
+  --purple: #1e1040; --purple-b:#7050e0; --purple-t:#c0aaff;
+  --pink:   #3a0f28; --pink-b:  #c0407a; --pink-t:  #ffb0d8;
+  --gray:   #161c28; --gray-b:  #3a4a60; --gray-t:  #a0b4cc;
+
+  --r: 10px;
+  --font-head: 'Syne', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── HEADER ── */
+.page-header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 20px 24px 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-header h1 {
+  font-family: var(--font-head);
+  font-size: 22px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.page-header h1 span { color: var(--blue-t); }
+.page-header .subtitle {
+  font-size: 12px;
+  color: var(--text2);
+  flex: 1 1 200px;
+}
+
+/* ── LEGEND ── */
+.legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+}
+.leg-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text2);
+}
+.leg-dot {
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ── LAYOUT ── */
+.wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 60px; }
+
+/* ── SECTION DIVIDER ── */
+.section-title {
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin: 28px 0 10px;
+  padding-left: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── NODE ── */
+.node {
+  border-radius: var(--r);
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+  position: relative;
+  line-height: 1.4;
+}
+.node:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.node .label { font-family: var(--font-head); font-size: 12.5px; font-weight: 600; }
+.node .sub { font-size: 11px; opacity: .75; margin-top: 2px; }
+.node .formula { font-size: 11px; font-family: monospace; margin-top: 4px; opacity: .9; }
+
+.c-blue   { background: var(--blue);   border-color: var(--blue-b);   color: var(--blue-t); }
+.c-teal   { background: var(--teal);   border-color: var(--teal-b);   color: var(--teal-t); }
+.c-green  { background: var(--green);  border-color: var(--green-b);  color: var(--green-t); }
+.c-amber  { background: var(--amber);  border-color: var(--amber-b);  color: var(--amber-t); }
+.c-red    { background: var(--red);    border-color: var(--red-b);    color: var(--red-t); }
+.c-coral  { background: var(--coral);  border-color: var(--coral-b);  color: var(--coral-t); }
+.c-purple { background: var(--purple); border-color: var(--purple-b); color: var(--purple-t); }
+.c-pink   { background: var(--pink);   border-color: var(--pink-b);   color: var(--pink-t); }
+.c-gray   { background: var(--gray);   border-color: var(--gray-b);   color: var(--gray-t); }
+
+/* ── BADGE ── */
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.b-green  { background: #1b3a0f; color: #9edc6a; border: 1px solid #3d9020; }
+.b-amber  { background: #3d2800; color: #ffd080; border: 1px solid #c8820a; }
+.b-red    { background: #3a0f0f; color: #ffb0b0; border: 1px solid #d43030; }
+.b-teal   { background: #0d3d32; color: #7ee8c8; border: 1px solid #1a9e7a; }
+.b-blue   { background: #1a4a7a; color: #90c4ff; border: 1px solid #2d6fbf; }
+.b-purple { background: #1e1040; color: #c0aaff; border: 1px solid #7050e0; }
+
+/* ── EXPANDABLE DETAIL ── */
+.detail {
+  display: none;
+  background: #0e1320;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text);
+  animation: fadeIn 0.15s ease;
+}
+.detail.open { display: block; }
+.detail h5 {
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text2);
+  margin: 8px 0 4px;
+}
+.detail h5:first-child { margin-top: 0; }
+.detail ul { padding-left: 18px; }
+.detail li { margin-bottom: 3px; }
+.detail b { color: #fff; font-weight: 600; }
+.detail .highlight {
+  background: #1a2540;
+  border-left: 3px solid var(--blue-b);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  font-size: 11.5px;
+}
+.detail .warning {
+  background: #3a0f0f44;
+  border-left: 3px solid var(--red-b);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  font-size: 11.5px;
+  color: var(--red-t);
+}
+.detail .ok {
+  background: #163a1044;
+  border-left: 3px solid var(--green-b);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  font-size: 11.5px;
+  color: var(--green-t);
+}
+
+@keyframes fadeIn { from { opacity:0; transform: translateY(-4px); } to { opacity:1; transform:none; } }
+
+/* ── ARROW ── */
+.arrow {
+  width: 2px;
+  margin: 0 auto;
+  background: var(--border);
+  position: relative;
+  flex-shrink: 0;
+}
+.arrow::after {
+  content: '';
+  position: absolute;
+  bottom: -5px; left: -4px;
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--border);
+}
+.arrow-sm { height: 14px; }
+.arrow-md { height: 22px; }
+.arrow-lg { height: 32px; }
+
+/* ── BRANCH ROW ── */
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  flex: 1;
+  min-width: 140px;
+  max-width: 240px;
+}
+.col-wide {
+  flex: 1;
+  min-width: 200px;
+  max-width: 360px;
+}
+.col-narrow {
+  min-width: 120px;
+  max-width: 180px;
+}
+
+/* ── GROUP BOX ── */
+.group {
+  border: 1px dashed #2a3550;
+  border-radius: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,0.015);
+  width: 100%;
+}
+.group-label {
+  font-family: var(--font-head);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+
+/* ── CENTER BOX ── */
+.center-box { max-width: 580px; margin: 0 auto; width: 100%; }
+
+/* ── CONNECTOR ── */
+.v-line {
+  width: 2px;
+  height: 10px;
+  background: var(--border);
+  margin: 0 auto;
+}
+
+/* ── SPECIAL CARDS ── */
+.special-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+/* ── TABLE ── */
+.mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 6px;
+}
+.mini-table th {
+  font-family: var(--font-head);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text3);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.mini-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #1a2030;
+  vertical-align: top;
+}
+.mini-table tr:last-child td { border-bottom: none; }
+
+/* ── STEP INDICATOR ── */
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px; height: 20px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-family: var(--font-head);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text2);
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+/* CHEVRON */
+.node .chevron {
+  position: absolute;
+  top: 8px; right: 10px;
+  font-size: 11px;
+  opacity: .5;
+  transition: transform 0.2s;
+}
+.node.expanded .chevron { transform: rotate(180deg); }
+
+/* ── PILL LABEL ── */
+.pill-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 5px; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  color: var(--text2);
+}
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+.pill .dot-green  { background: var(--green-b); }
+.pill .dot-amber  { background: var(--amber-b); }
+.pill .dot-red    { background: var(--red-b); }
+.pill .dot-blue   { background: var(--blue-b); }
+.pill .dot-purple { background: var(--purple-b); }
+
+/* TOC / NAV */
+.toc {
+  position: fixed;
+  top: 80px; left: 12px;
+  width: 130px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  z-index: 100;
+  display: none;
+}
+@media (min-width: 1460px) { .toc { display: block; } }
+.toc-title {
+  font-family: var(--font-head);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 8px;
+}
+.toc a {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text2);
+  text-decoration: none;
+  padding: 3px 0;
+  border-left: 2px solid transparent;
+  padding-left: 8px;
+  transition: color 0.15s;
+}
+.toc a:hover { color: var(--text); border-left-color: var(--blue-b); }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <div>
+    <div style="font-family:var(--font-head);font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--text3);margin-bottom:4px">GINECOLOGÍA · ONCOLOGÍA V6</div>
+    <h1 class="">Cáncer de <span>Cuello Uterino</span></h1>
+  </div>
+  <div class="subtitle">
+    Algoritmo integral: tamizaje por edad · PAP · HPV · co-test · colposcopía · biopsia (NIC) · tratamiento · seguimiento · situaciones especiales<br>
+    <span style="color:var(--text3)">Hacé clic en cualquier nodo para ver detalles. </span>
+  </div>
+  
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div class="leg-item"><div class="leg-dot" style="background:var(--green-b)"></div> Sin lesión / Bajo riesgo</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--amber-b)"></div> Cambio menor / Vigilar</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--red-b)"></div> Cambio mayor / Tratar</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--blue-b)"></div> Procedimiento diagnóstico</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--purple-b)"></div> Colposcopía / Clasificación</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--teal-b)"></div> Tratamiento / Escisión</div>
+  <div class="leg-item"><div class="leg-dot" style="background:var(--coral-b)"></div> Situación especial</div>
+</div>
+
+<div class="wrap">
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 1 — INICIO DEL TAMIZAJE
+═══════════════════════════════════════ -->
+<div id="s1" class="section-title">① Inicio del tamizaje</div>
+
+<div style="display:flex;flex-direction:column;align-items:center;width:100%;gap:0">
+
+  <!-- INICIO -->
+  <div class="center-box">
+    <div class="node c-gray" onclick="tog(this,'d-inicio')">
+      <div class="label">Inicio del tamizaje cervical</div>
+      <div class="sub">A los 3 años del inicio de relaciones sexuales (IRS) · mínimo 25 años</div>
+      <div class="pill-row">
+        <span class="pill"><span class="dot dot-green"></span>Inicio: 3 años post-IRS</span>
+        <span class="pill"><span class="dot dot-red"></span>Fin: 65-70 años</span>
+      </div>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-inicio" class="detail">
+      <h5>Cuándo NO tamizar</h5>
+      <ul>
+        <li>Menores de 25 años (aunque inicio sexual precoz)</li>
+        <li>Mayores de <b>65 años</b> si usaron HPV y tuvieron 2 HPV negativos consecutivos (separados 5 años c/u)</li>
+        <li>Mayores de <b>70 años</b> si solo usaron PAP y tuvieron 3 PAP negativos en los últimos 10 años</li>
+        <li>Histerectomía total por causa benigna (sin cuello residual)</li>
+      </ul>
+      <h5>Finalización del tamizaje</h5>
+      <ul>
+        <li><b>Con HPV:</b> 65 años — 2 HPV (-) consecutivos separados por 5 años cada uno</li>
+        <li><b>Solo PAP:</b> 70 años — 3 PAP (-) en últimos 10 años (1 cada 3 años)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="arrow arrow-md" style="margin:8px auto"></div>
+
+  <!-- BIFURCACIÓN POR EDAD -->
+  <div id="s1-edad" class="section-title" style="width:100%">Por edad: &lt;30 vs ≥30 años</div>
+  <div class="row" style="width:100%;align-items:flex-start">
+
+    <!-- < 30 AÑOS -->
+    <div class="col col-wide">
+      <div class="node c-blue" onclick="tog(this,'d-lt30')">
+        <div class="label">Menor de 30 años</div>
+        <div class="sub">Método: PAP (citología)</div>
+        <div class="formula">Regla: 1 → 1 → 3</div>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-lt30" class="detail">
+        <div class="highlight">PAP año 1 → PAP año 2 → PAP a los 3 años del 2.° → cada 3 años</div>
+        <ul>
+          <li>Alta prevalencia de HPV transitorio que se resuelve espontáneamente → no se recomienda test HPV aislado ni co-test</li>
+          <li>No usar HPV como cribado primario en menores de 30 años</li>
+        </ul>
+        <h5>Resultados del PAP &lt;30</h5>
+        <ul>
+          <li><b>PAP (−):</b> aplicar regla 1-1-3</li>
+          <li><b>Cambios menores</b> (ASC-US, LSIL): repetir PAP a los 6 meses</li>
+          <li><b>Cambios mayores</b> (ASC-H, HSIL, AGC): derivar a colposcopía + biopsia</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ≥ 30 AÑOS -->
+    <div class="col col-wide">
+      <div class="node c-purple" onclick="tog(this,'d-gte30')">
+        <div class="label">30 años o más</div>
+        <div class="sub">Método preferido: test de HPV</div>
+        <div class="formula">Revisión cada 5 años si HPV (−)</div>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-gte30" class="detail">
+        <h5>Si solo hay PAP disponible</h5>
+        <div class="ok">Aplica la regla 1-1-3 (igual que &lt;30 años)</div>
+        <h5>Si hay co-test disponible (HPV + PAP)</h5>
+        <ul>
+          <li>Solo se leen los PAP con HPV (+)</li>
+          <li>Si ambos (−): repetir en <b>5 años</b></li>
+        </ul>
+        <h5>Algoritmo HPV primario ≥30</h5>
+        <ul>
+          <li>HPV (−) → repetir en <b>5 años</b></li>
+          <li>HPV (+) → solicitar PAP</li>
+          <li>HPV (+) + PAP (+) → <b>colposcopía</b></li>
+          <li>HPV (+) + PAP (−) → repetir HPV en <b>12 meses</b></li>
+          <ul>
+            <li>HPV (+) a los 12 m → <b>colposcopía</b></li>
+            <li>HPV (−) a los 12 m → HPV en <b>5 años</b></li>
+          </ul>
+          <li>HPV (+) + PAP anormal (cualquier resultado no negativo por Bethesda) → <b>colposcopía</b></li>
+        </ul>
+      </div>
+    </div>
+
+  </div><!-- /row edad -->
+
+</div><!-- /flex-column s1 -->
+
+<!-- ── SEPARADOR SITUACIONES ESPECIALES ── -->
+<div class="section-title" style="width:100%;margin-top:22px">Situaciones especiales</div>
+
+<!-- 3 nodos en fila horizontal -->
+<div class="special-grid">
+
+    <!-- INMUNOCOMPROMETIDOS -->
+    <div>
+      <div class="node c-coral" onclick="tog(this,'d-inmuno')">
+        <div class="label">Inmunocomprometidas (general)</div>
+        <div class="sub">Excepto HIV (ver abajo)</div>
+        <span class="badge b-amber">PAP anual siempre</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-inmuno" class="detail">
+        <div class="warning">PAP siempre anual — independientemente de la edad o resultado anterior</div>
+        <ul>
+          <li>No se aplica el intervalo de 3 o 5 años</li>
+          <li>Cualquier resultado anormal → colposcopía directa</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- VIH -->
+    <div>
+      <div class="node c-coral" onclick="tog(this,'d-vih')" style="border-width:2px">
+        <div class="label">⚠ HIV positivo — protocolo diferenciado</div>
+        <div class="sub">Mayor riesgo de lesiones de alto grado</div>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-vih" class="detail">
+        <h5>Inicio del tamizaje</h5>
+        <ul>
+          <li>Se inicia en función de la edad (&lt;30 / ≥30 años) <b>al año del IRS</b> (no espera 3 años como las inmunocompetentes)</li>
+        </ul>
+        <h5>Primer año</h5>
+        <ul>
+          <li>PAP al diagnóstico de HIV, a los 6 meses y a los 12 meses</li>
+          <li>Si ambos normales → PAP <b>anual de por vida</b> (no ampliar a 3 o 5 años)</li>
+        </ul>
+        <h5>Resultados</h5>
+        <ul>
+          <li>Cualquier resultado anormal (incluso ASC-US) → <b>colposcopía directa</b></li>
+          <li>NIC 1 en HIV (+): seguimiento estrecho PAP + colposcopía c/6-12 meses (no observación pura)</li>
+          <li>NIC 2-3: tratamiento igual que inmunocompetente, pero seguimiento más intensivo post-escisión</li>
+        </ul>
+        <div class="highlight">Vacuna HPV puede ofrecerse hasta los 45 años en inmunocomprometidas</div>
+      </div>
+    </div>
+
+    <!-- EMBARAZO -->
+    <div>
+      <div class="node c-blue" onclick="tog(this,'d-embarazo')">
+        <div class="label">Embarazo</div>
+        <div class="sub">Excepción al tratamiento de NIC 3</div>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-embarazo" class="detail">
+        <ul>
+          <li>NIC 3 durante el embarazo: <b>única excepción</b> en que la observación es aceptable</li>
+          <li>Colposcopía y biopsia pueden realizarse durante el embarazo (cuidado con el sangrado)</li>
+          <li>No se realiza LEEP ni conización durante el embarazo salvo sospecha de invasión</li>
+          <li>Re-evaluar a las 6-8 semanas post-parto</li>
+        </ul>
+      </div>
+    </div>
+
+</div><!-- /special-grid situaciones especiales -->
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 2 — RESULTADOS PAP (BETHESDA)
+═══════════════════════════════════════ -->
+<div id="s2" class="section-title">② Resultados PAP — Clasificación de Bethesda</div>
+
+<div class="row" style="align-items:flex-start">
+
+  <!-- NIL-M -->
+  <div class="col">
+    <div class="node c-green" onclick="tog(this,'d-nilm')">
+      <div class="label">Negativo (NIL-M)</div>
+      <span class="badge b-green">Sin lesión</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-nilm" class="detail">
+      <ul>
+        <li>Sin lesión ni malignidad</li>
+        <li>Puede incluir cambios inflamatorios, atrofia, microorganismos (Trichomonas, Cándida, VB)</li>
+      </ul>
+      <div class="ok"><b>Conducta:</b> continuar tamizaje según edad y método</div>
+    </div>
+    <div class="v-line"></div>
+    <div class="node c-gray" style="text-align:center;font-size:11px"><div class="label">Repetir según intervalo (regla 1-1-3 o c/5 a)</div></div>
+  </div>
+
+  <!-- ASC-US -->
+  <div class="col">
+    <div class="node c-amber" onclick="tog(this,'d-ascus')">
+      <div class="label">ASC-US</div>
+      <div class="sub">Células escamosas atípicas de significado incierto</div>
+      <span class="badge b-amber">Cambio menor</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-ascus" class="detail">
+      <ul>
+        <li><b>Opción A:</b> HPV reflexivo → HPV(+): colposcopía; HPV(−): PAP en 3 años</li>
+        <li><b>Opción B:</b> Co-test en 3 años</li>
+        <li><b>Sin HPV disponible:</b> repetir PAP en 6–12 meses</li>
+        <li>2 PAP repetidos ASC-US o LSIL → colposcopía</li>
+      </ul>
+    </div>
+    <div class="v-line"></div>
+    <div class="node c-amber" style="text-align:center;font-size:11px"><div class="label">PAP c/6-12 m o HPV reflexivo</div></div>
+  </div>
+
+  <!-- LSIL -->
+  <div class="col">
+    <div class="node c-amber" onclick="tog(this,'d-lsil')">
+      <div class="label">L-SIL / LSIL</div>
+      <div class="sub">Lesión intraepitelial de bajo grado</div>
+      <span class="badge b-amber">Cambio menor</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-lsil" class="detail">
+      <ul>
+        <li><b>&lt;25 años:</b> observar, PAP en 12 meses (alto clearance espontáneo)</li>
+        <li><b>25-30 años:</b> HPV reflexivo o PAP en 12 meses</li>
+        <li><b>≥30 años:</b> co-test en 12 meses; si alterado → colposcopía</li>
+        <li>Posmenopáusicas o inmunocomprometidas: colposcopía directa</li>
+      </ul>
+    </div>
+    <div class="v-line"></div>
+    <div class="node c-amber" style="text-align:center;font-size:11px"><div class="label">HPV/PAP en 12 m o colposcopía</div></div>
+  </div>
+
+  <!-- ASC-H -->
+  <div class="col">
+    <div class="node c-red" onclick="tog(this,'d-asch')">
+      <div class="label">⚠ ASC-H</div>
+      <div class="sub">No puede excluir H-SIL</div>
+      <span class="badge b-red">Cambio mayor</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-asch" class="detail">
+      <div class="warning">Colposcopía inmediata con biopsia dirigida — independiente del HPV</div>
+      <ul>
+        <li>No aceptable: repetir PAP ni esperar 6 meses</li>
+        <li>Colposcopía sin lesión visible → LEC (legrado endocervical)</li>
+        <li>HPV puede pedirse pero NO cambia conducta: siempre → colposcopía</li>
+      </ul>
+    </div>
+    <div class="v-line"></div>
+    <div class="node c-red" style="text-align:center;font-size:11.5px;border-width:2px"><div class="label">COLPOSCOPÍA + BIOPSIA</div></div>
+  </div>
+
+  <!-- HSIL -->
+  <div class="col">
+    <div class="node c-red" onclick="tog(this,'d-hsil')">
+      <div class="label">⚠ H-SIL / HSIL</div>
+      <div class="sub">Lesión intraepitelial de alto grado</div>
+      <span class="badge b-red">Cambio mayor</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-hsil" class="detail">
+      <ul>
+        <li>Colposcopía inmediata con biopsia dirigida</li>
+        <li>Si colposcopía adecuada sin lesión → LEC obligatorio</li>
+        <li>Opción "ver y tratar" (LEEP inmediato) en casos seleccionados con alta sospecha NIC 3</li>
+      </ul>
+    </div>
+    <div class="v-line"></div>
+    <div class="node c-red" style="text-align:center;font-size:11.5px;border-width:2px"><div class="label">COLPOSCOPÍA + BIOPSIA</div></div>
+  </div>
+
+  <!-- AGC -->
+  <div class="col">
+    <div class="node c-coral" onclick="tog(this,'d-agc')">
+      <div class="label">AGC / AIS / Ca invasor</div>
+      <div class="sub">Células glandulares atípicas</div>
+      <span class="badge b-red">Cambio mayor</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-agc" class="detail">
+      <ul>
+        <li><b>AGC:</b> colposcopía + LEC ± biopsia endometrial (≥35 a o sangrado anormal)</li>
+        <li><b>AIS:</b> conización diagnóstica</li>
+        <li><b>Carcinoma invasor:</b> derivación urgente a oncología ginecológica</li>
+      </ul>
+    </div>
+    <div class="v-line"></div>
+    <div class="node c-coral" style="text-align:center;font-size:11px;border-width:2px"><div class="label">Colpo + LEC ± bx endometrial</div></div>
+  </div>
+
+</div><!-- /row bethesda -->
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 3 — COLPOSCOPÍA
+═══════════════════════════════════════ -->
+<div id="s3" class="section-title">③ Colposcopía — Clasificación IFCPC 2011</div>
+
+<div style="display:flex;flex-direction:column;align-items:center;width:100%">
+
+  <div class="center-box">
+    <div class="node c-purple" onclick="tog(this,'d-colpo-def')" style="text-align:center">
+      <div class="label">Colposcopía</div>
+      <div class="sub">Visualización magnificada del cuello uterino con ácido acético 3-5%</div>
+      <div class="sub">.</div>
+      <div class="sub">Evalúa: </div>
+      <div class="sub">(1) Zona de Transformación (ZT)</div>
+      <div class="sub">(2) Tipo de lesión</div>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-colpo-def" class="detail">
+      <h5>¿Por qué es importante la Zona de Transformación?</h5>
+      <p style="font-size:12px">La ZT es el área donde el epitelio escamoso cervical reemplaza al epitelio columnar (metaplasia). Esta zona es susceptible a infección por HPV y es el sitio de origen de las lesiones cervicales.</p>
+    </div>
+  </div>
+
+  <div class="arrow arrow-sm" style="margin:8px auto"></div>
+
+  <!-- ZT -->
+  <div class="group" style="margin-bottom:10px">
+    <div class="group-label">Clasificación de Zona de Transformación (ZT) → define si la colposcopía es adecuada</div>
+    <div class="row">
+      <div class="col">
+        <div class="node c-green" onclick="tog(this,'d-zt1')">
+          <div class="label">ZT Tipo 1</div>
+          <div class="sub">Completamente visible en exocérvix</div>
+          <span class="badge b-green">Colpo adecuada ✓</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-zt1" class="detail">La zona de transformación es completamente visible en el ectocérvix. <b>Colposcopía adecuada / satisfactoria.</b> Lo más favorable para el diagnóstico.</div>
+      </div>
+      <div class="col">
+        <div class="node c-amber" onclick="tog(this,'d-zt2')">
+          <div class="label">ZT Tipo 2</div>
+          <div class="sub">Parcialmente visible / componente endocervical</div>
+          <span class="badge b-amber">Colpo adecuada ✓</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-zt2" class="detail">La ZT tiene un componente endocervical pero puede visualizarse con maniobras. <b>Colposcopía adecuada.</b></div>
+      </div>
+      <div class="col">
+        <div class="node c-red" onclick="tog(this,'d-zt3')">
+          <div class="label">ZT Tipo 3</div>
+          <div class="sub">No visible — dentro del canal endocervical</div>
+          <span class="badge b-red">Colpo INadecuada ✗</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-zt3" class="detail">
+          <div class="warning">La ZT no es visible. Colposcopía <b>inadecuada / insatisfactoria.</b></div>
+          <p style="font-size:12px">Considerar: <b>LEC (legrado endocervical)</b> o <b>conización diagnóstica</b> según contexto. Importante para la toma de decisiones en tratamiento (ver sección NIC 2).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HALLAZGOS -->
+  <div class="group">
+    <div class="group-label">Clasificación de hallazgos → tipo de lesión</div>
+    <div class="row" style="align-items:flex-start">
+      <div class="col">
+        <div class="node c-green" onclick="tog(this,'d-colpo-normal')">
+          <div class="label">Normal / sin lesión</div>
+          <span class="badge b-green">Imagen normal</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-colpo-normal" class="detail">Epitelio sin alteraciones. Si el PAP fue ASC-H o HSIL y la colposcopía es normal → <b>LEC obligatorio.</b> Seguimiento con co-test en 12 meses.</div>
+      </div>
+      <div class="col">
+        <div class="node c-amber" onclick="tog(this,'d-colpo-g1')">
+          <div class="label">Grado 1 (G1)</div>
+          <div class="sub">Hallazgos menores</div>
+          <span class="badge b-amber">Sugiere LSIL</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-colpo-g1" class="detail">
+          <ul>
+            <li>Epitelio acetoblanco tenue, de aparición lenta</li>
+            <li>Mosaico fino, punteado fino</li>
+            <li>Bordes irregulares, geográficos</li>
+          </ul>
+          <p style="font-size:12px;margin-top:4px">Biopsia dirigida de la lesión más significativa. Esperar resultado histológico antes de decidir tratamiento.</p>
+        </div>
+      </div>
+      <div class="col">
+        <div class="node c-red" onclick="tog(this,'d-colpo-g2')" style="border-width:2px">
+          <div class="label">⚠ Grado 2 (G2)</div>
+          <div class="sub">Hallazgos mayores</div>
+          <span class="badge b-red">Alta sospecha HSIL</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-colpo-g2" class="detail">
+          <div class="warning">SIEMPRE requiere biopsia sin excepción</div>
+          <ul>
+            <li>Epitelio acetoblanco <b>denso</b>, aparición rápida</li>
+            <li>Punteado <b>grueso</b>, mosaico <b>grueso</b></li>
+            <li>Bordes bien definidos y elevados</li>
+            <li>Signo de cresta, borde interno</li>
+          </ul>
+          <p style="font-size:12px;margin-top:4px">Lesiones G2 corresponden con alta frecuencia a NIC 2-3.</p>
+        </div>
+      </div>
+      <div class="col">
+        <div class="node c-coral" onclick="tog(this,'d-colpo-inv')" style="border-width:2px">
+          <div class="label">⚠ Sospecha de invasión</div>
+          <span class="badge b-red">Urgente</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-colpo-inv" class="detail">
+          <div class="warning">Biopsia inmediata + derivación urgente a oncología ginecológica</div>
+          <ul>
+            <li>Vasos atípicos</li>
+            <li>Lesión exofítica, ulcerada, necrótica</li>
+            <li>No esperar seguimiento</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /colpo section -->
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 4 — BIOPSIA / NIC
+═══════════════════════════════════════ -->
+<div id="s4" class="section-title">④ Biopsia — Clasificación histológica NIC / CIN</div>
+
+<div style="display:flex;flex-direction:column;align-items:center;width:100%">
+
+  <div class="center-box">
+    <div class="node c-teal" onclick="tog(this,'d-bx-def')" style="text-align:center">
+      <div class="label">Biopsia cervical</div>
+      <div class="sub">Indicación: hallazgos mayores o sospecha de invasión en colposcopía, o PAP de alto grado</div>
+      <div class="sub">Define gravedad y conducta terapéutica — Clasificación NIC (Neoplasia Intraepitelial Cervical)</div>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-bx-def" class="detail">
+      <table class="mini-table">
+        <tbody><tr><th>NIC</th><th>Nombre</th><th>Extensión en muestra</th><th>Regresión espontánea</th></tr>
+        <tr><td><b>NIC 1</b></td><td>L-SIL displasia leve</td><td>1/3 inferior</td><td style="color:var(--green-t)">Alta (75% en &lt;25 a; 90% en &gt;25 a)</td></tr>
+        <tr><td><b>NIC 2</b></td><td>H-SIL displasia moderada</td><td>2/3 de la muestra</td><td style="color:var(--amber-t)">Variable — requiere p16</td></tr>
+        <tr><td><b>NIC 3</b></td><td>H-SIL displasia severa/in situ</td><td>Todo el espesor</td><td style="color:var(--red-t)">Baja — alto riesgo de progresión</td></tr>
+        <tr><td><b>Ca invasor</b></td><td>Carcinoma</td><td>Pasó membrana basal</td><td style="color:var(--red-t)">No aplica — tratar</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <div class="arrow arrow-sm" style="margin:8px auto"></div>
+
+  <div class="row" style="width:100%;align-items:flex-start">
+
+    <!-- NIC 1 -->
+    <div class="col col-wide">
+      <div class="node c-green" onclick="tog(this,'d-nic1')">
+        <div class="label">NIC 1 · L-SIL</div>
+        <div class="sub">Displasia leve · 1/3 inferior</div>
+        <span class="badge b-green">Alta regresión espontánea</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-nic1" class="detail">
+        <div class="ok">Conducta: Observación y seguimiento (NO tratamiento de rutina)</div>
+        <ul>
+          <li>Control en <b>12 meses</b> → regresa al inicio del algoritmo de tamizaje</li>
+          <li>&lt;25 años: regresión ~75%</li>
+          <li>&gt;25 años: regresión ~90%</li>
+          <li>Si persiste ≥24 meses sin regresión → considerar tratamiento</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- NIC 2 -->
+    <div class="col col-wide">
+      <div class="node c-amber" onclick="tog(this,'d-nic2')">
+        <div class="label">NIC 2 · H-SIL</div>
+        <div class="sub">Displasia moderada · 2/3 de muestra</div>
+        <span class="badge b-amber">Requiere p16 inmunohistoquímica</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-nic2" class="detail">
+        <div class="highlight"><b>Paso 1:</b> Solicitar p16 (marcador IHQ que confirma alto grado = integración viral)</div>
+        <h5>Según p16:</h5>
+        <ul>
+          <li><b>p16 (−):</b> tratar como L-SIL (NIC 1)</li>
+          <li><b>p16 (+) o no disponible:</b> es un verdadero NIC 2 → ver abajo</li>
+        </ul>
+        <h5>NIC 2 verdadero — según edad:</h5>
+        <p style="font-size:12px"><b>&lt;25 años:</b></p>
+        <ul>
+          <li><b>ZT tipo 1 o 2:</b> seguimiento PAP + colposcopía c/6 meses × 2 años (regresión ~75%)</li>
+          <li><b>ZT tipo 3:</b> tratamiento escisional (conización) — no se ve la lesión completa</li>
+        </ul>
+        <p style="font-size:12px;margin-top:6px"><b>≥25 años:</b></p>
+        <ul>
+          <li><b>ZT tipo 1 o 2:</b> tratamiento escisional mediante LEEP (preferible) — observación es "aceptable" según contexto</li>
+          <li><b>ZT tipo 3:</b> tratamiento escisional mediante conización</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- NIC 3 -->
+    <div class="col col-wide">
+      <div class="node c-red" onclick="tog(this,'d-nic3')" style="border-width:2px">
+        <div class="label">⚠ NIC 3 · H-SIL</div>
+        <div class="sub">Displasia severa / in situ · todo el espesor</div>
+        <span class="badge b-red">Siempre tratar — escisión</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-nic3" class="detail">
+        <div class="warning">La observación NUNCA es aceptable en NIC 3 (excepción única: embarazo)</div>
+        <h5>Tratamiento:</h5>
+        <p style="font-size:12px"><b>1) Escisional (preferente):</b></p>
+        <ul>
+          <li>LEEP o conización — elegir técnica según contexto, profundidad y márgenes</li>
+        </ul>
+        <p style="font-size:12px;margin-top:4px"><b>2) Tratamiento Destructivo Local (TDL):</b></p>
+        <ul>
+          <li><b>Aceptable si:</b> el procedimiento es diagnóstico y terapéutico simultáneamente</li>
+          <li><b>NO aceptable si:</b> lesión penetra canal endocervical (ZT tipo 3), no se puede abarcar completamente, o se sospecha invasión</li>
+        </ul>
+      </div>
+    </div>
+
+  </div><!-- /row NIC -->
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 5 — ADENOCARCINOMA IN SITU (AIS)
+═══════════════════════════════════════ -->
+<div id="s5" class="section-title">⑤ Adenocarcinoma in situ (AIS)</div>
+
+<div class="center-box">
+  <div class="node c-pink" onclick="tog(this,'d-ais')" style="text-align:center;border-width:2px">
+    <div class="label">⚠ AdenoCarcinoma In Situ (AIS)</div>
+    <div class="sub">Escisión fragmentada con asa eléctrica</div>
+    <span class="chevron">▾</span>
+  </div>
+  <div id="d-ais" class="detail">
+    <div class="warning">Los márgenes negativos NO garantizan resección completa (skip lesions). No se hace biopsia dirigida — se necesita pieza completa.</div>
+    <h5>Procedimiento diagnóstico Y terapéutico: CONIZACIÓN</h5>
+    <p style="font-size:12px">La conización confirma el diagnóstico, descarta invasión y evalúa márgenes.</p>
+    <h5>Conducta según deseo reproductivo y márgenes:</h5>
+  </div>
+</div>
+
+<div class="arrow arrow-sm" style="margin:8px auto"></div>
+
+<div class="row" style="width:100%;align-items:flex-start">
+  <div class="col col-wide">
+    <div class="node c-pink" onclick="tog(this,'d-ais-pari')">
+      <div class="label">Paridad cumplida</div>
+      <span class="badge b-red">Histerectomía total</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-ais-pari" class="detail">Histerectomía total. Tratamiento definitivo.</div>
+  </div>
+  <div class="col col-wide">
+    <div class="node c-amber" onclick="tog(this,'d-ais-repro-neg')">
+      <div class="label">Deseo reproductivo + márgenes (−)</div>
+      <span class="badge b-teal">Seguimiento estricto</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-ais-repro-neg" class="detail">
+          <ul>
+            <li>&nbsp;Utilizan un asa de alambre fino con corriente eléctrica para eliminar células anormales o precancerosas (NIC2, NIC3, CIN2-3) del cuello uterino.&nbsp;</li><li>Procedimiento: Ambulatorio, menor sangrado, menos agresivo.&nbsp;Se realiza bajo anestesia local en consultorio, dura unos 15 minutos.</li>
+            <li><b>Finalidad:</b> Diagnóstica (evaluar tejido) y terapéutica (eliminar lesiones).</li><li><b>Recuperación: </b>Generalmente rápida, con indicaciones de reposo relativo y abstinencia de relaciones sexuales por unas semanas.</li><li><b>Riesgos: </b>Poco frecuentes, pero incluyen sangrado, infección, o estrechamiento del cuello uterino (estenosis).</li><li>✅ Preserva mejor la fertilidad</li><li>Indicado para <b>ZT tipo 1 y 2</b></li>
+          </ul>
+          <div class="warning"><span style="color: rgb(216, 228, 245); font-size: 13px; background-color: rgb(19, 23, 32);">❌&nbsp;</span><b>LO MALO: </b>Fragmenta la pieza resecada → dificulta la evaluación de márgenes</div>
+        </div>
+  </div>
+  <div class="col col-wide">
+    <div class="node c-red" onclick="tog(this,'d-ais-repro-pos')" style="border-width:2px">
+      <div class="label">Deseo reproductivo + márgenes (+)</div>
+      <span class="badge b-red">Re-conización</span>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-ais-repro-pos" class="detail">
+          <ul>
+            <li>Reseca una pieza en forma de cono, íntegra</li><li>✅ Asegura mejor evaluación de márgenes</li><li>✅Indicada para: ZT tipo 3, lesiones profundas, sospecha de invasión, AIS</li>
+            <li>❌Mayor sangrado, más agresiva</li>
+          </ul><div><br></div>
+          <div class="highlight">La conización no es una biopsia — es un procedimiento diagnóstico Y terapéutico.</div>
+        </div>
+  </div>
+</div>
+
+</div><!-- end s4/s5 container -->
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 5b — TRATAMIENTO ESCISIONAL
+═══════════════════════════════════════ -->
+<div id="s5b" class="section-title">✂ Tratamiento Escisional</div>
+
+<div style="display:flex;flex-direction:column;align-items:center;width:100%">
+
+  <div class="center-box">
+    <div class="node c-teal" onclick="tog(this,'d-escision-def')" style="text-align:center">
+      <div class="label"><font color="#ffffff"><u style="">LEEP</u> (<i style="">Procedimiento de Escisión Electroquirúrgica con Asa</i>) o&nbsp; <u style="">LLETZ</u> (<i style="">Escisión con Asa Grande de la Zona de Transformación</i>)</font></div>
+      <div class="sub">Objetivo: extirpar toda la Zona de Transformación y la lesión — es diagnóstico y terapéutico simultáneamente</div>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-escision-def" class="detail">
+      <h5>Indicaciones</h5>
+      <ul>
+        <li>Lesiones de alto grado: <b>NIC 2 y NIC 3</b></li>
+        <li>Colposcopía insatisfactoria: <b>ZT tipo 3</b></li>
+        <li>Sospecha de invasión</li>
+        <li><b>Discordancia citohistológica</b> (ej.: ASC-H con biopsia NIC 1)</li>
+      </ul>
+      <div class="warning">Antes de realizar histerectomía por cualquier indicación, siempre descartar carcinoma invasor mediante conización previa — para no infratratar una lesión invasora no diagnosticada.</div>
+    </div>
+  </div>
+
+  <div class="arrow arrow-sm" style="margin:8px auto"></div>
+
+  <!-- TÉCNICAS -->
+  <div class="group" style="margin-bottom:10px">
+    <div class="group-label">Técnicas escisionales — se eligen según contexto clínico</div>
+    <div class="row" style="align-items:flex-start">
+
+      <!-- LEEP -->
+      <div class="col col-wide">
+        <div class="node c-green" onclick="tog(this,'d-leep')">
+          <div class="label">Conización</div>
+          <div class="sub">Escisión con asa eléctrica</div>
+          <span class="badge b-teal">ZT tipo 1 y 2</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-leep" class="detail">
+          <ul>
+            <li>&nbsp;Utilizan un asa de alambre fino con corriente eléctrica para eliminar células anormales o precancerosas (NIC2, NIC3, CIN2-3) del cuello uterino.&nbsp;</li><li>Procedimiento: Ambulatorio, menor sangrado, menos agresivo.&nbsp;Se realiza bajo anestesia local en consultorio, dura unos 15 minutos.</li>
+            <li><b>Finalidad:</b> Diagnóstica (evaluar tejido) y terapéutica (eliminar lesiones).</li><li><b>Recuperación: </b>Generalmente rápida, con indicaciones de reposo relativo y abstinencia de relaciones sexuales por unas semanas.</li><li><b>Riesgos: </b>Poco frecuentes, pero incluyen sangrado, infección, o estrechamiento del cuello uterino (estenosis).</li><li>✅ Preserva mejor la fertilidad</li><li>Indicado para <b>ZT tipo 1 y 2</b></li>
+          </ul>
+          <div class="warning"><span style="color: rgb(216, 228, 245); font-size: 13px; background-color: rgb(19, 23, 32);">❌&nbsp;</span><b>LO MALO: </b>Fragmenta la pieza resecada → dificulta la evaluación de márgenes</div>
+        </div>
+      </div>
+
+      <!-- CONIZACIÓN -->
+      <div class="col col-wide">
+        <div class="node c-purple" onclick="tog(this,'d-coni')">
+          <div class="label">Conización</div>
+          <div class="sub">Para ZT tipo 1:&nbsp;&nbsp;<b>7–10 mm</b> de profundidad</div>
+          <span class="badge b-teal">ZT tipo 3 · lesiones profundas</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-coni" class="detail">
+          <ul>
+            <li>Reseca una pieza en forma de cono, íntegra</li><li>✅ Asegura mejor evaluación de márgenes</li><li>✅Indicada para: ZT tipo 3, lesiones profundas, sospecha de invasión, AIS</li>
+            <li>❌Mayor sangrado, más agresiva</li>
+          </ul><div><br></div>
+          <div class="highlight">La conización no es una biopsia — es un procedimiento diagnóstico Y terapéutico.</div>
+        </div>
+      </div>
+
+      <!-- TDL -->
+      <div class="col col-wide">
+        <div class="node c-amber" onclick="tog(this,'d-tdl')">
+          <div class="label">Tratamiento Destructivo Local (TDL)</div>
+          <div class="sub">Para ZT tipo 2: 10–15 mm de profundidad</div>
+          <span class="badge b-amber">Solo en casos seleccionados</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-tdl" class="detail">
+          <div class="ok">Aceptable si: lesión completamente visible (ZT tipo 1 o 2), procedimiento abarca toda la lesión, sin sospecha de invasión</div>
+          <div class="warning">NO aceptable si: lesión penetra canal endocervical (ZT tipo 3), no puede abarcarse completamente, o hay sospecha de invasión</div>
+        </div>
+      </div>
+
+    </div>
+    <div class="group-label">.</div>
+    <div class="group-label">Otras Técnicas no escisionales:</div>
+      <!-- ECE -->
+      <div class="col col-wide">
+        <div class="node c-teal" onclick="tog(this,'d-ece')">
+          <div class="label">Estudio del Conducto Endocervical(ECE)</div>
+          <div class="sub">Para ZT tipo 3: 15–25 mm de profundidad</div>
+          <span class="badge b-amber">Indicaciones: ZT tipo 3, Adenoacarcinoma insitu (AIS), AGS (Celulas glandulas atípicas) y citologías (PAP) de alto grado</span>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-ece" class="detail">Determina si la escisión fue completa y orienta el seguimiento o la necesidad de re-intervención.<div>El compromiso de márgenes es factor de riesgo para <strong>persistencia o recurrencia</strong>.</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- PROFUNDIDAD -->
+  <div class="group">
+    <div class="group-label">Tipo de escisión según profundidad — elegir según tipo de ZT</div>
+    <div class="row" style="align-items:flex-start">
+      <div class="col">
+        <div class="node c-amber" onclick="tog(this,'d-escT1')">
+          <div class="label">Escisión Tipo 3</div>
+          <div class="sub">Para ZT tipo 1 · 7–10 mm de profundidad</div>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-escT1" class="detail">Resección superficial para lesiones exocervicales completamente visibles. Técnica: LEEP preferente.</div>
+      </div>
+      <div class="col">
+        <div class="node c-red" onclick="tog(this,'d-escT2')">
+          <div class="label">Escisión Tipo 2</div>
+          <div class="sub">Para ZT tipo 2 · 10–15 mm de profundidad</div>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-escT2" class="detail">Lesiones con componente endocervical parcialmente visible. Técnica: LEEP o conización según extensión.</div>
+      </div>
+      <div class="col">
+        <div class="node c-teal" onclick="tog(this,'d-escT3')">
+          <div class="label">Escisión Tipo 3</div>
+          <div class="sub">Para ZT tipo 3 · 15–25 mm de profundidad</div>
+          <span class="chevron">▾</span>
+        </div>
+        <div id="d-escT3" class="detail">Lesiones endocervicales no visibles. Técnica: <b>conización obligatoria</b>. Mayor profundidad para asegurar resección completa.</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /escision section -->
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 6 — POST-ESCISIÓN: MÁRGENES
+═══════════════════════════════════════ -->
+<div id="s6" class="section-title">⑥ Post-escisión — Evaluación de márgenes</div>
+
+<div style="display:flex;flex-direction:column;align-items:center;width:100%">
+  <div class="center-box">
+    <div class="node c-blue" style="text-align:center" onclick="tog(this,'d-marg-def')">
+      <div class="label">Evaluación de márgenes quirúrgicos</div>
+      <div class="sub">Obligatoria en toda pieza de escisión . Mayor peso pronóstico en NIC 3</div>
+      <span class="chevron">▾</span>
+    </div>
+    <div id="d-marg-def" class="detail"><ul><li>Determina si la escisión fue completa y orienta el seguimiento o la necesidad de re-intervención.</li><li>El compromiso de márgenes es factor de riesgo para <strong>persistencia o recurrencia</strong>.</li><li>e evealúa en todas las lesiones escisadas (NIC 2 y NIC 3), pero en NIC 2 tiene mayor peso porquela escición es obligaroria (porque los NIC 3 siempre se trata) y el riesgo de progresión es más alto.</li></ul></div>
+  </div>
+
+  <div class="arrow arrow-sm" style="margin:8px auto"></div>
+
+  <div class="row" style="width:100%;align-items:flex-start">
+    <div class="col col-wide">
+      <div class="node c-green" onclick="tog(this,'d-marg-neg')">
+        <div class="label">Márgenes negativos (libres)</div>
+        <div class="sub">Escisión completa</div>
+        <span class="badge b-green">Seguimiento estándar</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-marg-neg" class="detail">
+        <div class="ok">Procedimiento considerado completo</div>
+        <p style="font-size:12px"><b>Seguimiento post-HSIL:</b> ver sección siguiente</p>
+      </div>
+    </div>
+    <div class="col col-wide">
+      <div class="node c-amber" onclick="tog(this,'d-marg-exo')">
+        <div class="label">Margen exocervical (+)&nbsp; con endocervical (-) y ECE (-)</div>
+        <div class="sub">No requiere re-escisión inmediata</div>
+        <span class="badge b-amber">Seguimiento estrecho</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-marg-exo" class="detail">
+        <ul>
+          <li>Seguimiento PAP + colposcopía c/4-6 meses</li>
+          <li>HPV a los 6-12 meses</li>
+          <li>No requiere re-escisión de rutina inmediata</li>
+        </ul>
+      </div>
+    </div>
+    <div class="col col-wide">
+      <div class="node c-red" onclick="tog(this,'d-marg-pos')" style="border-width:2px">
+        <div class="label">Margen layeral/endocervical (+) o ECE (+)</div>
+        <div class="sub">Mayor riesgo de lesión residual</div>
+        <span class="badge b-red">Seguimiento o re-escisión</span>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-marg-pos" class="detail">
+        <font color="#ffffff"><b>Hay 2 opciones para dar a elegir a la paciente:<br></b></font><ul><li><b>Opción A:</b> seguimiento con PAP&nbsp; +&nbsp; colposcopía c/4-6 m, ± HPV a los 6-12 meses (suele usarse en mujeres con deseos de reproducción)</li></ul><div><br></div><ul><li><b>Opción B:</b>&nbsp;Re-conización (repetir escisión). Suele usarse en mujeres SIN deseos de reproducción o la lesión es endocervical</li>
+          </ul><div><br></div>Decisión según edad, paridad, tipo de lesión y colposcopía<ul>
+        </ul>
+      <div><br></div><div><div class="highlight"><blockquote class="ml-2 border-l-4 border-border-300/10 pl-4 text-text-300"><p class="font-claude-response-body break-words whitespace-normal leading-[1.7]">⚠️ <strong>Antes de indicar histerectomía</strong> por márgenes comprometidos, siempre intentar <strong>reconización</strong> para descartar carcinoma invasor oculto. La histerectomía sin ese paso podría infratratar una lesión invasora no diagnosticada.</p></blockquote></div><div class="highlight">⚠️ En&nbsp;<span style="color: rgb(255, 255, 255); font-weight: 600;">NIC 2</span>&nbsp;el análisis de márgenes tiene mayor peso que en NIC 3, paradójicamente, porque en NIC 2 la escisión no siempre es obligatoria — por lo tanto, si se decidió operar, los márgenes definen si el procedimiento fue suficiente.</div><br></div></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 7 — SEGUIMIENTO POST-TRATAMIENTO H-SIL
+═══════════════════════════════════════ -->
+<div id="s7" class="section-title">⑦ Seguimiento post-tratamiento H-SIL (NIC 2-3)</div>
+
+<div class="group">
+  <div class="group-label">Seguimiento mínimo: 25 años post-tratamiento</div>
+  <div class="row" style="align-items:flex-start">
+
+    <div class="col col-wide">
+      <div class="node c-teal" onclick="tog(this,'d-seg-hpv')">
+        <div class="label">Con HPV disponible</div>
+        <div class="sub">1.er control a los 6-12 meses post-tratamiento</div>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-seg-hpv" class="detail">
+        <ul>
+          <li>HPV (−) → <b>control anual</b></li><ul><li>HPV (−) × 3 controles → <b>repetir c/3 años</b></li><li>HPV (+) → <b>colposcopía ± biopsia</b><ul><li class="whitespace-normal break-words pl-2"><strong>PAP (+) y/o Colpo (+)</strong> → biopsia dirigida → según resultado considerar <strong>retratamiento</strong></li>
+<li class="whitespace-normal break-words pl-2"><strong>PAP (-) y Colpo (-)</strong> → seguimiento con PAP + Colpo c/6 meses x 2 años</li></ul></li></ul>
+          
+          
+        </ul><div><font color="#ffffff"><b><br></b></font></div>
+        <div class="highlight">HPV (+) aislado NO implica retratamiento automático → siempre correlacionar con citología y colposcopía antes de tomar conducta</div>
+      </div>
+    </div>
+
+    <div class="col col-wide">
+      <div class="node c-blue" onclick="tog(this,'d-seg-nohpv')">
+        <div class="label">Sin HPV disponible</div>
+        <div class="sub">PAP + colposcopía c/6 meses × 2 año</div>
+        <span class="chevron">▾</span>
+      </div>
+      <div id="d-seg-nohpv" class="detail">
+        <ul>
+          <li>Si todo (−) → control anual</li>
+        </ul><div><br></div><div><div class="highlight">⚠️ El seguimiento de 25 años se justifica porque el riesgo de recurrencia o progresión a carcinoma invasor <strong>persiste a largo plazo</strong>, incluso con márgenes negativos post-tratamiento, especialmente en mujeres mayores de 50 años</div><br></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════
+     SECCIÓN 8 — HISTERECTOMÍA
+═══════════════════════════════════════ -->
+<div id="s8" class="section-title">⑧ Histerectomía — indicaciones específicas</div>
+
+<div class="center-box">
+  <div class="node c-pink" onclick="tog(this,'d-hx')" style="text-align:center">
+    <div class="label">Histerectomía — no es primera elección</div>
+    <div class="sub">Solo en indicaciones precisas · La vagina sigue siendo zona de riesgo post-histerectomía</div>
+    <span class="chevron">▾</span>
+  </div>
+  <div id="d-hx" class="detail">
+    <h5>Indicaciones:</h5>
+    <ul>
+      <li>Recurrencia de NIC 2-3 con re-conización no factible</li>
+      <li>Persistencia tras escisión repetida</li>
+      <li>Imposibilidad de seguimiento adecuado</li>
+      <li>Patología ginecológica asociada (miomatosis sintomática, etc.)</li>
+      <li>AIS con paridad cumplida&nbsp;(independientemente de los márgenes) → histerectomía simple</li>
+      <li>Carcinoma invasor → histerectomía radical o tratamiento oncológico específico</li></ul><div><br></div><div><div class="warning">La histerectomía NO reemplaza el seguimiento citocolposcópico posterior — La vagina sigue siendo zona de riesgo;&nbsp;&nbsp;las mujeres histerectomizadas por NIC 3 o AIS requieren citología de cúpula vaginal periódica, ya que existe riesgo de neoplasia intraepitelial vaginal (VAIN)</div></div><div><div class="highlight"><p class="font-claude-response-body break-words whitespace-normal leading-[1.7]">⚠️ <strong>Regla fundamental:</strong> siempre realizar <strong>conización previa</strong> antes de la histerectomía en cualquiera de estas indicaciones, para:</p>
+<ul class="[li_&amp;]:mb-0 [li_&amp;]:mt-1 [li_&amp;]:gap-1 [&amp;:not(:last-child)_ul]:pb-1 [&amp;:not(:last-child)_ol]:pb-1 list-disc flex flex-col gap-1 pl-8 mb-3">
+<li class="whitespace-normal break-words pl-2">Confirmar el diagnóstico histológico definitivo</li>
+<li class="whitespace-normal break-words pl-2"><strong>Descartar carcinoma invasor</strong> — una histerectomía simple sobre un cáncer invasor no diagnosticado es un tratamiento insuficiente e incorrecto</li>
+<li class="whitespace-normal break-words pl-2">Evaluar márgenes y extensión real de la lesión</li></ul></div></div>
+  </div>
+</div>
+
+
+
+<!-- NOTA FINAL -->
+<div style="margin-top:28px;padding:12px 16px;background:var(--bg2);border-radius:10px;border:1px solid var(--border);font-size:11.5px;color:var(--text2);text-align:center;line-height:1.7">
+  Hacé clic en cada nodo para expandir los detalles clínicos · Basado en guías ASCCP / FIGO / WHO y apuntes de cátedra
+</div>
+
+<!-- /wrap -->
+
+/* ── TOOLBAR ── */
+/* ── NODE: chevron safe zone ── */
+.node .chevron { right: 32px; }
+
+/* ── TOAST ── */
+@keyframes toastIn {
+  from { opacity:0; transform:translateX(-50%) translateY(8px); }
+  to   { opacity:1; transform:translateX(-50%) translateY(0); }
+}
+</style>
+
+<script>
+function tog(el, id) {
+  const d = document.getElementById(id);
+  if (!d) return;
+  const isOpen = d.classList.contains('open');
+  d.classList.toggle('open');
+  el.classList.toggle('expanded', !isOpen);
+}
+
+// ═══════════════════════════════════════════
+</script>
+
+
+</body></html>
