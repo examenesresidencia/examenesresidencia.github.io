@@ -44,6 +44,8 @@
     { id: 'unico2023',      label: 'Único 2023',        grupo: 'Exámenes Único' },
     { id: 'unico2024',      label: 'Único 2024',        grupo: 'Exámenes Único' },
     { id: 'unico2025',      label: 'Único 2025',        grupo: 'Exámenes Único' },
+    { id: 'unico2025t1',  label: 'Único 2025 T1 Post-copia', grupo: 'Exámenes Único' },
+    { id: 'unico2025t2',  label: 'Único 2025 T2 Post-copia', grupo: 'Exámenes Único' },
     // ── Exámenes UBA ──────────────────────────────────────────────
     { id: 'uba2016',        label: 'UBA 2016',          grupo: 'Exámenes UBA' },
     { id: 'uba2017',        label: 'UBA 2017',          grupo: 'Exámenes UBA' },
