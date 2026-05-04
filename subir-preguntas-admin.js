@@ -766,11 +766,12 @@
     // dejando  }  \n  // comentario  \n  {  sin coma → JSON inválido.
     // Solución: reemplazar cada línea de comentario por una coma si el contexto lo requiere.
     const contenidoLimpio = contenido
+      // Normalizar doble coma (bug de QDuplicator: genera },,)
+      .replace(/,,/g, ',')
       // Primero reemplazar líneas que son SOLO un comentario // por nada (línea vacía)
       .replace(/^[ \t]*\/\/[^\n]*$/gm, '')
       // Luego asegurarse de que entre  }  y  {  haya siempre una coma
       .replace(/\}\s*\n(\s*)\{/g, '},\n$1{');
-
     // Intentar varios patrones comunes
     const patrones = [
       /preguntasPorSeccion\[["']\w+["']\]\s*=\s*(\[[\s\S]*?\]);\s*$/m,
