@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V16
+// editor-admin.js  — V17
 // ────────────────────────────────────────────────────────────────
 
 
@@ -248,52 +248,13 @@
         height: 34px;
       }
       .meq-input::placeholder { color: #334155; }
-      .meq-preview-wrap {
-        background: #0a1628;
-        border: 1px solid rgba(56,189,248,0.14);
-        border-radius: 7px;
-        padding: 10px;
-        margin-bottom: 10px;
-        text-align: center;
+      .meq-insert-status {
+        font-size: 0.74rem;
+        font-weight: 600;
+        color: #34d399;
+        margin-top: 6px;
+        min-height: 18px;
       }
-      .meq-preview-img {
-        max-width: 100%;
-        max-height: 180px;
-        border-radius: 6px;
-        border: 1px solid rgba(56,189,248,0.2);
-        display: block;
-        margin: 0 auto 7px;
-      }
-      .meq-preview-status { font-size: 0.74rem; font-weight: 600; }
-      .meq-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-      .meq-btn-verificar, .meq-btn-insertar {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        border-radius: 7px;
-        font-size: 0.77rem;
-        font-weight: 700;
-        padding: 6px 13px;
-        cursor: pointer;
-        border: none;
-        transition: all 0.16s;
-      }
-      .meq-btn-verificar {
-        background: rgba(56,189,248,0.10);
-        border: 1.5px solid rgba(56,189,248,0.28);
-        color: #38bdf8;
-      }
-      .meq-btn-verificar:hover { background: rgba(56,189,248,0.20); }
-      .meq-btn-insertar {
-        background: linear-gradient(135deg, #0891b2, #0d7490);
-        color: #fff;
-        box-shadow: 0 3px 10px rgba(8,145,178,0.28);
-      }
-      .meq-btn-insertar:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 5px 14px rgba(8,145,178,0.4);
-      }
-      .meq-btn-insertar:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
     `;
     document.head.appendChild(st);
   }
@@ -770,17 +731,29 @@
     // ── Acumular fragmento al hacer mouseup con Ctrl ───────────────
     editor.addEventListener('mouseup', function(e) {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return; // sin selección real
 
       if (!_ctrlPresionado) {
-        // Sin Ctrl y sin selección real (simple click): limpiar highlights
-        if (_multiFragmentos.length > 0 && (!sel || sel.isCollapsed)) {
+        // Sin Ctrl y sin selección real (simple click): limpiar highlights SIEMPRE
+        if (!sel || sel.isCollapsed) {
           _meqLimpiarHighlights(editor);
           _multiFragmentos = [];
           _ultimoComando   = null;
+          return;
+        }
+        // Sin Ctrl pero CON selección: guardar el rango para que los botones
+        // B/I/U puedan aplicar el formato directamente sin necesitar Ctrl.
+        // El texto queda visualmente seleccionado; no se crea highlight.
+        if (sel.rangeCount > 0) {
+          const r = sel.getRangeAt(0);
+          if (editor.contains(r.commonAncestorContainer)) {
+            _savedRange = r.cloneRange();
+            savedRangeRef.current = _savedRange;
+          }
         }
         return;
       }
+
+      if (!sel || sel.isCollapsed) return; // con Ctrl pero sin selección real
 
       // Con Ctrl: capturar el rango actual y envolverlo en un span de highlight
       if (sel.rangeCount === 0) return;
@@ -1064,143 +1037,52 @@
             style="color:#64748b;display:flex;align-items:center;user-select:none;">
             Clic para buscar imagen…
           </span>
-          <input type="file"   id="meq-file-input" accept="image/*" style="display:none;" autocomplete="off"/>
-          <input type="hidden" id="meq-nombre" value=""/>
+          <input type="file" id="meq-file-input" accept="image/*" style="display:none;" autocomplete="off"/>
         </div>
-        <div id="meq-preview-wrap" style="display:none;" class="meq-preview-wrap">
-          <img class="meq-preview-img" id="meq-preview-img" src="" alt="preview"/>
-          <div class="meq-preview-status" id="meq-preview-status"></div>
-        </div>
-        <div class="meq-actions">
-          <button class="meq-btn-verificar" id="meq-btn-verificar" type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-            Verificar
-          </button>
-          <button class="meq-btn-insertar" id="meq-btn-insertar" disabled type="button">
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <line x1="5"  y1="12" x2="19" y2="12"/>
-            </svg>
-            Insertar en explicación
-          </button>
-        </div>`;
+        <div class="meq-insert-status" id="meq-insert-status"></div>`;
       panelCont.appendChild(panel);
 
-      const inputNombre    = panel.querySelector('#meq-nombre');
-      const fileInput      = panel.querySelector('#meq-file-input');
-      const fileRow        = panel.querySelector('#meq-file-row');
-      const nombreDisplay  = panel.querySelector('#meq-nombre-display');
-      const btnVerificar   = panel.querySelector('#meq-btn-verificar');
-      const btnInsertar    = panel.querySelector('#meq-btn-insertar');
-      const previewWrap    = panel.querySelector('#meq-preview-wrap');
-      const previewImg     = panel.querySelector('#meq-preview-img');
-      const previewStatus  = panel.querySelector('#meq-preview-status');
-      let urlVerificada    = '';
-      let nombreVerificado = '';
+      const fileInput     = panel.querySelector('#meq-file-input');
+      const fileRow       = panel.querySelector('#meq-file-row');
+      const nombreDisplay = panel.querySelector('#meq-nombre-display');
+      const insertStatus  = panel.querySelector('#meq-insert-status');
 
       fileRow.addEventListener('click', () => fileInput.click());
 
-      // Al seleccionar archivo: preview inmediato con URL local temporal
+      // Al seleccionar archivo: insertar directamente al final del editor
       fileInput.addEventListener('change', () => {
         const file = fileInput.files[0];
         if (!file) return;
-        inputNombre.value         = file.name;
+
         nombreDisplay.textContent = file.name;
         nombreDisplay.style.color = '#e2e8f0';
-        const localUrl = URL.createObjectURL(file);
-        previewWrap.style.display = 'block';
-        previewImg.src            = localUrl;
-        previewImg.style.display  = 'block';
-        previewStatus.innerHTML   = '📁 Imagen seleccionada — <span style="color:#fbbf24">recordá subirla a imagenes/ en GitHub</span>';
-        previewStatus.style.color = '#34d399';
-        btnInsertar.disabled      = false;
-        urlVerificada             = localUrl;
-        nombreVerificado          = file.name;
-      });
 
-      // Verificar: prueba GitHub Pages primero, luego local
-      btnVerificar.addEventListener('click', () => {
-        const nombre = inputNombre.value.trim();
-        if (!nombre) { inputNombre.style.borderColor = '#ef4444'; return; }
-        inputNombre.style.borderColor = '';
-        const urlGH    = GITHUB_IMAGES_BASE + nombre;
-        const urlLocal = 'imagenes/' + nombre;
-        previewWrap.style.display = 'block';
-        previewStatus.textContent = 'Verificando…';
-        previewStatus.style.color = '#94a3b8';
-        previewImg.style.display  = 'none';
-        btnInsertar.disabled      = true;
-        urlVerificada = ''; nombreVerificado = '';
-
-        function probar(url, esLocal) {
-          const t = new Image();
-          t.onload = () => {
-            previewImg.src            = url;
-            previewImg.style.display  = 'block';
-            previewStatus.innerHTML   = esLocal
-              ? '✅ Encontrada localmente — <span style="color:#fbbf24">recordá subirla a GitHub</span>'
-              : '✅ Encontrada en GitHub Pages — lista para insertar';
-            previewStatus.style.color = '#34d399';
-            btnInsertar.disabled      = false;
-            urlVerificada             = url;
-            nombreVerificado          = nombre;
-          };
-          t.onerror = () => {
-            if (!esLocal) { probar(urlLocal + '?t=' + Date.now(), true); return; }
-            previewImg.style.display  = 'none';
-            previewStatus.textContent = '❌ No encontrada. Verificá el nombre y que esté en imagenes/ o GitHub.';
-            previewStatus.style.color = '#fca5a5';
-            btnInsertar.disabled      = true;
-          };
-          t.src = url;
-        }
-        probar(urlGH + '?t=' + Date.now(), false);
-      });
-
-      // Insertar imagen en el WYSIWYG en la posición del cursor guardada
-      btnInsertar.addEventListener('click', () => {
-        if (!urlVerificada || !nombreVerificado) return;
-        // Siempre guardar con URL de GitHub (aunque se previsualizó en local)
-        const urlFinal = GITHUB_IMAGES_BASE + nombreVerificado;
-        const imgHtml  = `<img src="${urlFinal}" alt="${nombreVerificado}"
+        const nombreVerificado = file.name;
+        const urlFinal         = GITHUB_IMAGES_BASE + nombreVerificado;
+        const imgHtml          = `<br><img src="${urlFinal}" alt="${nombreVerificado}"
           style="max-width:100%;border-radius:8px;margin:10px 0;display:block;box-shadow:0 2px 10px rgba(0,0,0,0.18);"
           title="Clic para ampliar">`;
 
-        // Restaurar selección y luego insertar
-        restaurarSeleccion();
+        // Mover el cursor al final del editor e insertar
+        editor.focus();
+        const sel = window.getSelection();
+        const r   = document.createRange();
+        r.selectNodeContents(editor);
+        r.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(r);
         document.execCommand('insertHTML', false, imgHtml);
 
-        // Cerrar panel
-        panelCont.innerHTML      = '';
-        btnImg.style.background  = '';
-        btnImg.style.borderColor = '';
+        insertStatus.innerHTML = `✅ <strong style="color:#e2e8f0">${nombreVerificado}</strong> insertada — <span style="color:#fbbf24">recordá subirla a imagenes/ en GitHub</span>`;
 
-        const esLocal = urlVerificada.startsWith('blob:') || urlVerificada.startsWith('imagenes/');
-        _eaToast(
-          esLocal
-            ? '🖼 Imagen insertada (local). Al guardar se usará la URL de GitHub Pages.'
-            : '🖼 Imagen insertada. Guardá para confirmar.',
-          'success'
-        );
+        // Cerrar panel tras un breve instante para que el usuario vea el feedback
+        setTimeout(() => {
+          panelCont.innerHTML      = '';
+          btnImg.style.background  = '';
+          btnImg.style.borderColor = '';
+        }, 1400);
 
-        // Scroll del overlay hasta el botón "Guardar en Firestore"
-        // El overlay es el contenedor scrollable (overflow-y:auto), no el window.
-        // Usamos scrollTo sobre el overlay con la posición del botón relativa al overlay.
-        requestAnimationFrame(() => {
-          const btnSave = overlay.querySelector('#edit-q-save');
-          if (btnSave) {
-            const overlayRect = overlay.getBoundingClientRect();
-            const btnRect     = btnSave.getBoundingClientRect();
-            // Posición del botón relativa al scroll actual del overlay
-            const scrollTarget = overlay.scrollTop + (btnRect.bottom - overlayRect.bottom) + 24;
-            overlay.scrollTo({ top: scrollTarget, behavior: 'smooth' });
-          }
-        });
+        _eaToast('🖼 Imagen insertada. Al guardar se usará la URL de GitHub Pages.', 'success');
       });
     }); // fin btnImg.addEventListener
 
