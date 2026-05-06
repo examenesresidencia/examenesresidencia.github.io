@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Amenorrea Secundaria · Algoritmo Diagnóstico</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&amp;family=DM+Sans:wght@300;400;500;600&amp;display=swap" rel="stylesheet">
+
+<style>
+/* ═══════════════════════════════════════════════
+   BASE
+═══════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+  background: #f0ece4;
+  min-height: 100vh;
+  padding: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   EDITOR TOOLBAR (top bar)
+═══════════════════════════════════════════════ */
+
+
+
+
+
+
+
+
+
+
+
+
+/* Export button group */
+.export-wrap { position: relative; }
+
+
+#export-menu {
+  display: none; position: absolute; top: calc(100% + 6px); right: 0;
+  background: #1a1814; border: 1px solid #2d5a18;
+  border-radius: 10px; min-width: 260px; z-index: 500;
+  overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,.7);
+}
+#export-menu-label {
+  padding: 7px 12px; font-size: 9px; font-weight: 700;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: #4a4038; border-bottom: 1px solid #2a2520;
+}
+
+
+
+
+
+
+
+/* ═══════════════════════════════════════════════
+   DRAG OVERLAY & PLACEHOLDER
+═══════════════════════════════════════════════ */
+
+
+
+.draggable-block {
+  position: relative;
+}
+.draggable-block:hover > 
+.draggable-block.drag-mode-on > 
+
+body.dragging-active * { user-select: none; }
+.drop-placeholder {
+  border: 2px dashed #2d6fbf;
+  border-radius: 8px;
+  background: rgba(45,111,191,.07);
+  transition: height .1s;
+  pointer-events: none;
+}
+.being-dragged {
+  opacity: .4;
+  outline: 2px dashed #2d6fbf;
+  outline-offset: 2px;
+}
+
+
+/* ═══════════════════════════════════════════════
+   MAIN WRAPPER
+═══════════════════════════════════════════════ */
+#amenorrea-main {
+  max-width: 1400px; margin: 0 auto;
+  padding: 24px 20px 80px;
+  zoom: 0.9;
+}
+
+
+/* ═══════════════════════════════════════════════
+   VARIABLES & TOKENS (amenorrea original)
+═══════════════════════════════════════════════ */
+#amenorrea-algo-root {
+  --a-ink:        #1a1814;
+  --a-ink2:       #3d3a34;
+  --a-ink3:       #6b6760;
+  --a-paper:      #faf8f4;
+  --a-paper2:     #f2efe8;
+  --a-rule:       #ddd9ce;
+
+  --a-blue-dk:    #0d3b6e;
+  --a-blue-md:    #1a5fa8;
+  --a-blue-lt:    #deeaf7;
+  --a-blue-pale:  #eef4fb;
+
+  --a-purple-dk:  #2e1f6b;
+  --a-purple-md:  #4c3baa;
+  --a-purple-lt:  #e4e1f8;
+  --a-purple-pale:#eeedfb;
+
+  --a-teal-dk:    #05473a;
+  --a-teal-md:    #0a7260;
+  --a-teal-lt:    #d5f0ea;
+  --a-teal-pale:  #e8f7f4;
+
+  --a-coral-dk:   #6b1f0d;
+  --a-coral-md:   #b03a1a;
+  --a-coral-lt:   #f5ddd6;
+  --a-coral-pale: #faf0ec;
+
+  --a-green-dk:   #1b4d0e;
+  --a-green-md:   #2e7d1a;
+  --a-green-lt:   #d8eed1;
+  --a-green-pale: #edf7e8;
+
+  --a-amber-dk:   #5c3200;
+  --a-amber-md:   #a05a00;
+  --a-amber-lt:   #fde8c0;
+  --a-amber-pale: #fff4e0;
+
+  --a-red-dk:     #6b0f0f;
+  --a-red-md:     #c0392b;
+  --a-red-lt:     #fad5d5;
+  --a-red-pale:   #fdf0f0;
+
+  --a-r:   8px;
+  --a-rsm: 5px;
+  --a-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+
+/* ── page wrapper ── */
+.a-page {
+  background: var(--a-paper);
+  border: 1px solid var(--a-rule);
+  border-radius: 12px;
+  padding: 28px 28px 36px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.07);
+  margin-bottom: 20px;
+}
+
+/* ── export toolbar (PDF/JPG) ── */
+.a-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 20px;
+  background: var(--a-ink); border-radius: var(--a-r);
+  padding: 10px 16px;
+}
+.a-toolbar-title {
+  font-size: 12px; color: #d0ccc4; letter-spacing: .5px;
+  font-family: 'Libre Baskerville', serif;
+}
+.a-toolbar-btns { display: flex; gap: 8px; }
+.a-btn-exp {
+  display: flex; align-items: center; gap: 5px;
+  padding: 6px 14px; border: none; border-radius: var(--a-rsm);
+  font-family: 'DM Sans', 'Segoe UI', sans-serif;
+  font-size: 12px; font-weight: 500; cursor: pointer; transition: opacity .15s;
+}
+.a-btn-exp:hover { opacity: .82; }
+.a-btn-pdf { background: #c0392b; color: #fff; }
+.a-btn-jpg { background: #1a5fa8; color: #fff; }
+
+/* ── header ── */
+.a-hdr {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  border-bottom: 2px solid var(--a-ink); padding-bottom: 14px; margin-bottom: 16px;
+}
+.a-hdr-eyebrow {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 2px;
+  color: var(--a-blue-md); text-transform: uppercase; margin-bottom: 3px;
+}
+.a-hdr-title {
+  font-family: 'Libre Baskerville', serif;
+  font-size: 20px; font-weight: 700; color: var(--a-ink); line-height: 1.2;
+}
+.a-hdr-sub { font-size: 11px; color: var(--a-ink3); margin-top: 4px; font-style: italic; }
+.a-hdr-def {
+  background: var(--a-blue-pale); border: 1px solid var(--a-blue-lt);
+  border-radius: var(--a-r); padding: 9px 13px;
+  font-size: 10.5px; color: var(--a-blue-dk); max-width: 220px; text-align: right;
+  line-height: 1.5;
+}
+.a-hdr-def strong { font-weight: 600; display: block; margin-bottom: 2px; }
+
+/* ── flow ── */
+.a-flow { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.a-step-wrap { width: 100%; display: flex; flex-direction: column; align-items: center; }
+
+.a-card {
+  width: 100%; border-radius: var(--a-r); border: 1.2px solid;
+  padding: 11px 15px; box-shadow: var(--a-shadow);
+  transition: box-shadow .15s;
+}
+.a-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+  text-transform: uppercase; margin-bottom: 5px;
+  padding: 2px 7px; border-radius: 3px;
+}
+.a-title {
+  font-family: 'Libre Baskerville', serif;
+  font-size: 13px; font-weight: 700; line-height: 1.25; margin-bottom: 3px;
+}
+.a-body { font-size: 10.5px; line-height: 1.6; }
+.a-body p + p { margin-top: 2px; }
+
+/* skins */
+.as-slate  { background: var(--a-paper2); border-color: #b0aba0; }
+.as-slate  .a-tag { background: var(--a-ink2); color: #e8e5df; }
+.as-slate  .a-title { color: var(--a-ink); }
+.as-slate  .a-body  { color: var(--a-ink2); }
+
+.as-blue   { background: var(--a-blue-pale); border-color: var(--a-blue-md); }
+.as-blue   .a-tag { background: var(--a-blue-dk); color: #fff; }
+.as-blue   .a-title { color: var(--a-blue-dk); }
+.as-blue   .a-body  { color: var(--a-blue-md); }
+
+.as-purple { background: var(--a-purple-pale); border-color: var(--a-purple-md); }
+.as-purple .a-tag { background: var(--a-purple-dk); color: #fff; }
+.as-purple .a-title { color: var(--a-purple-dk); }
+.as-purple .a-body  { color: var(--a-purple-md); }
+
+.as-coral  { background: var(--a-coral-pale); border-color: var(--a-coral-md); }
+.as-coral  .a-tag { background: var(--a-coral-md); color: #fff; }
+.as-coral  .a-title { color: var(--a-coral-dk); }
+.as-coral  .a-body  { color: var(--a-coral-md); }
+
+.as-green  { background: var(--a-green-pale); border-color: var(--a-green-md); }
+.as-green  .a-tag { background: var(--a-green-md); color: #fff; }
+.as-green  .a-title { color: var(--a-green-dk); }
+.as-green  .a-body  { color: var(--a-green-md); }
+
+.as-teal   { background: var(--a-teal-pale); border-color: var(--a-teal-md); }
+.as-teal   .a-tag { background: var(--a-teal-md); color: #fff; }
+.as-teal   .a-title { color: var(--a-teal-dk); }
+.as-teal   .a-body  { color: var(--a-teal-md); }
+
+.as-amber  { background: var(--a-amber-pale); border-color: var(--a-amber-md); }
+.as-amber  .a-tag { background: var(--a-amber-dk); color: #fff; }
+.as-amber  .a-title { color: var(--a-amber-dk); }
+.as-amber  .a-body  { color: var(--a-amber-md); }
+
+.as-red    { background: var(--a-red-pale); border-color: var(--a-red-md); }
+.as-red    .a-tag { background: var(--a-red-md); color: #fff; }
+.as-red    .a-title { color: var(--a-red-dk); }
+.as-red    .a-body  { color: var(--a-red-md); }
+
+/* ── arrows ── */
+.a-arr { display: flex; flex-direction: column; align-items: center; margin: 3px 0; }
+.a-arr-line { width: 1.5px; height: 14px; background: #9e9a92; }
+.a-arr-head { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid #9e9a92; }
+
+/* ── fork ── */
+.a-fork { width: 100%; display: flex; flex-direction: column; align-items: center; }
+.a-fork-stem { width: 1.5px; height: 16px; background: #9e9a92; }
+.a-fork-bar { width: 90%; display: flex; align-items: flex-start; position: relative; overflow: visible; }
+.a-fork-bar::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1.5px; background: #9e9a92; }
+.a-fork-branch { flex: 1; display: flex; flex-direction: column; align-items: center; }
+.a-fork-bline { width: 1.5px; height: 16px; background: #9e9a92; }
+.a-flabel {
+  font-size: 9px; font-weight: 700; letter-spacing: .8px;
+  padding: 2px 8px; border-radius: 3px; text-transform: uppercase;
+  margin-bottom: 5px; white-space: nowrap;
+}
+.afl-pos  { background: var(--a-green-lt);  color: var(--a-green-dk); }
+.afl-neg  { background: var(--a-red-lt);    color: var(--a-red-dk); }
+.afl-elev { background: var(--a-coral-lt);  color: var(--a-coral-dk); }
+.afl-low  { background: var(--a-purple-lt); color: var(--a-purple-dk); }
+.afl-resp { background: var(--a-teal-lt);   color: var(--a-teal-dk); }
+.afl-nore { background: var(--a-amber-lt);  color: var(--a-amber-dk); }
+.a-fork-branch .a-card { width: 95%; }
+
+/* ── flecha anotada centrada ── */
+.a-arr-labeled {
+  display: flex; flex-direction: column; align-items: center; margin: 6px 0;
+}
+.a-arr-pill {
+  font-size: 9px; font-weight: 700; color: #fff;
+  background: #7a7770; border-radius: 3px;
+  padding: 2px 10px; letter-spacing: .5px; white-space: nowrap; margin: 1px 0;
+}
+
+/* ── bullet list ── */
+.a-blist { list-style: none; margin-top: 5px; }
+.a-blist li { position: relative; padding-left: 13px; font-size: 10.5px; line-height: 1.55; margin-bottom: 1px; }
+.a-blist li::before { content: '·'; position: absolute; left: 3px; font-weight: 700; font-size: 13px; line-height: 1.3; }
+.a-hl { font-weight: 600; }
+
+/* ── divider ── */
+.a-divider { width: 100%; border: none; border-top: 1.5px dashed var(--a-rule); margin: 20px 0 14px; }
+
+/* ── table ── */
+.a-tbl-wrap { width: 100%; overflow: hidden; border-radius: var(--a-r); border: 1px solid var(--a-rule); margin-top: 6px; }
+.a-tbl { width: 100%; border-collapse: collapse; font-size: 10px; }
+.a-tbl thead tr { background: var(--a-ink); }
+.a-tbl thead th { color: #d8d4cc; font-weight: 500; padding: 7px 9px; text-align: left; }
+.a-tbl tbody tr:nth-child(1) td { background: var(--a-red-pale);    color: var(--a-red-dk); }
+.a-tbl tbody tr:nth-child(2) td { background: var(--a-blue-pale);   color: var(--a-blue-dk); }
+.a-tbl tbody tr:nth-child(3) td { background: var(--a-teal-pale);   color: var(--a-teal-dk); }
+.a-tbl tbody tr:nth-child(4) td { background: var(--a-amber-pale);  color: var(--a-amber-dk); }
+.a-tbl tbody tr:nth-child(5) td { background: var(--a-purple-pale); color: var(--a-purple-dk); }
+.a-tbl tbody td { padding: 6px 9px; vertical-align: top; line-height: 1.45; border-bottom: 1px solid #e8e4dc; }
+.a-tbl tbody tr:last-child td { border-bottom: none; }
+.a-tbl td:first-child { font-weight: 600; white-space: nowrap; }
+
+/* ── refs ── */
+.a-refs { font-size: 9px; color: var(--a-ink3); text-align: center; margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--a-rule); font-style: italic; line-height: 1.6; }
+
+/* ── fin label ── */
+.a-fin { font-size: 9.5px; font-weight: 700; text-align: center; margin-top: 5px; }
+
+
+/* ═══════════════════════════════════════════════
+   INLINE EDITOR STYLES
+═══════════════════════════════════════════════ */
+.tb-btn {
+  background: #1a2030; border: 1px solid #252d3d; border-radius: 6px;
+  color: #a0b4cc; cursor: pointer; padding: 4px 9px; font-size: 12px;
+  font-family: 'DM Sans', sans-serif; transition: all .15s; line-height: 1.6; white-space: nowrap;
+}
+.tb-btn:hover  { background: #252d3d; color: #d8e4f5; }
+.tb-btn:active { background: #2d6fbf; color: #fff; }
+.tb-group { display: flex; flex-direction: row; align-items: center; gap: 3px; }
+.tb-sep   { width: 1px; height: 32px; background: #252d3d; margin: 0 2px; flex-shrink: 0; }
+
+#edit-area h5 {
+  font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; color: #7a91b0; margin: 10px 0 4px;
+}
+#edit-area b, #edit-area strong { color: #fff; font-weight: 600; }
+#edit-area .highlight { background: #1a2540; border-left: 3px solid #2d6fbf; border-radius: 4px; padding: 6px 10px; margin: 6px 0; font-size: 11.5px; }
+#edit-area .warning   { background: rgba(58,15,15,.4); border-left: 3px solid #d43030; border-radius: 4px; padding: 6px 10px; margin: 6px 0; font-size: 11.5px; color: #ffb0b0; }
+#edit-area .ok        { background: rgba(22,58,16,.4); border-left: 3px solid #3d9020; border-radius: 4px; padding: 6px 10px; margin: 6px 0; font-size: 11.5px; color: #9edc6a; }
+
+#edit-area ul, #edit-area ol { padding-left: 20px; margin: 3px 0; }
+#edit-area li { margin-bottom: 3px; line-height: 1.6; }
+
+.editable-target {
+  position: relative; border-radius: 4px; transition: outline .1s; cursor: default;
+}
+.editable-target:hover { outline: 1.5px dashed rgba(45,111,191,.5); outline-offset: 3px; }
+.editable-target .edit-btn {
+  display: none; position: absolute; top: -10px; right: -4px;
+  background: rgba(45,111,191,.95); border: 1px solid #2d6fbf; border-radius: 5px;
+  color: #fff; font-size: 10px; padding: 1px 7px; cursor: pointer; z-index: 50;
+  font-family: 'DM Sans', sans-serif; line-height: 1.7; white-space: nowrap;
+  pointer-events: all; transition: background .15s;
+}
+.editable-target:hover .edit-btn { display: inline-block; }
+.editable-target .edit-btn:hover { background: #2d6fbf; }
+
+/* Skin picker swatches */
+.skin-btn {
+  width: 26px; height: 26px; border-radius: 5px; border: 2px solid transparent;
+  cursor: pointer; transition: transform .1s, box-shadow .1s;
+  font-size: 0;
+}
+.skin-btn:hover { transform: scale(1.2); }
+.skin-btn.active { box-shadow: 0 0 0 3px #fff; }
+
+@keyframes toastIn {
+  from { opacity:0; transform:translateX(-50%) translateY(8px); }
+  to   { opacity:1; transform:translateX(-50%) translateY(0); }
+}
+
+/* Drag mode: highlight draggable areas */
+body.drag-mode-on .draggable-block {
+  outline: 1px dashed rgba(45,111,191,.25);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+body.drag-mode-on .draggable-block:hover {
+  outline-color: rgba(45,111,191,.6);
+}
+
+/* Free 2D drag */
+.draggable-block {
+  transition: box-shadow .15s;
+  position: relative;
+}
+.draggable-block.being-dragged {
+  opacity: .75;
+  box-shadow: 0 12px 40px rgba(0,0,0,.35);
+  z-index: 400;
+}
+
+/* ── SWAP BUTTONS ── */
+.swap-btn {
+  display: none;                        /* shown only in drag mode */
+  align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  cursor: pointer; font-size: 15px; font-weight: 700;
+  line-height: 1; transition: transform .12s, background .12s;
+  user-select: none; z-index: 50;
+}
+.swap-btn:hover { transform: scale(1.18); }
+.swap-btn:active { transform: scale(.95); }
+
+/* Horizontal swap: sits centred on the fork bar */
+.swap-h {
+  position: absolute; top: -16px; left: 50%;
+  transform: translateX(-50%);
+  width: 32px; height: 32px;
+  background: #1a4a7a; color: #90c4ff;
+  border: 2px solid #2d6fbf;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
+.swap-h:hover { background: #2d6fbf; transform: translateX(-50%) scale(1.15); }
+
+/* Vertical swap: between consecutive step-wraps */
+.swap-v {
+  display: none;
+  width: 28px; height: 28px;
+  background: #2a1a5a; color: #c0a0ff;
+  border: 2px solid #6040c0;
+  box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  border-radius: 50%;
+  margin: 0 auto;
+  font-size: 14px;
+  cursor: pointer;
+}
+.swap-v:hover { background: #6040c0; }
+
+/* Show swap buttons only in drag mode */
+body.drag-mode-on .swap-h,
+body.drag-mode-on .swap-v {
+  display: flex;
+}
+</style>
+<script id="html2canvas-s" src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script><script id="jspdf-s" src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script></head>
+<body class="">
+
+<!-- ═══════════════════════════════
+     EDITOR TOPBAR
+═══════════════════════════════ -->
+
+
+
+<!-- ═══════════════════════════════
+     MAIN CONTENT
+═══════════════════════════════ -->
+<div id="amenorrea-main">
+<div id="amenorrea-algo-root">
+
+  <!-- Contenido exportable -->
+  <div id="amenorrea-export-root" class="a-page">
+
+    <!-- HEADER -->
+    <div class="a-hdr draggable-block" data-drag-id="hdr">
+      <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+      <div>
+        <div class="a-hdr-eyebrow" data-eid="hdr-eyebrow" style="">Endocrinología Ginecológica · Diagnóstico</div>
+        <div class="a-hdr-title" data-eid="hdr-title" style="">Amenorrea Secundaria<br><span style="font-size:15px;font-weight:400;font-style:italic">Algoritmo diagnóstico escalonado</span></div>
+        <div class="a-hdr-sub" data-eid="hdr-sub" style="">Enfoque clínico por pruebas funcionales secuenciales · 5 pasos</div>
+      </div>
+      <div class="a-hdr-def" data-eid="hdr-def" style="">
+        <strong>Definición</strong>
+        Ausencia de menstruación <strong>≥ 3 meses</strong> con ciclos previos regulares,
+        o <strong>≥ 6 meses</strong> con ciclos irregulares previos (oligomenorréicas)</div>
+    </div>
+
+    <!-- FLOW -->
+    <div class="a-flow" id="a-flow-root">
+
+      <!-- ═══ PASO 1 ═══ -->
+      <div class="a-step-wrap draggable-block" data-drag-id="paso1">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-card as-slate" style="max-width:500px;" data-skin-id="k84vwh">
+          <div class="a-tag" data-eid="p1-tag" style="">● Paso 1 · Descarte inicial</div>
+          <div class="a-title" data-eid="p1-title" style="">Test de Embarazo · β-hCG sérica</div>
+          <div class="a-body" data-eid="p1-body" style="">
+            <p>Primera determinación obligatoria antes de cualquier otro estudio.</p>
+            <p>Descartar gestación como causa fisiológica de amenorrea.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-fork draggable-block" data-drag-id="fork1">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-fork-stem"></div>
+        <div class="a-fork-bar" style="position: relative;">
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-pos" data-eid="f1l-pos" style="">Positivo (+)</div>
+            <div class="a-card as-green" data-skin-id="0zsgy6">
+              <div class="a-tag" data-eid="f1l-tag" style="">Resultado · Positivo</div>
+              <div class="a-title" data-eid="f1l-title" style="">Embarazo confirmado</div>
+              <div class="a-body" data-eid="f1l-body" style="">
+                <p>· Derivar a Obstetricia · Control prenatal</p>
+                <p>· Descartar complicaciones tempranas (ectópico, mola)</p>
+              </div>
+            </div>
+            <div class="a-fin" data-eid="f1l-fin" style="color: var(--a-green-md);">⟶ FIN DE RAMA</div>
+          </div>
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-neg" data-eid="f1r-neg" style="">Negativo (−)</div>
+            <div class="a-card as-slate" data-skin-id="w7yvgx">
+              <div class="a-tag" data-eid="f1r-tag" style="">Resultado · Negativo</div>
+              <div class="a-title" data-eid="f1r-title" style="">Evaluación clínica inicial</div>
+              <div class="a-body" data-eid="f1r-body" style="">
+                <p>Historia clínica · examen físico · IMC · galactorrea · hiperandrogenismo</p>
+                <p style="margin-top:4px;"><span class="a-hl">Lab. basal:</span> TSH · Prolactina · Glucosa · Insulina · Andrógenos (testosterona, DHEA-S, 17-OH-P)</p>
+              </div>
+            </div>
+          </div>
+        <button class="swap-btn swap-h" title="Intercambiar ramas izquierda ↔ derecha" data-fork-idx="0">⇄</button></div>
+      </div>
+
+      <div class="a-arr-labeled draggable-block" data-drag-id="arr1" style="transform: translate(234px, -19px);">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-arr-line" style="height:16px;"></div>
+        <div class="a-arr-pill" data-eid="arr1-pill" style="">Continúa al Paso 2</div>
+        <div class="a-arr-head"></div>
+      </div>
+
+      <!-- ═══ PASO 2 ═══ -->
+      <button class="swap-btn swap-v" title="Intercambiar tarjetas arriba ↔ abajo">⇅</button><div class="a-step-wrap draggable-block" data-drag-id="paso2">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-card as-blue" style="max-width:540px;" data-skin-id="ykjvff">
+          <div class="a-tag" data-eid="p2-tag" style="">● Paso 2 · 1.er Paso Funcional</div>
+          <div class="a-title" data-eid="p2-title" style="">Prueba de Progesterona</div>
+          <div class="a-body" data-eid="p2-body" style="">
+            <p><span class="a-hl">Progesterona micronizada</span> 200 mg/día VO × 10 días — o — <span class="a-hl">Medroxiprogesterona</span> 10 mg/día × 10 días</p>
+            <p style="margin-top:3px;">Evaluar sangrado entre <strong>3 y 7 días</strong> post-suspensión</p>
+            <p style="margin-top:3px;font-style:italic;font-size:10px;">Premisa: para sangrar necesita endometrio previamente proliferado por E2 endógeno.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-fork draggable-block" data-drag-id="fork2">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-fork-stem"></div>
+        <div class="a-fork-bar" style="position: relative;">
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-pos" data-eid="f2l-pos" style="">Sangrado (+) · menstrúa</div>
+            <div class="a-card as-blue" data-skin-id="z79nty">
+              <div class="a-tag" data-eid="f2l-tag" style="">Interpretación · Positivo</div>
+              <div class="a-title" data-eid="f2l-title" style="">Eje H-H-O funcionante · Ciclo Monofásico</div>
+              <div class="a-body" data-eid="f2l-body" style="">
+                <ul class="a-blist">
+                  <li>E2 endógeno presente → endometrio proliferado y receptivo</li>
+                  <li>Gonaducto permeable (cérvix y útero)</li>
+                  <li><span class="a-hl">Anovulación como causa más probable</span></li>
+                </ul>
+                <p style="margin-top:5px;">⟶ Evaluar causa ovárica: <span class="a-hl">FSH · LH · E2 basal</span></p>
+              </div>
+            </div>
+          </div>
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-neg" data-eid="f2r-neg" style="">Sin sangrado (−) · no menstrúa</div>
+            <div class="a-card as-coral" data-skin-id="xfba4x">
+              <div class="a-tag" data-eid="f2r-tag" style="">Interpretación · Negativo</div>
+              <div class="a-title" data-eid="f2r-title" style="">Déficit estrogénico o patología uterina</div>
+              <div class="a-body" data-eid="f2r-body" style="">
+                <ul class="a-blist">
+                  <li>No hay E2 endógeno suficiente para proliferar el endometrio</li>
+                  <li>— o — el útero no responde a los estrógenos (causa estructural)</li>
+                </ul>
+                <p style="margin-top:5px;">⟶ Distinguir con E2 exógeno</p>
+              </div>
+            </div>
+          </div>
+        <button class="swap-btn swap-h" title="Intercambiar ramas izquierda ↔ derecha" data-fork-idx="1">⇄</button></div>
+      </div>
+
+      <div class="a-arr-labeled draggable-block" data-drag-id="arr2" style="transform: translate(213px, -17px);">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-arr-line" style="height:16px;"></div>
+        <div class="a-arr-pill" data-eid="arr2-pill" style="">Continúa al Paso 3</div>
+        <div class="a-arr-head"></div>
+      </div>
+
+      <!-- ═══ PASO 3 ═══ -->
+      <button class="swap-btn swap-v" title="Intercambiar tarjetas arriba ↔ abajo">⇅</button><div class="a-step-wrap draggable-block" data-drag-id="paso3">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-card as-coral" style="max-width:540px;" data-skin-id="aluv3p">
+          <div class="a-tag" data-eid="p3-tag" style="">● Paso 3</div>
+          <div class="a-title" data-eid="p3-title" style="">Prueba de Estrógenos + Progesterona</div>
+          <div class="a-body" data-eid="p3-body" style="">
+            <p><span class="a-hl">Estradiol</span> 2 mg/día VO × 21 días + Progesterona 200 mg/día × 10 días (últimos 10 días)</p>
+            <p style="margin-top:3px;">Alternativa: Estrógenos conjugados 1,25 mg/día × 21 días · Evaluar sangrado 3–7 días post-suspensión</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-fork draggable-block" data-drag-id="fork3">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-fork-stem"></div>
+        <div class="a-fork-bar" style="position: relative;">
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-pos" data-eid="f3l-pos" style="">Sangrado (+) · menstrúa</div>
+            <div class="a-card as-green" data-skin-id="na47ge">
+              <div class="a-tag" data-eid="f3l-tag" style="">Interpretación · Positivo</div>
+              <div class="a-title" data-eid="f3l-title" style="">Deficiencia estrogénica · Gonaducto permeable</div>
+              <div class="a-body" data-eid="f3l-body" style="">
+                <ul class="a-blist">
+                  <li>El endometrio responde al E2 exógeno → endometrio funcionalmente normal</li>
+                  <li>Déficit de estrógenos endógenos confirmado · Gonaducto permeable</li>
+                </ul>
+                <p style="margin-top:5px;"><span class="a-hl">¿Por qué no hay E2?</span> → evaluar gonadotrofinas</p>
+              </div>
+            </div>
+          </div>
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-neg" data-eid="f3r-neg" style="">Sin sangrado (−) · no menstrúa</div>
+            <div class="a-card as-red" data-skin-id="sj3j1x">
+              <div class="a-tag" data-eid="f3r-tag" style="">Causa uterina · Fin de rama</div>
+              <div class="a-title" data-eid="f3r-title" style="">Patología estructural uterina</div>
+              <div class="a-body" data-eid="f3r-body" style="">
+                <p>El útero no responde al E2 exógeno:</p>
+                <ul class="a-blist">
+                  <li><span class="a-hl">Sd. Asherman:</span> sinequias post-legrado, infección, cirugía</li>
+                  <li><span class="a-hl">Sinequias cervicales:</span> post-conización</li>
+                  <li><span class="a-hl">Endometritis tuberculosa</span></li>
+                  <li><span class="a-hl">Estenosis cervical:</span> post-LEEP, IIVC, infección crónica</li>
+                </ul>
+                <p style="margin-top:5px;"><span class="a-hl">Dx:</span> Histeroscopia (gold std) · HSG · Histerosonografía</p>
+              </div>
+            </div>
+            <div class="a-fin" data-eid="f3r-fin" style="color: var(--a-red-md);">⟶ FIN DE RAMA</div>
+          </div>
+        <button class="swap-btn swap-h" title="Intercambiar ramas izquierda ↔ derecha" data-fork-idx="2">⇄</button></div>
+      </div>
+
+      <div class="a-arr-labeled draggable-block" data-drag-id="arr3" style="transform: translate(-200px, -21px);">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-arr-line" style="height:16px;"></div>
+        <div class="a-arr-pill" data-eid="arr3-pill" style="">Continúa al Paso 4</div>
+        <div class="a-arr-head"></div>
+      </div>
+
+      <!-- ═══ PASO 4 ═══ -->
+      <button class="swap-btn swap-v" title="Intercambiar tarjetas arriba ↔ abajo">⇅</button><div class="a-step-wrap draggable-block" data-drag-id="paso4">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-card as-blue" style="max-width:580px;" data-skin-id="gr2x9z">
+          <div class="a-tag" data-eid="p4-tag" style="">● Paso 4</div>
+          <div class="a-title" data-eid="p4-title" style="">Dosaje de Gonadotrofinas · FSH · LH · E2 basal</div>
+          <div class="a-body" data-eid="p4-body" style="">
+            <p>Extraer en días 2–5 del ciclo inducido · Repetir si borderline</p>
+            <p style="margin-top:3px;font-style:italic;font-size:10px;">Llegan aquí: Paso 2 (+) y Paso 3 (+)</p>
+            <p style="margin-top:3px;"><span class="a-hl">Pregunta clave:</span> el déficit de E2, ¿es porque el <em>ovario no responde</em> a las gonadotrofinas, o porque el <em>eje central no envía estímulo</em> suficiente?</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-fork draggable-block" data-drag-id="fork4">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-fork-stem"></div>
+        <div class="a-fork-bar" style="position: relative;">
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-elev" data-eid="f4l-elev" style="">FSH/LH Elevadas ↑↑</div>
+            <div class="a-card as-coral" data-skin-id="scwnaw">
+              <div class="a-tag" data-eid="f4l-tag" style="">Causa ovárica · Fin de rama</div>
+              <div class="a-title" data-eid="f4l-title" style="">Falla del Ovario · No responde a FSH/LH</div>
+              <div class="a-body" data-eid="f4l-body" style="">
+                <p>No produce E2 ni P4 → no hay ovulación → sin feedback negativo → hipófisis ↑↑ FSH/LH compensatoriamente.</p>
+                <ul class="a-blist" style="margin-top:5px;">
+                  <li><span class="a-hl">SOP</span> (más frecuente) · Rotterdam: oligo/anovulación + hiperandrogenismo + morfología poliquística (2/3)</li>
+                  <li><span class="a-hl">FOP / IOPr</span> · FSH &gt; 40 mUI/mL · &lt; 40 años · AMH ↓</li>
+                  <li><span class="a-hl">Sd. Savage</span> · Ac anti-receptores de FSH → resistencia periférica</li>
+                  <li>Tumores ováricos · Resistencia insulina · Hiperprolactinemia leve · Hipotiroidismo subclínico</li>
+                </ul>
+                <p style="margin-top:5px;"><span class="a-hl">Estudios:</span> Eco TV · AMH · Inhibina B · Cariotipo · Ac anti-ovario · HOMA-IR · Testosterona · DHEA-S</p>
+              </div>
+            </div>
+            <div class="a-fin" data-eid="f4l-fin" style="color: var(--a-coral-md);">⟶ FIN DE RAMA</div>
+          </div>
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-low" data-eid="f4r-low" style="">FSH/LH Bajas o Normales ↓/→</div>
+            <div class="a-card as-purple" data-skin-id="wbudwq">
+              <div class="a-tag" data-eid="f4r-tag" style="">Causa central · continúa</div>
+              <div class="a-title" data-eid="f4r-title" style="">Causa Hipotálamo-Hipófisis</div>
+              <div class="a-body" data-eid="f4r-body" style="">
+                <p>FSH/LH insuficientes → el ovario sano no recibe señal → no ovula → no produce E2.</p>
+                <p style="margin-top:4px;"><span class="a-hl">La falla es central.</span> ¿Hipófisis o hipotálamo?</p>
+                <p style="margin-top:5px;">⟶ Prueba de estimulación con GnRH</p>
+              </div>
+            </div>
+          </div>
+        <button class="swap-btn swap-h" title="Intercambiar ramas izquierda ↔ derecha" data-fork-idx="3">⇄</button></div>
+      </div>
+
+      <div class="a-arr-labeled draggable-block" data-drag-id="arr4" style="transform: translate(230px, -17px);">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-arr-line" style="height:16px;"></div>
+        <div class="a-arr-pill" data-eid="arr4-pill" style="">Continúa al Paso 5</div>
+        <div class="a-arr-head"></div>
+      </div>
+
+      <!-- ═══ PASO 5 ═══ -->
+      <button class="swap-btn swap-v" title="Intercambiar tarjetas arriba ↔ abajo">⇅</button><div class="a-step-wrap draggable-block" data-drag-id="paso5">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-card as-purple" style="max-width:560px;" data-skin-id="pmj17w">
+          <div class="a-tag" data-eid="p5-tag" style="">● Paso 5</div>
+          <div class="a-title" data-eid="p5-title" style="">Prueba de Estimulación con GnRH (Gonadorelina)</div>
+          <div class="a-body" data-eid="p5-body" style="">
+            <p><span class="a-hl">100 µg IV en bolo</span> · Dosaje FSH y LH: basal → 30 min → 60 min post-estímulo</p>
+            <p style="margin-top:3px;">Respuesta normal: <span class="a-hl">LH ≥ 2× basal</span> · FSH ≥ 1,5× basal</p>
+            <p style="margin-top:3px;font-style:italic;font-size:10px;">Evalúa la capacidad de la hipófisis ante GnRH exógeno.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-fork draggable-block" data-drag-id="fork5">
+        <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+        <div class="a-fork-stem"></div>
+        <div class="a-fork-bar" style="position: relative;">
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-resp" data-eid="f5l-resp" style="">FSH/LH suben (+)</div>
+            <div class="a-card as-teal" data-skin-id="y2t8uc">
+              <div class="a-tag" data-eid="f5l-tag" style="">Causa hipotalámica · Fin de rama</div>
+              <div class="a-title" data-eid="f5l-title" style="">Amenorrea Hipotalámica Funcional (AHF)</div>
+              <div class="a-body" data-eid="f5l-body" style="">
+                <p>Hipófisis competente. La falla está en el <span class="a-hl">hipotálamo</span>: no envía pulsos de GnRH adecuadamente.</p>
+                <ul class="a-blist" style="margin-top:5px;">
+                  <li><span class="a-hl">Bajo peso / restricción calórica:</span> anorexia nerviosa · pérdida &gt; 10% · RED-S</li>
+                  <li><span class="a-hl">Ejercicio excesivo:</span> tríada de la deportista (↓E2 + disfunción menstrual + ↓DMO)</li>
+                  <li><span class="a-hl">Estrés crónico:</span> cortisol ↑ · CRH inhibe GnRH · burnout</li>
+                  <li>Lesión estructural hipotalámica (craneofaringioma, infiltración)</li>
+                </ul>
+                <p style="margin-top:5px;"><span class="a-hl">Estudios:</span> Exclusión clínica · Cortisol · RMN cerebral si sospecha orgánica</p>
+              </div>
+            </div>
+            <div class="a-fin" data-eid="f5l-fin" style="color: var(--a-teal-md);">⟶ FIN DE RAMA</div>
+          </div>
+          <div class="a-fork-branch">
+            <div class="a-fork-bline"></div>
+            <div class="a-flabel afl-nore" data-eid="f5r-nore" style="">FSH/LH no suben (−)</div>
+            <div class="a-card as-amber" data-skin-id="8nwyxs">
+              <div class="a-tag" data-eid="f5r-tag" style="">Causa hipofisaria · Fin de rama</div>
+              <div class="a-title" data-eid="f5r-title" style="">Lesión o Disfunción Hipofisaria Primaria</div>
+              <div class="a-body" data-eid="f5r-body" style="">
+                <p>La hipófisis no responde al GnRH exógeno → lesión intrínseca.</p>
+                <ul class="a-blist" style="margin-top:5px;">
+                  <li><span class="a-hl">Prolactinoma</span> (adenoma secretor de PRL · 70% de adenomas hipofisarios)</li>
+                  <li><span class="a-hl">Sd. Sheehan:</span> necrosis hipofisaria post-hemorragia en el parto/puerperio</li>
+                  <li><span class="a-hl">Vacío selar:</span> herniación de aracnoides → compresión hipofisaria</li>
+                  <li>Hipofisitis autoinmune · Irradiación craneal · Craneofaringioma</li>
+                </ul>
+                <p style="margin-top:5px;"><span class="a-hl">Estudios:</span> RMN hipofisaria c/gadolinio · Prolactina · IGF-1 · Cortisol · ACTH · Panel hipofisario</p>
+              </div>
+            </div>
+            <div class="a-fin" data-eid="f5r-fin" style="color: var(--a-amber-md);">⟶ FIN DE RAMA</div>
+          </div>
+        <button class="swap-btn swap-h" title="Intercambiar ramas izquierda ↔ derecha" data-fork-idx="4">⇄</button></div>
+      </div>
+
+    </div><!-- /a-flow -->
+
+    <hr class="a-divider">
+
+    <!-- TABLA RESUMEN -->
+    <div class="draggable-block" data-drag-id="tabla">
+      <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+      <div style="font-family: &quot;Libre Baskerville&quot;, serif; font-size: 12px; font-weight: 700; color: var(--a-ink); margin-bottom: 7px;" class="" data-eid="tbl-title">Resumen etiológico · Amenorrea secundaria</div>
+      <div class="a-tbl-wrap">
+        <table class="a-tbl">
+          <thead>
+            <tr>
+              <th>Nivel</th>
+              <th>Prueba diagnóstica</th>
+              <th>Etiología principal</th>
+              <th>Hallazgos hormonales</th>
+              <th>Método de confirmación</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="" data-eid="tr1-1" style="">Uterino</td>
+              <td class="" data-eid="tr1-2" style="">Paso 3 (−)</td>
+              <td class="" data-eid="tr1-3" style="">Sd. Asherman · Estenosis cervical · Endometritis TBC</td>
+              <td class="" data-eid="tr1-4" style="">Hormonas normales · E+P sin sangrado</td>
+              <td class="" data-eid="tr1-5" style="">Histeroscopia · HSG · Histerosonografía</td>
+            </tr>
+            <tr>
+              <td class="" data-eid="tr2-1" style="">Ovárico</td>
+              <td class="" data-eid="tr2-2" style="">Paso 4 · FSH/LH ↑↑</td>
+              <td class="" data-eid="tr2-3" style="">SOP · FOP/IOPr · Sd. Savage · Tumores · R. insulina</td>
+              <td class="" data-eid="tr2-4" style="">FSH/LH ↑↑ · E2 ↓ · Andrógenos ↑ (SOP) · AMH ↓ (FOP)</td>
+              <td class="" data-eid="tr2-5" style="">Ecografía TV · AMH · HOMA-IR · Cariotipo</td>
+            </tr>
+            <tr>
+              <td class="" data-eid="tr3-1" style="">Hipotalámico</td>
+              <td class="" data-eid="tr3-2" style="">Paso 5 · GnRH (+)</td>
+              <td class="" data-eid="tr3-3" style="">AHF: bajo peso · ejercicio · estrés · lesión estructural</td>
+              <td class="" data-eid="tr3-4" style="">FSH/LH ↓ · E2 ↓ · Cortisol ↑ · Responde a GnRH ·&nbsp;PRL ↑</td>
+              <td class="" data-eid="tr3-5" style="">Exclusión clínica · RMN cerebral</td>
+            </tr>
+            <tr>
+              <td class="" data-eid="tr4-1" style="">Hipofisario</td>
+              <td class="" data-eid="tr4-2" style="">Paso 5 · GnRH (−)</td>
+              <td class="" data-eid="tr4-3" style="">Prolactinoma · Sd. Sheehan · Vacío selar · Hipofisitis</td>
+              <td class="" data-eid="tr4-4" style="">FSH/LH ↓ · PRL ↑ · No responde a GnRH</td>
+              <td class="" data-eid="tr4-5" style="">RMN hipofisaria c/gadolinio · Panel hipofisario</td>
+            </tr>
+            <tr>
+              <td class="" data-eid="tr5-1" style="">Endocrina</td>
+              <td class="" data-eid="tr5-2" style="">Laboratorio basal</td>
+              <td class="" data-eid="tr5-3" style="">Sd. Cushing · HSC tardía · Hipotiroidismo · Hiperprolactinemia</td>
+              <td class="" data-eid="tr5-4" style="">Cortisol ↑ · DHEA-S ↑ · 17-OH-P ↑ · TSH ↑ · PRL ↑</td>
+              <td class="" data-eid="tr5-5" style="">Cortisol · DHEA-S · 17-OH-P · TSH · Test Synacthen</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="draggable-block" data-drag-id="farmacos" style="margin-top:7px;">
+      <div class="drag-handle" title="Mover" style="display: none;">⠿</div>
+      <div style="background: var(--a-paper2); border: 1px solid var(--a-rule); border-radius: var(--a-r); padding: 7px 11px; font-size: 10px; color: var(--a-ink2);" class="" data-eid="farmacos-text">
+        <span style="font-weight:600;">Fármacos que causan amenorrea:</span> Antipsicóticos (risperidona, haloperidol) · Metoclopramida · Domperidona · Opioides · Antidepresivos · Anticonceptivos de alta dosis · Análogos de GnRH · Quimioterapia gonadotóxica
+      </div>
+    </div>
+
+    <div class="a-refs" data-eid="refs" style="margin-top: 16px;">
+      Referencias: Endocrine Society Clinical Practice Guidelines 2017 · ASRM Practice Committee 2023 ·
+      Speroff — Endocrinología Ginecológica Clínica y Esterilidad, 9.ª ed. · NICE Guidelines 2023 ·
+      Fritz &amp; Speroff — Clinical Gynecologic Endocrinology and Infertility, 8.ª ed.
+    </div>
+
+  </div><!-- /amenorrea-export-root -->
+</div><!-- /amenorrea-algo-root -->
+</div><!-- /amenorrea-main -->
+
+
+<!-- ═══════════════════════════════
+     EDITOR OVERLAY + MODAL
+═══════════════════════════════ -->
+
+
+
+
+
+
+
+
+
+</body></html>
