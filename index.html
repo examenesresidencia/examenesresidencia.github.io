@@ -197,7 +197,7 @@
 </div>
 </div>
 <div class="info-extra">
-<p>Para sugerencias y correcciones comunicarse por favor con <a href="/cdn-cgi/l/email-protection#fa9c9b88979b9995c8999b8ec999929593999fba9d979b9396d4999597"><span class="__cf_email__" data-cfemail="422423302f23212d7021233671212a2d2b212702252f232b2e6c212d2f">[email protected]</span></a></p>
+<p>Para sugerencias y correcciones comunicarse por favor con <a href="/cdn-cgi/l/email-protection#fa9c9b88979b9995c8999b8ec999929593999fba9d979b9396d4999597"><span class="__cf_email__" data-cfemail="422423302f23212d7021233671212a2d2b212702252f232b2e6c212d2f">[email protected]</span></a></p>
 <p>Última actualización: 21/09/2025</p>
 </div>
 </div>
@@ -584,7 +584,7 @@
 <div class="pagina-cuestionario" id="unico2018">
 <button class="btn-volver" onclick="volverAlSubmenu('examen-unico-submenu')">← Volver</button>
 <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
-<h1>Examen único 2016</h1>
+<h1>Examen único 2018</h1>
 <div id="cuestionario-unico2018"></div>
 <button id="mostrar-total-unico2018">Mostrar Puntuación Total</button>
 <div class="resultado-final" id="resultado-total-unico2018"></div>
@@ -934,66 +934,6 @@
     </div>
 </div>
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 <!-- SIMULACRO-->
 <div class="pagina-cuestionario" id="simulador">
 <button class="btn-volver" onclick="volverAlMenuSimulacro('simulador')">← Volver al Menú Principal</button>
@@ -1080,8 +1020,14 @@
   </div>
   <iframe id="iframe-ca-cervical" src="CA_Cuello_algoritmo_V6_subir.html" style="flex:1; border:none; width:100%; background:#0a1628;"></iframe>
 </div>
-<!-- Amenorrea Secundaria · Algoritmo diagnóstico (módulo independiente, depende de script.js) -->
-<script src="amenorrea-secundaria.html?v=1"></script>
+════════════════════════════════════════════════════════════════ -->
+<div id="amenorrea-secundaria-panel" style="display:none; width:100%; height:100vh; position:fixed; top:0; left:0; z-index:9000; background:#0a1628; flex-direction:column;">
+  <div style="display:flex; align-items:center; padding:10px 16px; background:#0d1f38; border-bottom:1px solid rgba(255,255,255,0.08); gap:12px; flex-shrink:0;">
+    <button onclick="cerrarAmenorreaSecundaria()" style="background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15); color:#94a3b8; padding:7px 16px; border-radius:8px; cursor:pointer; font-size:0.85rem; font-family:inherit; transition:all 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.13)'" onmouseout="this.style.background='rgba(255,255,255,0.07)'">← Volver al Menú</button>
+    <span style="color:#64748b; font-size:0.82rem; font-family:'Segoe UI',sans-serif;">Algoritmo · Amenorreas Secundarias</span>
+  </div>
+  <iframe src="amenorrea-secundaria.html" style="flex:1; border:none; width:100%; background:#0a1628;"></iframe>
+</div>
 <!--hitos del desarrollo (módulo independiente, NO depende de script.js) -->
 <script src="hitos-desarrollo.js?v=5"></script>
 
@@ -1144,8 +1090,6 @@
         });
 
         // 0. Gestión del permiso de copia de texto
-        // Se activa para: admin y el email autorizado específico.
-        // Se ejecuta cuando script.js dispara 'fb:usuarioAprobadoActivo' (usuario ya cargado).
         const COPY_ALLOWED_EMAIL = 'soloquimicayaruqui@gmail.com';
 
         function _actualizarPermisosCopia() {
@@ -1178,6 +1122,17 @@
           document.getElementById('menu-principal').style.display = 'block';
         }
 
+        // ── Amenorrea Secundaria ───────────────────────────
+        function mostrarAmenorreaSecundaria() {
+          document.getElementById('menu-principal').style.display = 'none';
+          const panel = document.getElementById('amenorrea-secundaria-panel');
+          panel.style.display = 'flex';
+        }
+        function cerrarAmenorreaSecundaria() {
+          document.getElementById('amenorrea-secundaria-panel').style.display = 'none';
+          document.getElementById('menu-principal').style.display = 'block';
+        }
+
         // 6. Prevenir impresión con CSS y JS
         window.addEventListener('beforeprint', function(e) {
             e.preventDefault();
@@ -1185,10 +1140,9 @@
             return false;
         });
 
-        
         // 8. Ofuscar código en consola
         console.log('%cADVERTENCIA!', 'color: red; font-size: 50px; font-weight: bold;');
-       console.log('%cEsta función del navegador está destinada a desarrolladores.', 'font-size: 20px;');
+        console.log('%cEsta función del navegador está destinada a desarrolladores.', 'font-size: 20px;');
     </script>
 <!-- Barra de usuario: existe desde el inicio con CSS ya aplicado -->
 <div id="fb-user-bar"></div>
