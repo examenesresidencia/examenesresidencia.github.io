@@ -1,4 +1,4 @@
-//PRUEBA 17  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 18  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -844,6 +844,11 @@
       if (!esCompilado(seccionId) && !esExamenOficial(seccionId) && seccionId !== 'simulador') {
         aplicarExtrapolacion(undefined, { hacia: seccionId });
       }
+      if (seccionId === 'simulador') {
+        const preguntasSimulacro = obtenerPreguntasSimulacro();
+        preguntasPorSeccion['simulador'] = preguntasSimulacro.map(item => item.pregunta);
+      }
+
       _scrollOnNextRender = true;
       generarCuestionario(seccionId);
 
