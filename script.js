@@ -3549,7 +3549,7 @@
   
   // Distribución objetivo de preguntas por especialidad (total 100)
   const distribucionObjetivo = {
-    pediatria: 20,
+    pediatria: 18,
     ginecologia: 11,
     obstetricia: 11,
     cardiologia: 11,
