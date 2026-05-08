@@ -1,4 +1,4 @@
-//PRUEBA 16  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 17  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -353,9 +353,8 @@
   // ======== Variables del temporizador del simulacro ========
   let timerInterval = null;
   let timerStartTime = null;
-  let timerDuration = 4 * 60 * 60 * 1000; // 4 horas en milisegundos
+  let timerDuration = 2.5 * 60 * 60 * 1000; // 2.5 horas = 2h 30min en milisegundos
   let alertasRealizadas = {
-    '2h': false,
     '1h': false,
     '30min': false,
     '15min': false,
@@ -1284,7 +1283,6 @@
       // Iniciar nuevo temporizador
       timerStartTime = Date.now();
       alertasRealizadas = {
-        '2h': false,
         '1h': false,
         '30min': false,
         '15min': false,
@@ -1748,16 +1746,6 @@
   function verificarAlertas(tiempoRestante) {
     const alertas = [
       {
-        nombre: '2h',
-        tiempo: 2 * 60 * 60 * 1000,
-        icono: '🟢',
-        titulo: 'Tiempo restante',
-        mensaje: 'Quedan 2 horas',
-        sub: 'Mantené el ritmo, vas bien.',
-        color: 'rgba(22,163,74,0.97)',
-        sombra: 'rgba(22,163,74,0.3)'
-      },
-      {
         nombre: '1h',
         tiempo: 1 * 60 * 60 * 1000,
         icono: '⏳',
@@ -1968,7 +1956,6 @@
     localStorage.removeItem(TIMER_STORAGE_KEY);
     timerStartTime = null;
     alertasRealizadas = {
-      '2h': false,
       '1h': false,
       '30min': false,
       '15min': false,
