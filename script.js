@@ -9476,8 +9476,9 @@ function fbSaveProgressToCloud() {
     const preguntas = preguntasPorSeccion[seccionId];
     const cont = document.getElementById('cuestionario-' + seccionId);
     if (!preguntas || !cont) return;
-    cont.innerHTML = '';
     ensureSectionState(seccionId, preguntas.length);
+    // NO limpiar cont aquí: el paginador ya limpió y mide antesRender.
+    // Solo agregar los nuevos divs al final para que el paginador los capture.
     indices.forEach((originalIdx, pos) => {
       _renderPregunta(seccionId, originalIdx, pos, cont);
     });
