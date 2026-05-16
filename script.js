@@ -1,4 +1,4 @@
-//PRUEBA 22  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 23  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -656,37 +656,12 @@
     } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
 
     // ── Cargar desde Firestore ──────────────────────────────────────
-    // Guard: si ya hay una carga activa, esperar sin duplicar la request a Firestore
-    if (_seccionesEnCarga.has(seccionId)) {
-      return new Promise(function(resolve) {
-        var poll = setInterval(function() {
-          if (!_seccionesEnCarga.has(seccionId)) { clearInterval(poll); resolve(); }
-        }, 80);
-        setTimeout(function() { clearInterval(poll); resolve(); }, 15000);
-      });
-    }
     _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
-    _seccionesEnCarga.add(seccionId); // marcar inicio de carga
+    _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
     return new Promise((resolve) => {
       function intentarCarga() {
         if (!window.__firebaseReady || !window.__firebase_firestore) {
-          // Polling: si firebaseReady ya se disparo antes de esta llamada,
-          // { once:true } no volvera a disparar y la promesa quedaria congelada.
-          var fbPoll = setInterval(function() {
-            if (window.__firebaseReady && window.__firebase_firestore) {
-              clearInterval(fbPoll);
-              intentarCarga();
-            }
-          }, 200);
-          setTimeout(function() {
-            clearInterval(fbPoll);
-            console.warn('[cargarSeccion] Timeout esperando Firebase:', seccionId);
-            _seccionesEnCarga.delete(seccionId);
-            resolve();
-          }, 20000);
-          document.addEventListener('firebaseReady', function() {
-            clearInterval(fbPoll); intentarCarga();
-          }, { once: true });
+          document.addEventListener('firebaseReady', intentarCarga, { once: true });
           return;
         }
         if (typeof fbInit === 'function') fbInit();
@@ -696,16 +671,14 @@
             const { collection, getDocs, query, orderBy } = window.__firebase_firestore;
             const db = _fbDb;
             if (!db) {
-              console.warn('⚠️ Firestore aun no listo, reintentando en 300ms:', seccionId);
-              setTimeout(intentarCarga, 300);
-              return;
+              console.warn('⚠️ Firestore no inicializado al cargar:', seccionId);
+              resolve(); return;
             }
             const itemsRef = collection(db, 'preguntas', seccionId, 'items');
             const q = query(itemsRef, orderBy('_idx'));
             const snap = await getDocs(q);
             if (snap.empty) {
               console.warn('⚠️ Sin preguntas en Firestore para:', seccionId);
-              _seccionesEnCarga.delete(seccionId);
               resolve(); return;
             }
             let preguntas = snap.docs.map(d => {
@@ -819,26 +792,17 @@
    * Muestra un spinner mientras se descarga el archivo de la sección.
    */
   function mostrarSpinnerCarga(seccionId) {
-    const cont = document.getElementById('cuestionario-' + seccionId);
-    if (!cont) return;
-    const sid = 'spinner-carga-' + seccionId;
-    cont.innerHTML = '<div id="' + sid + '" style="text-align:center;padding:60px 20px;color:#64748b;">'
-      + '<div style="width:42px;height:42px;border:4px solid #e2e8f0;border-top-color:#0891b2;border-radius:50%;animation:spin 0.7s linear infinite;margin:0 auto 16px;"></div>'
-      + '<p style="font-size:0.95rem;">Cargando preguntas...</p>'
-      + '</div>'
-      + '<style>@keyframes spin{to{transform:rotate(360deg);}}</style>';
-    // Si tras 12s el spinner sigue, mostrar boton de reintento
-    setTimeout(function() {
-      var sp = document.getElementById(sid);
-      if (!sp) return;
-      sp.innerHTML = '<div style="font-size:2rem;margin-bottom:14px;">&#9200;</div>'
-        + '<p style="font-size:1rem;font-weight:600;color:#94a3b8;margin-bottom:6px;">Tardando mas de lo esperado...</p>'
-        + '<p style="font-size:0.83rem;color:#64748b;margin-bottom:20px;">Puede ser un problema de conexion o de Firebase.</p>'
-        + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'
-        + '<button onclick="location.reload()" style="padding:10px 22px;border-radius:10px;border:none;background:linear-gradient(135deg,#0d7490,#0891b2);color:#fff;font-size:.9rem;font-weight:700;cursor:pointer;">Recargar pagina</button>'
-        + '<button onclick="window.mostrarCuestionario && window.mostrarCuestionario(\'' + seccionId + '\')" style="padding:10px 22px;border-radius:10px;border:1.5px solid rgba(148,163,184,.3);background:rgba(255,255,255,.04);color:#94a3b8;font-size:.9rem;font-weight:600;cursor:pointer;">Reintentar</button>'
-        + '</div>';
-    }, 12000);
+    const cont = document.getElementById(`cuestionario-${seccionId}`);
+    if (cont) {
+      cont.innerHTML = `
+        <div style="text-align:center;padding:60px 20px;color:#64748b;">
+          <div style="width:42px;height:42px;border:4px solid #e2e8f0;
+            border-top-color:#0891b2;border-radius:50%;
+            animation:spin 0.7s linear infinite;margin:0 auto 16px;"></div>
+          <p style="font-size:0.95rem;">Cargando preguntas…</p>
+        </div>
+        <style>@keyframes spin{to{transform:rotate(360deg);}}</style>`;
+    }
   }
 
   function showSection(seccionId) {
@@ -871,11 +835,10 @@
       }
       return Promise.resolve();
     }).then(() => {
-      // Guard: si el usuario navego a otra seccion mientras cargaba, no renderizar
-      if (currentSection !== seccionId) {
-        console.log('[showSection] Carga completada para', seccionId, 'pero la seccion activa es', currentSection, 'cancelado.');
-        return;
-      }
+      // Guard: si el usuario volvio al menu o abrio otra seccion mientras
+      // Firestore cargaba, cancelar el render para que no aparezca debajo del menu.
+      if (currentSection !== seccionId) return;
+
       aplicarExtrapolacion(esCompilado(seccionId) ? seccionId : undefined);
       // Si es una especialidad (no compilado, no simulador), forzar re-extrapolación
       // de todas las fuentes ya en memoria (Únicos, UBA y compilados) hacia esta
@@ -891,7 +854,7 @@
       }
 
       _scrollOnNextRender = true;
-      (window.generarCuestionario || generarCuestionario)(seccionId);
+      generarCuestionario(seccionId);
 
       if (seccionId === 'simulador') {
         const timerState = loadJSON(TIMER_STORAGE_KEY, null);
@@ -913,16 +876,10 @@
       // Limpiar el estado solo si el cuestionario ya fue completado (totalShown)
       clearSectionStateIfCompletedAndBack(currentSection);
 
-      // Re-mezclar preguntas sin responder al salir
-      const _s = state[currentSection];
-      if (_s && _s.unansweredOrder && !_s.totalShown &&
-          currentSection !== 'simulador' &&
-          !esExamenUnico(currentSection) && !esExamenUBA(currentSection) &&
-          !esCompilado(currentSection) &&
-          !(_currentUserData && _currentUserData.role === 'admin')) {
-        _s.unansweredOrder = [];
-        saveJSON(STORAGE_KEY, state);
-      }
+      // Si es el simulacro con progreso: ya se maneja en volverAlMenuSimulacro
+      // Para todos los demás: PRESERVAR el estado (no limpiar nada)
+      // Las respuestas ya están guardadas en localStorage desde responderPregunta()
+      // No hace falta hacer nada especial aquí.
     }
 
     sessionStorage.removeItem('quiz_active_section'); // Ya no hay sección activa
@@ -2234,8 +2191,71 @@
   }
 
   // ======== Render del cuestionario ========
-  function _renderPregunta(seccionId, originalIdx, displayPosition, cont) {
+  function generarCuestionario(seccionId) {
     const preguntas = preguntasPorSeccion[seccionId];
+    if (!preguntas) return;
+
+    ensureSectionState(seccionId, preguntas.length);
+
+    const cont = document.getElementById(`cuestionario-${seccionId}`);
+    if (!cont) return;
+    cont.innerHTML = "";
+
+    // Obtener orden de visualización (respondidas arriba fijas, no respondidas abajo aleatorias)
+    const displayOrder = getDisplayOrder(seccionId, preguntas.length);
+
+    // Renderizar preguntas en lotes para no bloquear el hilo principal
+    const CHUNK_SIZE = 50;
+    let chunkIndex = 0;
+
+    const renderChunk = () => {
+      const end = Math.min(chunkIndex + CHUNK_SIZE, displayOrder.length);
+      for (let i = chunkIndex; i < end; i++) {
+        const originalIdx = displayOrder[i];
+        const displayPosition = i;
+        renderPregunta(originalIdx, displayPosition);
+      }
+      chunkIndex = end;
+
+      if (chunkIndex < displayOrder.length) {
+        // Actualizar spinner con progreso
+        const spinner = cont.querySelector('.chunk-progress');
+        if (spinner) spinner.textContent = `Cargando preguntas… ${chunkIndex} / ${displayOrder.length}`;
+        // Restaurar solo el último lote renderizado (no todo desde el principio)
+        setTimeout(renderChunk, 0);
+      } else {
+        // Todo renderizado: eliminar spinner, conectar botón total, restaurar estado y scroll
+        const spinner = cont.querySelector('.chunk-progress');
+        if (spinner) {
+          const spinnerParent = spinner.closest('div') || spinner.parentElement;
+          if (spinnerParent && spinnerParent !== cont) spinnerParent.remove();
+          else spinner.remove();
+        }
+        const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
+        if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
+        restoreSelectionsAndGrades(seccionId);
+        // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
+        // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
+        // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
+        if (!esExamenUnico(seccionId) && !esExamenUBA(seccionId) && seccionId !== 'simulador') {
+          actualizarSeparador(seccionId, cont);
+        }
+        if (_scrollOnNextRender) {
+          _scrollOnNextRender = false;
+          scrollToFirstUnanswered(seccionId);
+        }
+      }
+    };
+
+    // Mostrar spinner de progreso mientras se renderizan los lotes
+    if (displayOrder.length > CHUNK_SIZE) {
+      const progressDiv = document.createElement('div');
+      progressDiv.style.cssText = 'text-align:center;padding:16px 20px 8px;color:#64748b;font-size:0.9rem;';
+      progressDiv.innerHTML = `<span class="chunk-progress">Cargando preguntas… 0 / ${displayOrder.length}</span>`;
+      cont.appendChild(progressDiv);
+    }
+
+    const renderPregunta = (originalIdx, displayPosition) => {
       const preg = preguntas[originalIdx];
       const div = document.createElement("div");
       div.className = "pregunta";
@@ -2430,10 +2450,6 @@
       if (window.fbInjectEditButtonIfAdmin) {
         window.fbInjectEditButtonIfAdmin(seccionId, originalIdx, botonesDiv);
       }
-      // Botón Reclasificar (admin + usuario elegido)
-      if (window.fbInjectReclasificarButton) {
-        window.fbInjectReclasificarButton(seccionId, originalIdx, botonesDiv);
-      }
 
       div.appendChild(botonesDiv);
 
@@ -2589,84 +2605,7 @@
       }
 
       cont.appendChild(div);
-  } // fin _renderPregunta
-
-  function generarCuestionario(seccionId) {
-    const preguntas = preguntasPorSeccion[seccionId];
-    if (!preguntas || preguntas.length === 0) {
-      const cont = document.getElementById('cuestionario-' + seccionId);
-      if (cont) {
-        cont.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#64748b;">'
-          + '<div style="font-size:2.5rem;margin-bottom:16px;">&#9888;&#65039;</div>'
-          + '<p style="font-size:1rem;font-weight:600;color:#94a3b8;margin-bottom:8px;">No se pudieron cargar las preguntas.</p>'
-          + '<p style="font-size:0.85rem;color:#64748b;margin-bottom:24px;">Verifica tu conexion y recarga la pagina.</p>'
-          + '<button onclick="location.reload()" style="padding:10px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0d7490,#0891b2);color:#fff;font-size:.9rem;font-weight:700;cursor:pointer;">Recargar</button>'
-          + '</div>';
-      }
-      return;
-    }
-
-    ensureSectionState(seccionId, preguntas.length);
-
-    const cont = document.getElementById(`cuestionario-${seccionId}`);
-    if (!cont) return;
-    cont.innerHTML = "";
-
-    // Obtener orden de visualización (respondidas arriba fijas, no respondidas abajo aleatorias)
-    const displayOrder = getDisplayOrder(seccionId, preguntas.length);
-
-    // Renderizar preguntas en lotes para no bloquear el hilo principal
-    const CHUNK_SIZE = 50;
-    let chunkIndex = 0;
-
-    const renderChunk = () => {
-      const end = Math.min(chunkIndex + CHUNK_SIZE, displayOrder.length);
-      for (let i = chunkIndex; i < end; i++) {
-        const originalIdx = displayOrder[i];
-        const displayPosition = i;
-        renderPregunta(originalIdx, displayPosition);
-      }
-      chunkIndex = end;
-
-      if (chunkIndex < displayOrder.length) {
-        // Actualizar spinner con progreso
-        const spinner = cont.querySelector('.chunk-progress');
-        if (spinner) spinner.textContent = `Cargando preguntas… ${chunkIndex} / ${displayOrder.length}`;
-        // Restaurar solo el último lote renderizado (no todo desde el principio)
-        setTimeout(renderChunk, 0);
-      } else {
-        // Todo renderizado: eliminar spinner, conectar botón total, restaurar estado y scroll
-        const spinner = cont.querySelector('.chunk-progress');
-        if (spinner) {
-          const spinnerParent = spinner.closest('div') || spinner.parentElement;
-          if (spinnerParent && spinnerParent !== cont) spinnerParent.remove();
-          else spinner.remove();
-        }
-        const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
-        if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
-        restoreSelectionsAndGrades(seccionId);
-        // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
-        // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
-        // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
-        if (!esExamenUnico(seccionId) && !esExamenUBA(seccionId) && seccionId !== 'simulador') {
-          actualizarSeparador(seccionId, cont);
-        }
-        if (_scrollOnNextRender) {
-          _scrollOnNextRender = false;
-          scrollToFirstUnanswered(seccionId);
-        }
-      }
-    };
-
-    // Mostrar spinner de progreso mientras se renderizan los lotes
-    if (displayOrder.length > CHUNK_SIZE) {
-      const progressDiv = document.createElement('div');
-      progressDiv.style.cssText = 'text-align:center;padding:16px 20px 8px;color:#64748b;font-size:0.9rem;';
-      progressDiv.innerHTML = `<span class="chunk-progress">Cargando preguntas… 0 / ${displayOrder.length}</span>`;
-      cont.appendChild(progressDiv);
-    }
-
-    const renderPregunta = (originalIdx, displayPosition) => _renderPregunta(seccionId, originalIdx, displayPosition, cont);
+    }; // fin renderPregunta
 
     renderChunk();
   }
@@ -3290,7 +3229,7 @@
     document.getElementById('mr-btn-confirmar').addEventListener('click', () => {
       overlay.remove();
       limpiarSeccion(seccionId, true);
-      (window.generarCuestionario || generarCuestionario)(seccionId);
+      generarCuestionario(seccionId);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
@@ -5397,7 +5336,7 @@
           expBtn.textContent = nuevaExplicacion.trim() ? 'Ver explicación' : '➕ Agregar explicación';
           expBtn.className = 'btn-explicacion' + (nuevaExplicacion.trim() ? '' : ' btn-explicacion--vacia');
         }
-        (window.generarCuestionario || generarCuestionario)(seccionId);
+        generarCuestionario(seccionId);
       } catch(e) {
         preguntasPorSeccion[seccionId][qIndex].explicacion = anterior;
         fbToast('\u274C Error al guardar: ' + e.message, 'error');
@@ -6078,7 +6017,7 @@
               );
               panel.remove();
               // Re-renderizar el cuestionario para reflejar el cambio en pantalla
-              (window.generarCuestionario || generarCuestionario)(seccionId);
+              generarCuestionario(seccionId);
             } else {
               // Revertir cambio en memoria si el servidor falló
               if (esOpcion) {
@@ -6415,7 +6354,7 @@
       if (j.ok) {
         mostrarToast(`Especialidad guardada en data/${seccionId}.js → ${nuevaEspecialidad} ✓`, 'exito', 3500);
         if (onExito) onExito();
-        (window.generarCuestionario || generarCuestionario)(seccionId);
+        generarCuestionario(seccionId);
       } else {
         // Revertir el cambio en memoria si el servidor falló
         preg.etiquetas.especialidad = especialidadAnterior;
@@ -8350,7 +8289,7 @@ function fbSaveProgressToCloud() {
 
       // Renderizar — generarCuestionario llama getDisplayOrder que usa las anclas
       // de docId+texto para ubicar las respondidas en su lugar correcto
-      (window.generarCuestionario || generarCuestionario)(seccionId);
+      generarCuestionario(seccionId);
 
       // Restaurar selecciones en curso y scroll DESPUÉS de que todos los chunks terminen.
       // Usamos un flag en el contenedor para saber cuándo terminó el último chunk.
@@ -9526,25 +9465,6 @@ function fbSaveProgressToCloud() {
   window.cargarSeccion        = cargarSeccion;
   window.generarCuestionario  = generarCuestionario;
   window.showSection          = showSection;
-  // Exponer para el paginador externo
-  window._getDisplayOrder = getDisplayOrder;
-  // Renderizar un subconjunto de índices en el contenedor de la sección.
-  // El paginador llama esto con solo los índices de la página activa.
-  window._renderIndicesToCont = function(seccionId, indices, posOffset) {
-    const preguntas = preguntasPorSeccion[seccionId];
-    const cont = document.getElementById('cuestionario-' + seccionId);
-    if (!preguntas || !cont) return;
-    ensureSectionState(seccionId, preguntas.length);
-    const offset = (typeof posOffset === 'number') ? posOffset : 0;
-    indices.forEach((originalIdx, pos) => {
-      _renderPregunta(seccionId, originalIdx, offset + pos, cont);
-    });
-    // Restaurar estado visual (respuestas ya dadas)
-    restoreSelectionsAndGrades(seccionId);
-    // Conectar botón de puntuación total si existe
-    const btnTotal = document.getElementById('mostrar-total-' + seccionId);
-    if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
-  };
   Object.defineProperty(window, 'currentSection', {
     get: function () { return currentSection; },
     configurable: true
