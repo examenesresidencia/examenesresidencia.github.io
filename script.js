@@ -1,4 +1,4 @@
-//PRUEBA 18  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 19  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2445,10 +2445,6 @@
       // Botón Editar (solo admin) — disponible en todas las secciones
       if (window.fbInjectEditButtonIfAdmin) {
         window.fbInjectEditButtonIfAdmin(seccionId, originalIdx, botonesDiv);
-      }
-      // Botón Reclasificar (admin + usuario seleccionado)
-      if (window.fbInjectReclasificarButton) {
-        window.fbInjectReclasificarButton(seccionId, originalIdx, botonesDiv);
       }
 
       div.appendChild(botonesDiv);
@@ -9465,6 +9461,24 @@ function fbSaveProgressToCloud() {
   window.cargarSeccion        = cargarSeccion;
   window.generarCuestionario  = generarCuestionario;
   window.showSection          = showSection;
+  // Exponer para el paginador externo
+  window._getDisplayOrder = getDisplayOrder;
+  // Renderizar un subconjunto de índices en el contenedor de la sección.
+  // El paginador llama esto con solo los índices de la página activa.
+  window._renderIndicesToCont = function(seccionId, indices) {
+    const preguntas = preguntasPorSeccion[seccionId];
+    const cont = document.getElementById('cuestionario-' + seccionId);
+    if (!preguntas || !cont) return;
+    ensureSectionState(seccionId, preguntas.length);
+    indices.forEach((originalIdx, pos) => {
+      renderPregunta(originalIdx, pos);
+    });
+    // Restaurar estado visual (respuestas ya dadas)
+    restoreSelectionsAndGrades(seccionId);
+    // Conectar botón de puntuación total si existe
+    const btnTotal = document.getElementById('mostrar-total-' + seccionId);
+    if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
+  };
   Object.defineProperty(window, 'currentSection', {
     get: function () { return currentSection; },
     configurable: true
