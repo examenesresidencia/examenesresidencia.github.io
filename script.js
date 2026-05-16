@@ -9244,7 +9244,7 @@ function fbSaveProgressToCloud() {
     var botonesDiv = document.createElement('div');
     botonesDiv.style.marginTop = '10px';
     botonesDiv.style.display = 'flex';
-    botonesDiv.style.gap = '10px';
+    botonesDiv.style.gap = '8px';
     botonesDiv.style.flexWrap = 'wrap';
 
     var btn = document.createElement('button');
