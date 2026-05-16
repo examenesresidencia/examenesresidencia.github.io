@@ -1,4 +1,4 @@
-//PRUEBA 30  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 31  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -807,7 +807,9 @@
 
   function showSection(seccionId) {
     currentSection = seccionId;
-    document.getElementById("menu-principal")?.classList.add("oculto");
+    // Limpiar inline style antes de agregar clase (fix: cerrar* de sub-paneles ponen style.display='block')
+    const _menuEl = document.getElementById("menu-principal");
+    if (_menuEl) { _menuEl.style.display = ''; _menuEl.classList.add("oculto"); }
     // Ocultar todos los submenús
     document.querySelectorAll(".menu-principal[id$='-submenu']").forEach(s => s.style.display = "none");
     document.querySelectorAll(".pagina-cuestionario").forEach(p => p.classList.remove("activa"));
@@ -895,7 +897,9 @@
     currentSection = null;
     // Siempre asegurar que la URL quede en #menu
     history.replaceState({ section: null }, 'Menú Principal', '#menu');
-    document.getElementById("menu-principal")?.classList.remove("oculto");
+    // Limpiar inline style antes de quitar clase 'oculto' (fix: sub-paneles ponen style.display)
+    const _menuElAlt = document.getElementById("menu-principal");
+    if (_menuElAlt) { _menuElAlt.style.display = ''; _menuElAlt.classList.remove("oculto"); }
     document.querySelectorAll(".menu-principal[id$='-submenu']").forEach(s => s.style.display = "none");
     document.querySelectorAll(".pagina-cuestionario").forEach(p => p.classList.remove("activa"));
 
