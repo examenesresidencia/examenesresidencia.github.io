@@ -657,6 +657,22 @@
 
     // ── Cargar desde Firestore ──────────────────────────────────────
     _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
+
+    // Guard: si ya hay una carga activa para esta sección, esperar a que termine
+    // en lugar de iniciar una segunda carga en paralelo (doble clic, simulador, etc.)
+    if (_seccionesEnCarga.has(seccionId)) {
+      return new Promise((resolve) => {
+        const poll = setInterval(() => {
+          if (!_seccionesEnCarga.has(seccionId)) {
+            clearInterval(poll);
+            resolve();
+          }
+        }, 80);
+        // Timeout de seguridad: si después de 15s sigue cargando, resolver igual
+        setTimeout(() => { clearInterval(poll); resolve(); }, 15000);
+      });
+    }
+
     _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
     return new Promise((resolve) => {
       function intentarCarga() {
@@ -671,14 +687,17 @@
             const { collection, getDocs, query, orderBy } = window.__firebase_firestore;
             const db = _fbDb;
             if (!db) {
-              console.warn('⚠️ Firestore no inicializado al cargar:', seccionId);
-              resolve(); return;
+              // Firestore aún no inicializado — reintentar en 200ms en lugar de resolver vacío
+              console.warn('⚠️ Firestore aún no inicializado, reintentando en 200ms:', seccionId);
+              setTimeout(intentarCarga, 200);
+              return;
             }
             const itemsRef = collection(db, 'preguntas', seccionId, 'items');
             const q = query(itemsRef, orderBy('_idx'));
             const snap = await getDocs(q);
             if (snap.empty) {
               console.warn('⚠️ Sin preguntas en Firestore para:', seccionId);
+              _seccionesEnCarga.delete(seccionId);
               resolve(); return;
             }
             let preguntas = snap.docs.map(d => {
@@ -2561,7 +2580,30 @@
 
   function generarCuestionario(seccionId) {
     const preguntas = preguntasPorSeccion[seccionId];
-    if (!preguntas) return;
+    if (!preguntas || preguntas.length === 0) {
+      // Limpiar spinner estático del HTML y mostrar mensaje de error
+      const cont = document.getElementById(`cuestionario-${seccionId}`);
+      if (cont) {
+        cont.innerHTML = `
+          <div style="text-align:center;padding:60px 20px 40px;color:#64748b;">
+            <div style="font-size:2.5rem;margin-bottom:16px;">⚠️</div>
+            <p style="font-size:1rem;font-weight:600;color:#94a3b8;margin-bottom:8px;">
+              No se pudieron cargar las preguntas de esta sección.
+            </p>
+            <p style="font-size:0.85rem;color:#64748b;margin-bottom:24px;">
+              Verificá tu conexión a internet y volvé a intentarlo.
+            </p>
+            <button onclick="location.reload()"
+              style="padding:10px 24px;border-radius:10px;border:none;
+                background:linear-gradient(135deg,#0d7490,#0891b2);
+                color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
+                box-shadow:0 4px 14px rgba(13,116,144,.35);">
+              🔄 Recargar página
+            </button>
+          </div>`;
+      }
+      return;
+    }
 
     ensureSectionState(seccionId, preguntas.length);
 
