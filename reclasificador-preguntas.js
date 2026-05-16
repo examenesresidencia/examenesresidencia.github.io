@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// reclasificador-preguntas.js  — V2
+// reclasificador-preguntas.js  — V3
 // ────────────────────────────────────────────────────────────────
 // Permite reclasificar preguntas hacia otra especialidad con impacto
 // directo en Firestore. Visible solo para admin y usuario elegido.
@@ -315,28 +315,31 @@
   // Estrategia: leer todos los docs de /preguntas/{destino}/items
   // y usar el mayor índice + 1, o bien usar el caché local si ya existe.
   async function _proximoIndice(destino) {
-    const { getDocs, collection } = window.__fb;
+    const { getDocs, collection, query, orderBy, limit } = window.__fb;
     const _fbDb = window._fbDb;
 
-    // 1. Intentar desde caché local primero (rápido)
+    // 1. Intentar desde caché local primero (sin costo de lectura)
     const pps = window.preguntasPorSeccion || {};
     let maxLocal = -1;
     if (Array.isArray(pps[destino]) && pps[destino].length > 0) {
-      maxLocal = pps[destino].length; // 0-indexed length = next index (1-indexed = length+1 - 1 = length)
+      maxLocal = pps[destino].length;
     }
 
-    // 2. Consultar Firestore para asegurarse (evita colisiones si la sección no está en caché)
+    // 2. Consultar Firestore con orderBy __name__ desc + limit(1)
+    //    → siempre 1 sola lectura sin importar el tamaño de la sección
     try {
-      const snap = await getDocs(collection(_fbDb, 'preguntas', destino, 'items'));
+      const q = query(
+        collection(_fbDb, 'preguntas', destino, 'items'),
+        orderBy('__name__', 'desc'),
+        limit(1)
+      );
+      const snap = await getDocs(q);
       if (!snap.empty) {
-        // Parsear números de los docIds: destino_1, destino_2, etc. → extraer el número
-        let maxFs = 0;
-        snap.forEach(d => {
-          const parts = d.id.split('_');
-          const n = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(n) && n > maxFs) maxFs = n;
-        });
-        return maxFs + 1; // próximo libre
+        // El único doc devuelto tiene el docId más alto (ej: "pediatria_183")
+        const docId = snap.docs[0].id;
+        const parts = docId.split('_');
+        const n = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(n)) return n + 1;
       }
     } catch (e) {
       console.warn('[RECLASIF] No se pudo leer la colección destino desde Firestore:', e.message);
