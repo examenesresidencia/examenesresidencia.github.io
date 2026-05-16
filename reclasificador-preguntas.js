@@ -1,8 +1,8 @@
 // ════════════════════════════════════════════════════════════════
-// reclasificador-preguntas.js  — V1
+// reclasificador-preguntas.js  — V2
 // ────────────────────────────────────────────────────────────────
 // Permite reclasificar preguntas hacia otra especialidad con impacto
-// directo en Firestore. Visible solo para admin y soloquimicayaruqui@gmail.com.
+// directo en Firestore. Visible solo para admin y usuario elegido.
 //
 // LÓGICA:
 //   1. Agrega un botón "🔀 Reclasificar" junto a los botones de cada pregunta.
@@ -103,7 +103,7 @@
     st.textContent = `
       /* ── Botón Reclasificar ── */
       .btn-reclasificar {
-        padding: 6px 14px;
+        padding: 6px 10px;
         border-radius: 8px;
         border: 1.5px solid rgba(167, 139, 250, 0.4);
         background: rgba(167, 139, 250, 0.08);
@@ -509,6 +509,22 @@
           doc(_fbDb, 'preguntas', seccionOrigen, 'items', origenDocId)
         );
 
+        // ── 4.5. Migrar progreso del usuario autorizado ───────
+        // Solo aplica cuando quien reclasifica es el usuario autorizado (no admin).
+        // El admin nunca responde preguntas, así que no tiene progreso que migrar.
+        // El objetivo: si el usuario autorizado ya respondió esta pregunta en el origen,
+        // moverla como "respondida" al destino en su progress/{uid}, sin tocar a nadie más.
+        await _migrarProgresoUsuario({
+          db         : _fbDb,
+          fb         : window.__fb,
+          seccionOrigen,
+          seccionDestino : destino,
+          origenDocId,
+          nuevoDocId,
+          nuevoIndiceDestino : nuevoIndice,
+          pregClonada,
+        });
+
         // ── 5. Parche quirúrgico en caché local ──────────────
         // 5a. Quitar del caché del origen
         if (Array.isArray(pps[seccionOrigen])) {
@@ -595,6 +611,177 @@
   }
 
   // ════════════════════════════════════════════════════════════════
+  // _migrarProgresoUsuario
+  // Mueve el estado de una pregunta respondida desde la sección origen
+  // hacia la sección destino en el documento progress/{uid} del usuario
+  // autorizado. No toca el progreso de ningún otro usuario.
+  //
+  // Solo actúa si:
+  //   a) El usuario actual es el usuario autorizado (no admin).
+  //   b) La pregunta realmente estaba respondida en el origen.
+  //
+  // Si la pregunta no estaba respondida, simplemente no hace nada.
+  // ════════════════════════════════════════════════════════════════
+  async function _migrarProgresoUsuario({
+    db, fb,
+    seccionOrigen, seccionDestino,
+    origenDocId, nuevoDocId,
+    nuevoIndiceDestino,
+    pregClonada,
+  }) {
+    // Solo migrar si quien reclasifica es el usuario autorizado
+    const user = window._currentUser;
+    if (!user || !user.uid) return;
+    const esAutorizado = user.email && user.email.toLowerCase() === EMAIL_AUTORIZADO;
+    if (!esAutorizado) return;
+
+    const uid = user.uid;
+    const { doc, getDoc, setDoc } = fb;
+
+    try {
+      // 1. Leer el documento de progreso del usuario autorizado
+      const snap = await getDoc(doc(db, 'progress', uid));
+      if (!snap.exists()) {
+        console.log('[RECLASIF-PROGRESS] No existe progress para', uid, '— nada que migrar.');
+        return;
+      }
+
+      const progressData = snap.data();
+      // Clonar profundo para no mutar el objeto de Firestore
+      const state = JSON.parse(JSON.stringify(progressData.state || {}));
+
+      const sOrigen  = state[seccionOrigen];
+      if (!sOrigen) {
+        console.log('[RECLASIF-PROGRESS] Sin estado en sección origen — nada que migrar.');
+        return;
+      }
+
+      // 2. Buscar la entrada en answeredOrder del origen
+      //    Ancla primaria: origenDocId  |  Ancla secundaria: texto normalizado
+      const _norm = t => (t || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 120);
+      const textoNorm = _norm(pregClonada.pregunta);
+
+      const answeredOrigen = sOrigen.answeredOrder || [];
+      let entradaIdx = -1; // posición en el array answeredOrder
+      let idxEnSeccion = -1; // índice numérico (qIndex) dentro de la sección
+
+      for (let i = 0; i < answeredOrigen.length; i++) {
+        const e = answeredOrigen[i];
+        const eDocId = e.docId || null;
+        const eTexto = _norm(e.texto);
+        if (eDocId && eDocId === origenDocId) { entradaIdx = i; idxEnSeccion = typeof e === 'number' ? e : e.idx; break; }
+        if (!eDocId && eTexto && eTexto === textoNorm) { entradaIdx = i; idxEnSeccion = typeof e === 'number' ? e : e.idx; break; }
+      }
+
+      if (entradaIdx === -1 || idxEnSeccion === -1) {
+        console.log('[RECLASIF-PROGRESS] Pregunta no encontrada en answeredOrder del origen — no estaba respondida, nada que migrar.');
+        return;
+      }
+
+      console.log(`[RECLASIF-PROGRESS] Pregunta respondida encontrada en origen[${idxEnSeccion}] — migrando a destino índice ${nuevoIndiceDestino}`);
+
+      // 3. Extraer datos del origen (graded, answers, shuffleMap)
+      const gradedOrigen    = sOrigen.graded    || {};
+      const answersOrigen   = sOrigen.answers   || {};
+      const shuffleOrigen   = sOrigen.shuffleMap || {};
+
+      const gradedVal  = gradedOrigen[idxEnSeccion];   // true | false
+      const answersVal = answersOrigen[idxEnSeccion];  // array de selecciones
+      const shuffleVal = shuffleOrigen[idxEnSeccion];  // array de shuffle de opciones
+
+      // 4. Limpiar del origen
+      sOrigen.answeredOrder.splice(entradaIdx, 1);
+      delete gradedOrigen[idxEnSeccion];
+      if (answersVal !== undefined) delete answersOrigen[idxEnSeccion];
+      if (shuffleVal !== undefined) delete shuffleOrigen[idxEnSeccion];
+
+      // También quitar de unansweredOrder del origen por si acaso
+      sOrigen.unansweredOrder = (sOrigen.unansweredOrder || []).filter(i => i !== idxEnSeccion);
+
+      // 5. Insertar en el destino
+      if (!state[seccionDestino]) {
+        state[seccionDestino] = {
+          shuffleMap    : {},
+          answeredOrder : [],
+          unansweredOrder: [],
+          answers       : {},
+          graded        : {},
+          totalShown    : false,
+        };
+      }
+      const sDest = state[seccionDestino];
+
+      // El índice en la sección destino es nuevoIndiceDestino - 1
+      // porque los docIds son base-1 (destino_1, destino_2…) pero los índices del array son base-0
+      const nuevoIdxEnSeccion = nuevoIndiceDestino - 1;
+
+      // Insertar en answeredOrder del destino
+      sDest.answeredOrder = sDest.answeredOrder || [];
+      sDest.answeredOrder.push({
+        idx   : nuevoIdxEnSeccion,
+        docId : nuevoDocId,
+        texto : _norm(pregClonada.pregunta),
+      });
+
+      // Migrar graded, answers y shuffleMap al nuevo índice
+      sDest.graded    = sDest.graded    || {};
+      sDest.answers   = sDest.answers   || {};
+      sDest.shuffleMap = sDest.shuffleMap || {};
+
+      if (gradedVal !== undefined)  sDest.graded[nuevoIdxEnSeccion]    = gradedVal;
+      if (answersVal !== undefined) sDest.answers[nuevoIdxEnSeccion]   = answersVal;
+      if (shuffleVal !== undefined) sDest.shuffleMap[nuevoIdxEnSeccion] = shuffleVal;
+
+      // Quitar de unansweredOrder del destino si por alguna razón estuviera ahí
+      sDest.unansweredOrder = (sDest.unansweredOrder || []).filter(i => i !== nuevoIdxEnSeccion);
+
+      // 6. Guardar el estado actualizado en Firestore
+      await setDoc(doc(db, 'progress', uid), {
+        ...progressData,
+        state,
+        updatedAt: (fb.serverTimestamp ? fb.serverTimestamp() : new Date()),
+      });
+
+      // 7. Parche en localStorage (quiz_state_v3) para que la UI local refleje el cambio
+      //    sin necesidad de recargar desde la nube
+      try {
+        const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
+        const localState = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+        // Limpiar origen en local
+        if (localState[seccionOrigen]) {
+          const lo = localState[seccionOrigen];
+          if (lo.answeredOrder) lo.answeredOrder.splice(entradaIdx, 1);
+          if (lo.graded)     delete lo.graded[idxEnSeccion];
+          if (lo.answers)    delete lo.answers[idxEnSeccion];
+          if (lo.shuffleMap) delete lo.shuffleMap[idxEnSeccion];
+          lo.unansweredOrder = (lo.unansweredOrder || []).filter(i => i !== idxEnSeccion);
+        }
+
+        // Insertar en destino en local
+        if (!localState[seccionDestino]) localState[seccionDestino] = { shuffleMap:{}, answeredOrder:[], unansweredOrder:[], answers:{}, graded:{} };
+        const ld = localState[seccionDestino];
+        (ld.answeredOrder = ld.answeredOrder || []).push({ idx: nuevoIdxEnSeccion, docId: nuevoDocId, texto: textoNorm });
+        (ld.graded     = ld.graded     || {})[nuevoIdxEnSeccion] = gradedVal;
+        if (answersVal !== undefined) (ld.answers   = ld.answers   || {})[nuevoIdxEnSeccion] = answersVal;
+        if (shuffleVal !== undefined) (ld.shuffleMap = ld.shuffleMap || {})[nuevoIdxEnSeccion] = shuffleVal;
+        (ld.unansweredOrder = ld.unansweredOrder || []).filter(i => i !== nuevoIdxEnSeccion);
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(localState));
+        console.log('[RECLASIF-PROGRESS] ✅ Progreso migrado en Firestore y localStorage');
+      } catch (_) {
+        // Si falla el parche local, no es crítico — la nube ya tiene el dato correcto
+        console.warn('[RECLASIF-PROGRESS] Parche localStorage falló (no crítico):', _);
+      }
+
+    } catch (e) {
+      // Error no crítico: la reclasificación de contenido ya se hizo correctamente.
+      // Solo informar en consola para no interrumpir el flujo.
+      console.error('[RECLASIF-PROGRESS] Error al migrar progreso (no crítico):', e.message);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // fbInjectReclasificarButton
   // Llamado desde script.js (o desde editor-admin.js) por cada pregunta.
   // Inserta el botón "🔀 Reclasificar" en el div de botones de la pregunta.
@@ -607,7 +794,7 @@
     if (botonesDiv.querySelector('[data-reclasif-btn]')) return;
 
     const btn = document.createElement('button');
-    btn.textContent = '🔀 Reclasificar';
+    btn.textContent = '🔀';
     btn.className   = 'btn-reclasificar';
     btn.setAttribute('data-reclasif-btn', '1');
     btn.title = 'Mover esta pregunta a otra especialidad';
