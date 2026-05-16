@@ -872,10 +872,18 @@
       // Limpiar el estado solo si el cuestionario ya fue completado (totalShown)
       clearSectionStateIfCompletedAndBack(currentSection);
 
-      // Si es el simulacro con progreso: ya se maneja en volverAlMenuSimulacro
-      // Para todos los demás: PRESERVAR el estado (no limpiar nada)
-      // Las respuestas ya están guardadas en localStorage desde responderPregunta()
-      // No hace falta hacer nada especial aquí.
+      // Re-mezclar preguntas sin responder al salir: borramos unansweredOrder
+      // para que al volver se genere un nuevo orden aleatorio.
+      // Las respondidas (answeredOrder + graded) quedan intactas.
+      const _s = state[currentSection];
+      if (_s && _s.unansweredOrder && !_s.totalShown &&
+          currentSection !== 'simulador' &&
+          !esExamenUnico(currentSection) && !esExamenUBA(currentSection) &&
+          !esCompilado(currentSection) &&
+          !(_currentUserData && _currentUserData.role === 'admin')) {
+        _s.unansweredOrder = [];
+        saveJSON(STORAGE_KEY, state);
+      }
     }
 
     sessionStorage.removeItem('quiz_active_section'); // Ya no hay sección activa
@@ -9472,15 +9480,16 @@ function fbSaveProgressToCloud() {
   window._getDisplayOrder = getDisplayOrder;
   // Renderizar un subconjunto de índices en el contenedor de la sección.
   // El paginador llama esto con solo los índices de la página activa.
-  window._renderIndicesToCont = function(seccionId, indices) {
+  window._renderIndicesToCont = function(seccionId, indices, posOffset) {
     const preguntas = preguntasPorSeccion[seccionId];
     const cont = document.getElementById('cuestionario-' + seccionId);
     if (!preguntas || !cont) return;
     ensureSectionState(seccionId, preguntas.length);
-    // NO limpiar cont aquí: el paginador ya limpió y mide antesRender.
-    // Solo agregar los nuevos divs al final para que el paginador los capture.
+    // posOffset: número de preguntas antes de esta página (para numeración correlativa)
+    const offset = (typeof posOffset === 'number') ? posOffset : 0;
+    // NO limpiar cont: el paginador mide antesRender y mueve los hijos después.
     indices.forEach((originalIdx, pos) => {
-      _renderPregunta(seccionId, originalIdx, pos, cont);
+      _renderPregunta(seccionId, originalIdx, offset + pos, cont);
     });
     // Restaurar estado visual (respuestas ya dadas)
     restoreSelectionsAndGrades(seccionId);
