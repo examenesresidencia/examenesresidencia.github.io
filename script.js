@@ -1,4 +1,4 @@
-//PRUEBA 28  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 29  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -879,7 +879,16 @@
       // Si es el simulacro con progreso: ya se maneja en volverAlMenuSimulacro
       // Para todos los demás: PRESERVAR el estado (no limpiar nada)
       // Las respuestas ya están guardadas en localStorage desde responderPregunta()
-      // No hace falta hacer nada especial aquí.
+      // Re-mezclar preguntas sin responder para que al volver el orden sea nuevo
+      const _s = state[currentSection];
+      if (_s && Array.isArray(_s.unansweredOrder) && !_s.totalShown &&
+          currentSection !== 'simulador' &&
+          !esExamenUnico(currentSection) && !esExamenUBA(currentSection) &&
+          !esCompilado(currentSection) &&
+          !(_currentUserData && _currentUserData.role === 'admin')) {
+        _s.unansweredOrder = [];
+        saveJSON(STORAGE_KEY, state);
+      }
     }
 
     sessionStorage.removeItem('quiz_active_section'); // Ya no hay sección activa
@@ -3234,7 +3243,7 @@
     document.getElementById('mr-btn-confirmar').addEventListener('click', () => {
       overlay.remove();
       limpiarSeccion(seccionId, true);
-      generarCuestionario(seccionId);
+      (window.generarCuestionario || generarCuestionario)(seccionId);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
@@ -5341,7 +5350,7 @@
           expBtn.textContent = nuevaExplicacion.trim() ? 'Ver explicación' : '➕ Agregar explicación';
           expBtn.className = 'btn-explicacion' + (nuevaExplicacion.trim() ? '' : ' btn-explicacion--vacia');
         }
-        generarCuestionario(seccionId);
+        (window.generarCuestionario || generarCuestionario)(seccionId);
       } catch(e) {
         preguntasPorSeccion[seccionId][qIndex].explicacion = anterior;
         fbToast('\u274C Error al guardar: ' + e.message, 'error');
@@ -6022,7 +6031,7 @@
               );
               panel.remove();
               // Re-renderizar el cuestionario para reflejar el cambio en pantalla
-              generarCuestionario(seccionId);
+              (window.generarCuestionario || generarCuestionario)(seccionId);
             } else {
               // Revertir cambio en memoria si el servidor falló
               if (esOpcion) {
@@ -6359,7 +6368,7 @@
       if (j.ok) {
         mostrarToast(`Especialidad guardada en data/${seccionId}.js → ${nuevaEspecialidad} ✓`, 'exito', 3500);
         if (onExito) onExito();
-        generarCuestionario(seccionId);
+        (window.generarCuestionario || generarCuestionario)(seccionId);
       } else {
         // Revertir el cambio en memoria si el servidor falló
         preg.etiquetas.especialidad = especialidadAnterior;
@@ -8294,7 +8303,7 @@ function fbSaveProgressToCloud() {
 
       // Renderizar — generarCuestionario llama getDisplayOrder que usa las anclas
       // de docId+texto para ubicar las respondidas en su lugar correcto
-      generarCuestionario(seccionId);
+      (window.generarCuestionario || generarCuestionario)(seccionId);
 
       // Restaurar selecciones en curso y scroll DESPUÉS de que todos los chunks terminen.
       // Usamos un flag en el contenedor para saber cuándo terminó el último chunk.
