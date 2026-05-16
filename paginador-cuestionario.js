@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V4
+// paginador-cuestionario.js  — V5
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -380,9 +380,11 @@
 
       // Encontrar primera sin responder DESPUÉS de renderizar:
       // restoreSelectionsAndGrades (dentro de _renderIndicesToCont) ya pobló
-      // puntajesPorSeccion con 1/0. Antes de eso todo era null, dando posición 0 incorrecta.
+      // puntajesPorSeccion con 1/0. Usamos el array actualizado, no la variable
+      // capturada antes del render (que tenía todos los valores en null).
+      const puntajesActualizados = (window.puntajesPorSeccion || {})[seccionId] || [];
       const primeraSinRespPos = indicesPage.findIndex(i => {
-        const v = puntajes[i]; return v === null || v === undefined;
+        const v = puntajesActualizados[i]; return v === null || v === undefined;
       });
 
       // Crear zona de preguntas
@@ -394,6 +396,7 @@
         if (pos === primeraSinRespPos && primeraSinRespPos > 0) {
           const sep = document.createElement('div');
           sep.className = 'pag2-separador';
+          sep.setAttribute('id', `pag2-sep-${seccionId}`);
           sep.innerHTML = `
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
               fill="none" stroke="currentColor" stroke-width="2.5"
@@ -465,11 +468,21 @@
 
     renderPagina(paginaInicial);
 
-    // Scroll automático a la primera sin responder
+    // Scroll automático a la primera sin responder — funciona en TODOS los casos
+    // de entrada: navegación desde menú, F5, recarga directa por URL/hash.
+    // El paginador es completamente autónomo: no depende de _scrollOnNextRender
+    // de script.js (que solo se activa al pasar por showSection() desde el menú).
     setTimeout(() => {
-      const sep = document.querySelector(`#pag2-wrapper-${seccionId} .pag2-separador`);
-      const nav = document.getElementById(`pag2-nav-${seccionId}`);
-      (sep || nav)?.scrollIntoView({ behavior:'smooth', block:'start' });
+      const sep = document.getElementById(`pag2-sep-${seccionId}`);
+      if (sep) {
+        // Hay separador → hay preguntas respondidas antes: ir a la primera sin responder
+        sep.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        // Sin separador: o todas respondidas, o ninguna respondida aún.
+        // En ambos casos, ir al navbar de la página (inicio del contenido).
+        const nav = document.getElementById(`pag2-nav-${seccionId}`);
+        if (nav) nav.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }, 150);
 
     return true;
