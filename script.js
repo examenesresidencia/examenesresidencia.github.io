@@ -1,4 +1,4 @@
-//PRUEBA 27  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 28  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -9461,7 +9461,7 @@ function fbSaveProgressToCloud() {
     get: function () { return _currentUser; },
     configurable: true
   });
- window._bumpContentVersion         = _bumpContentVersion;
+  window._bumpContentVersion         = _bumpContentVersion;
   window._registrarEdicionPendiente  = _registrarEdicionPendiente;
   window._aplicarEdicionPuntual      = _aplicarEdicionPuntual;
   window._seccionesYaCargadas = _seccionesYaCargadas;
@@ -9475,22 +9475,196 @@ function fbSaveProgressToCloud() {
     configurable: true
   });
 
-  // ── Exponer funciones para paginador-cuestionario.js ──────────
+  // ── Exponer para paginador-cuestionario.js ────────────────────
   window._getDisplayOrder = function(seccionId, total) {
     ensureSectionState(seccionId, total);
     return getDisplayOrder(seccionId, total);
   };
 
+  // _renderPreguntaUnica: función standalone que no depende de variables
+  // locales de generarCuestionario — accede todo por parámetro o por window.
+  function _renderPreguntaUnica(seccionId, originalIdx, displayPosition) {
+    var preguntas = preguntasPorSeccion[seccionId] || [];
+    var preg = preguntas[originalIdx];
+    if (!preg) return;
+    var cont = document.getElementById('cuestionario-' + seccionId);
+    if (!cont) return;
+
+    var div = document.createElement('div');
+    div.className = 'pregunta';
+
+    var resultado = document.createElement('div');
+    resultado.id = 'puntaje-' + seccionId + '-' + originalIdx;
+    resultado.className = 'resultado-pregunta';
+    resultado.textContent = '';
+    div.appendChild(resultado);
+
+    var h3 = document.createElement('h3');
+    h3.textContent = (displayPosition + 1) + '. ' + preg.pregunta;
+    div.appendChild(h3);
+
+    if (preg.imagen) {
+      var imgContainer = document.createElement('div');
+      imgContainer.style.marginTop = '15px';
+      imgContainer.style.marginBottom = '15px';
+      imgContainer.style.textAlign = 'center';
+      var img = document.createElement('img');
+      img.src = preg.imagen;
+      img.alt = 'Imagen';
+      img.style.maxWidth = '100%';
+      img.style.height = 'auto';
+      img.style.border = '2px solid #ddd';
+      img.style.borderRadius = '8px';
+      img.style.cursor = 'pointer';
+      img.onclick = function() { window.open(this.src, '_blank'); };
+      imgContainer.appendChild(img);
+      div.appendChild(imgContainer);
+    }
+
+    var tipoInput = preg.multiple ? 'checkbox' : 'radio';
+    var shuffleResult = getOrBuildShuffleForQuestion(seccionId, originalIdx, preg.opciones);
+    var inv = shuffleResult.inv;
+    var opcionesMezcladas = shuffleResult.opcionesMezcladas;
+
+    opcionesMezcladas.forEach(function(opc, mixedIdx) {
+      var label = document.createElement('label');
+      label.className = 'opcion';
+      var input = document.createElement('input');
+      input.type = tipoInput;
+      input.name = 'pregunta' + seccionId + originalIdx;
+      input.value = mixedIdx;
+      input.setAttribute('data-original-index', inv[mixedIdx]);
+      input.addEventListener('change', function() {
+        if (!state[seccionId].shuffleMap[originalIdx]) {
+          freezeShuffleForQuestion(seccionId, originalIdx);
+        }
+        persistSelectionsForQuestion(seccionId, originalIdx);
+      });
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(' ' + opc));
+      div.appendChild(label);
+    });
+
+    inyectarEstilosEtiquetas();
+    var etq = preg.etiquetas || {};
+    var esSimulacroCtx = (seccionId === 'simulador');
+    var esUnicoCtx = esExamenUnico(seccionId);
+    var esUBACtx = esExamenUBA(seccionId);
+    var esCompCtx = esCompilado(seccionId);
+    var esOrigenOficial = esUnicoCtx || esUBACtx || esCompCtx;
+    var nombreArchivoFinal = etq.nombreArchivo || preg.nombreArchivo || '';
+    var mostrarEspecialidad = (esOrigenOficial || esSimulacroCtx) && !!etq.especialidad;
+    var mostrarNombreArchivo = !esOrigenOficial && !!nombreArchivoFinal;
+    var mostrarNumeroPregunta = !esOrigenOficial && !!etq.numeroPregunta;
+    if (mostrarEspecialidad || mostrarNombreArchivo || mostrarNumeroPregunta) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'etiquetas-origen-wrapper';
+      var sep = document.createElement('div');
+      sep.className = 'etiquetas-separador';
+      var pillsDiv = document.createElement('div');
+      pillsDiv.className = 'etiquetas-origen';
+      var crearPill = function(icono, texto, variante) {
+        var span = document.createElement('span');
+        span.className = 'etiqueta-pill etiqueta-pill--' + variante;
+        span.innerHTML = '<span class="etiqueta-pill-icono">' + icono + '</span><span class="etiqueta-pill-texto">' + texto + '</span>';
+        return span;
+      };
+      if (mostrarEspecialidad) pillsDiv.appendChild(crearPill('🏥', etq.especialidad, 'especialidad'));
+      if (mostrarNombreArchivo) pillsDiv.appendChild(crearPill('📂', nombreArchivoFinal, 'archivo'));
+      if (mostrarNumeroPregunta) pillsDiv.appendChild(crearPill('🔢', etq.numeroPregunta, 'numero'));
+      wrapper.appendChild(sep);
+      wrapper.appendChild(pillsDiv);
+      div.appendChild(wrapper);
+    }
+
+    var botonesDiv = document.createElement('div');
+    botonesDiv.style.marginTop = '10px';
+    botonesDiv.style.display = 'flex';
+    botonesDiv.style.gap = '10px';
+    botonesDiv.style.flexWrap = 'wrap';
+
+    var btn = document.createElement('button');
+    btn.textContent = 'Responder';
+    btn.className = 'btn-responder';
+    btn.addEventListener('click', function() { responderPregunta(seccionId, originalIdx); });
+    botonesDiv.appendChild(btn);
+
+    var _hayExplicacion = preg.explicacion && preg.explicacion.trim() !== '';
+    if (_hayExplicacion || (window.fbIsAdmin && window.fbIsAdmin())) {
+      var btnExplicacion = document.createElement('button');
+      btnExplicacion.textContent = _hayExplicacion ? 'Ver explicación' : '➕ Agregar explicación';
+      btnExplicacion.className = 'btn-explicacion' + (_hayExplicacion ? '' : ' btn-explicacion--vacia');
+      btnExplicacion.id = 'btn-explicacion-' + seccionId + '-' + originalIdx;
+      btnExplicacion.addEventListener('click', function() { mostrarExplicacion(seccionId, originalIdx); });
+      botonesDiv.appendChild(btnExplicacion);
+    }
+
+    if (esExamenOficial(seccionId)) {
+      var btnRetag = document.createElement('button');
+      btnRetag.textContent = '✏️ Reetiquetado';
+      btnRetag.className = 'btn-retag';
+      btnRetag.style.cssText = 'padding:6px 14px;border-radius:8px;border:1.5px solid #0891b240;background:#0891b210;color:#0891b2;font-size:13px;cursor:pointer;font-weight:500;';
+      btnRetag.addEventListener('click', function() { abrirModalReetiquetado(seccionId, originalIdx, preg); });
+      botonesDiv.appendChild(btnRetag);
+    }
+
+    if (window.fbInjectEditButtonIfAdmin) window.fbInjectEditButtonIfAdmin(seccionId, originalIdx, botonesDiv);
+    if (window.fbInjectReclasificarButton) window.fbInjectReclasificarButton(seccionId, originalIdx, botonesDiv);
+
+    div.appendChild(botonesDiv);
+
+    var _tieneExplicacion = preg.explicacion && preg.explicacion.trim() !== '';
+    var explicacionDiv = document.createElement('div');
+    explicacionDiv.id = 'explicacion-' + seccionId + '-' + originalIdx;
+    explicacionDiv.className = 'explicacion-contenedor';
+    explicacionDiv.style.display = 'none';
+    explicacionDiv.style.marginTop = '15px';
+    explicacionDiv.style.padding = '18px 20px';
+    explicacionDiv.style.backgroundColor = '#f0f9ff';
+    explicacionDiv.style.borderLeft = '4px solid #0891b2';
+    explicacionDiv.style.borderRadius = '10px';
+    explicacionDiv.style.boxSizing = 'border-box';
+    explicacionDiv.style.width = '100%';
+    explicacionDiv.dataset.tieneContenido = _tieneExplicacion ? '1' : '0';
+    var explicacionTitulo = document.createElement('strong');
+    explicacionTitulo.textContent = 'Explicación:';
+    explicacionTitulo.style.display = 'block';
+    explicacionTitulo.style.marginBottom = '8px';
+    explicacionTitulo.style.color = '#0d7490';
+    var explicacionTexto = document.createElement('div');
+    if (_tieneExplicacion) {
+      var htmlDetectado = /<(p|b|i|u|br|img|strong|em)[^>]*>/i.test(preg.explicacion);
+      if (htmlDetectado) {
+        explicacionTexto.innerHTML = preg.explicacion.replace(/<p>\s*<\/p>/g,'').replace(/\n/g,'<br>').trim();
+      } else {
+        explicacionTexto.textContent = preg.explicacion;
+      }
+    }
+    explicacionTexto.style.margin = '0';
+    explicacionTexto.style.lineHeight = '1.6';
+    explicacionDiv.appendChild(explicacionTitulo);
+    explicacionDiv.appendChild(explicacionTexto);
+    div.appendChild(explicacionDiv);
+
+    if (typeof window.fbInjectVacunasButtonIfAdmin === 'function') {
+      window.fbInjectVacunasButtonIfAdmin(seccionId, explicacionDiv);
+    }
+
+    cont.appendChild(div);
+  }
+
+  window._renderPregunta = _renderPreguntaUnica;
+
   window._renderIndicesToCont = function(seccionId, indices, posOffset) {
     if (!Array.isArray(indices) || indices.length === 0) return;
     posOffset = (typeof posOffset === 'number') ? posOffset : 0;
-    const preguntas = preguntasPorSeccion[seccionId];
+    var preguntas = preguntasPorSeccion[seccionId];
     if (!preguntas || preguntas.length === 0) return;
     ensureSectionState(seccionId, preguntas.length);
-    const cont = document.getElementById('cuestionario-' + seccionId);
+    var cont = document.getElementById('cuestionario-' + seccionId);
     if (!cont) return;
     indices.forEach(function(originalIdx, localPos) {
-      window._renderPregunta(seccionId, originalIdx, posOffset + localPos);
+      _renderPreguntaUnica(seccionId, originalIdx, posOffset + localPos);
     });
     restoreSelectionsAndGrades(seccionId);
   };
