@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V3
+// paginador-cuestionario.js  — V4
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -366,11 +366,6 @@
       wrapper.appendChild(headerEl);
 
       // ── Zona de preguntas con separador ──
-      // Encontrar primera sin responder para el separador
-      const primeraSinRespPos = indicesPage.findIndex(i => {
-        const v = puntajes[i]; return v === null || v === undefined;
-      });
-
       // Crear contenedor temporal que recibirá los divs de script.js
       // script.js agrega los divs directamente a cont mediante cont.appendChild
       // Capturamos los divs ANTES y DESPUÉS de la llamada
@@ -382,6 +377,13 @@
 
       // Los nuevos divs fueron agregados por script.js al final de cont
       const nuevosHijos = Array.from(cont.children).slice(antesRender);
+
+      // Encontrar primera sin responder DESPUÉS de renderizar:
+      // restoreSelectionsAndGrades (dentro de _renderIndicesToCont) ya pobló
+      // puntajesPorSeccion con 1/0. Antes de eso todo era null, dando posición 0 incorrecta.
+      const primeraSinRespPos = indicesPage.findIndex(i => {
+        const v = puntajes[i]; return v === null || v === undefined;
+      });
 
       // Crear zona de preguntas
       const pregsZona = document.createElement('div');
