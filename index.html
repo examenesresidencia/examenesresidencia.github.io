@@ -192,12 +192,15 @@
 <li onclick="mostrarCuestionario('simulador')">SIMULACRO EXAMEN DE RESIDENCIA</li>
 <li onclick="mostrarBuscador()" style="background:linear-gradient(135deg,#0d7490,#0891b2);color:#fff;font-weight:700;letter-spacing:.03em;">🔍 BUSCADOR GLOBAL</li>
 <li onclick="mostrarVacunas2026()" style="background:linear-gradient(135deg,#166534,#15803d);color:#fff;font-weight:700;letter-spacing:.03em;">💉 VACUNAS 2026</li>
+
 </ul>
 </div>
 </div>
-<div class="info-extra">        
-
-
+<div class="info-extra">
+<p>Para sugerencias y correcciones comunicarse por favor con <a href="/cdn-cgi/l/email-protection#fa9c9b88979b9995c8999b8ec999929593999fba9d979b9396d4999597"><span class="__cf_email__" data-cfemail="422423302f23212d7021233671212a2d2b212702252f232b2e6c212d2f">[email protected]</span></a></p>
+<p>Última actualización: 21/09/2025</p>
+</div>
+</div>
 <!-- Submenú de Examen OTROS -->
 <div class="menu-principal" id="examen-otros-submenu" style="display: none;">
 <button class="btn-volver" onclick="volverAlMenu()">← Volver al Menú Principal</button>
@@ -972,6 +975,7 @@
 <!-- Botón flotante Volver al Buscador (se muestra al navegar desde una tarjeta) -->
 <button id="btn-volver-buscador" class="btn-volver-buscador" style="display:none;" onclick="volverAlBuscador()">← Volver al Buscador</button>
 <!-- Script de Cloudflare para protección de emails -->
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>
 
 <!-- FIREBASE SDK: carga módulos ESM y los expone como globals para script.js -->
 <script type="module">
@@ -997,13 +1001,13 @@
 <!-- Base de datos de preguntas -->
 <script>window.preguntasPorSeccion = {};</script>
 <!-- Script principal de la aplicación -->
-<script src="script.js?v=30"></script>
+<script src="script.js?v=16"></script>
 <!-- Editor admin de preguntas (módulo independiente, depende de script.js) -->
-<script src="editor-admin.js?v=19"></script>
+<script src="editor-admin.js?v=18"></script>
 <!-- Reclasificador de preguntas (admin + usuario seleccionado) -->
 <script src="reclasificador-preguntas.js?v=1"></script>
 <!-- Paginador de cuestionarios (solo usuarios, admin ve todo en una sola hoja) -->
-<script src="paginador-cuestionario.js?v=6"></script>
+<script src="paginador-cuestionario.js?v=1"></script>
 <!-- Buscador de preguntas duplicadas (módulo independiente, depende de script.js) -->
 <script src="buscador-duplicados.js?v=3"></script>
 <!-- subir preguntas a firebase -->
@@ -1027,6 +1031,7 @@
   </div>
   <iframe src="amenorrea-secundaria.html" style="flex:1; border:none; width:100%; background:#0a1628;"></iframe>
 </div>
+
 <!--hitos del desarrollo (módulo independiente, NO depende de script.js) -->
 <script src="hitos-desarrollo.js?v=5"></script>
 
