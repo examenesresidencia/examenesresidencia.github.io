@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V5
+// paginador-cuestionario.js  — V6
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -156,34 +156,62 @@
     st.id = 'pag2-styles';
     st.textContent = `
       .pag2-wrapper { width:100%; }
+
+      /* ── Navbar: SIEMPRE estático (top y bottom iguales) ── */
       .pag2-navbar {
         display:flex; align-items:center; justify-content:space-between;
         gap:8px; padding:10px 14px;
         border:1px solid rgba(56,189,248,0.18); border-radius:14px;
-        background:rgba(13,33,55,0.9); backdrop-filter:blur(8px);
-        -webkit-backdrop-filter:blur(8px);
+        background:rgba(13,33,55,0.95);
         margin-bottom:6px; flex-wrap:wrap;
-        position:sticky; top:0; z-index:200;
-        box-shadow:0 4px 20px rgba(0,0,0,0.3); box-sizing:border-box;
+        box-shadow:0 2px 12px rgba(0,0,0,0.25); box-sizing:border-box;
+        position:static;
       }
       .pag2-nav-left,.pag2-nav-right { display:flex;align-items:center;gap:6px;flex-shrink:0; }
       .pag2-nav-center { display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:center;flex:1;min-width:0; }
+
+      /* ── Pills: color de fondo completo según estado ── */
       .pag2-pill {
         display:inline-flex;align-items:center;justify-content:center;
         min-width:32px;height:32px;border-radius:8px;
-        border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);
-        font-size:13px;color:#94a3b8;padding:0 8px;cursor:pointer;position:relative;
-        transition:background .15s,border-color .15s,color .15s;
-        font-family:inherit;font-weight:500;user-select:none;
+        border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.05);
+        font-size:13px;color:#94a3b8;padding:0 8px;cursor:pointer;
+        transition:background .15s,border-color .15s,color .15s,transform .1s;
+        font-family:inherit;font-weight:600;user-select:none;
       }
-      .pag2-pill:hover:not(.pag2-pill-activa) { background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.22);color:#e2e8f0; }
-      .pag2-pill-activa { background:rgba(14,116,144,0.3);border-color:rgba(14,116,144,0.7);color:#38bdf8;font-weight:700;box-shadow:0 0 0 2px rgba(14,116,144,0.2); }
-      .pag2-pill-completa::after,.pag2-pill-parcial::after {
-        content:'';position:absolute;bottom:4px;right:4px;width:6px;height:6px;border-radius:50%;
+      .pag2-pill:hover:not(.pag2-pill-activa):not(.pag2-pill-completa):not(.pag2-pill-parcial) {
+        background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.28);color:#e2e8f0;
       }
-      .pag2-pill-completa::after { background:#34d399; }
-      .pag2-pill-parcial::after  { background:#fbbf24; }
-      .pag2-pill-elipsis { min-width:20px;border:none;background:transparent;cursor:default;color:#64748b;padding:0 2px;pointer-events:none; }
+      /* Página activa: azul teal sólido */
+      .pag2-pill-activa {
+        background:linear-gradient(135deg,#0d7490,#0891b2);
+        border-color:#0891b2;color:#fff;font-weight:700;
+        box-shadow:0 3px 10px rgba(8,145,178,0.45);
+        transform:scale(1.08);
+      }
+      /* Página completamente respondida: verde sólido */
+      .pag2-pill-completa {
+        background:linear-gradient(135deg,#059669,#10b981);
+        border-color:#10b981;color:#fff;font-weight:700;
+      }
+      .pag2-pill-completa:hover { filter:brightness(1.1); }
+      /* Página en progreso: amarillo/ámbar sólido */
+      .pag2-pill-parcial {
+        background:linear-gradient(135deg,#b45309,#d97706);
+        border-color:#d97706;color:#fff;font-weight:700;
+      }
+      .pag2-pill-parcial:hover { filter:brightness(1.1); }
+      /* Activa sobre completa o parcial: borde blanco extra para destacarla */
+      .pag2-pill-activa.pag2-pill-completa,
+      .pag2-pill-activa.pag2-pill-parcial {
+        box-shadow:0 0 0 2.5px #fff, 0 3px 12px rgba(0,0,0,0.4);
+        transform:scale(1.1);
+      }
+      .pag2-pill-elipsis {
+        min-width:20px;border:none;background:transparent;
+        cursor:default;color:#64748b;padding:0 2px;pointer-events:none;
+      }
+
       .pag2-btn {
         display:inline-flex;align-items:center;gap:5px;padding:7px 13px;
         border-radius:9px;border:1px solid rgba(255,255,255,0.13);
@@ -207,11 +235,38 @@
       .pag2-badge-ok   { background:rgba(52,211,153,.12);color:#34d399;border:1px solid rgba(52,211,153,.25); }
       .pag2-badge-err  { background:rgba(248,113,113,.10);color:#f87171;border:1px solid rgba(248,113,113,.25); }
       .pag2-badge-pend { background:rgba(251,191,36,.10);color:#fbbf24;border:1px solid rgba(251,191,36,.25); }
+
+      /* ── Separador "Continuá desde aquí": centrado y vistoso ── */
       .pag2-separador {
-        display:flex;align-items:center;gap:10px;margin:8px 0 14px;padding:8px 14px;
-        border-radius:10px;background:rgba(14,116,144,.08);border:1px solid rgba(14,116,144,.25);
-        font-size:13px;color:#38bdf8;font-weight:600;user-select:none;
+        display:flex; align-items:center; justify-content:center;
+        gap:10px; margin:28px 0 22px;
+        animation:pag2SepIn .4s ease .1s both;
       }
+      @keyframes pag2SepIn {
+        from { opacity:0; transform:translateY(8px); }
+        to   { opacity:1; transform:translateY(0); }
+      }
+      .pag2-separador::before,
+      .pag2-separador::after {
+        content:''; flex:1; height:2px;
+        background:linear-gradient(90deg,transparent,rgba(251,191,36,0.5));
+        border-radius:2px;
+      }
+      .pag2-separador::after {
+        background:linear-gradient(90deg,rgba(251,191,36,0.5),transparent);
+      }
+      .pag2-sep-etiqueta {
+        display:inline-flex; align-items:center; gap:8px;
+        background:linear-gradient(135deg,#92400e,#b45309);
+        color:#fef3c7; border-radius:100px;
+        padding:8px 20px 8px 16px;
+        font-size:0.82rem; font-weight:700;
+        letter-spacing:0.04em; white-space:nowrap;
+        box-shadow:0 4px 16px rgba(180,83,9,0.45), 0 1px 4px rgba(0,0,0,0.2);
+        user-select:none;
+      }
+      .pag2-sep-etiqueta svg { flex-shrink:0; opacity:0.9; }
+
       .pag2-footer {
         display:flex;align-items:center;justify-content:space-between;
         gap:10px;margin-top:18px;padding-top:14px;
@@ -234,7 +289,8 @@
       }
       .pag2-btn-siguiente:hover { opacity:.88;transform:translateY(-1px);box-shadow:0 6px 20px rgba(13,116,144,.45); }
       .pag2-btn-siguiente:disabled { opacity:.4;cursor:default;transform:none;box-shadow:none; }
-      .pag2-navbar-bottom { margin-top:18px;position:static;box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none; }
+      /* Navbar bottom: igual al top (ambos estáticos) */
+      .pag2-navbar-bottom { margin-top:18px; }
       #pag2-modal-overlay {
         position:fixed;inset:0;z-index:25000;display:flex;align-items:center;justify-content:center;
         background:rgba(10,22,40,.88);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
@@ -339,8 +395,8 @@
       infoEl.className = 'pag2-info-row';
       infoEl.innerHTML = `
         <div class="pag2-leyenda">
-          <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:#34d399"></span><span>Completa</span></div>
-          <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:#fbbf24"></span><span>En progreso</span></div>
+          <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:linear-gradient(135deg,#059669,#10b981)"></span><span>Completa</span></div>
+          <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:linear-gradient(135deg,#b45309,#d97706)"></span><span>En progreso</span></div>
           <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:rgba(255,255,255,.18)"></span><span>Sin comenzar</span></div>
         </div>
         <div class="pag2-total-info">${displayOrder.length} preguntas · ${totalPages} páginas</div>`;
@@ -398,12 +454,14 @@
           sep.className = 'pag2-separador';
           sep.setAttribute('id', `pag2-sep-${seccionId}`);
           sep.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-              fill="none" stroke="currentColor" stroke-width="2.5"
-              stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="9 18 15 12 9 6"/>
-            </svg>
-            Continuá desde aquí`;
+            <div class="pag2-sep-etiqueta">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              Continuá desde aquí
+            </div>`;
           pregsZona.appendChild(sep);
         }
         pregsZona.appendChild(div); // mover el div desde cont al pregsZona
@@ -448,13 +506,24 @@
         }, 60);
       }
 
+      // ── Recalcular estados de pills DESPUÉS de restoreSelectionsAndGrades ──
+      // puntajesPorSeccion ya fue poblado por el render; recalculamos los colores
+      // de los botones de todas las páginas (correcto tanto desde menú como desde F5).
+      const estadosActualizados = pages.map(pg => _estadoPagina(seccionId, pg));
+      const pillsNuevo = _pillsHTML(totalPages, pag, estadosActualizados);
+      [navTop, navBot].forEach(nav => {
+        const center = nav.querySelector('.pag2-nav-center');
+        if (center) center.innerHTML = pillsNuevo;
+      });
+
+      // ── Conectar clicks en todas las pills (top + bottom) ──
+      wrapper.querySelectorAll('.pag2-pill[data-pag]').forEach(pill =>
+        pill.addEventListener('click', () => irA(parseInt(pill.dataset.pag, 10)))
+      );
       wrapper.querySelector('#pag2-prev-t')?.addEventListener('click', () => irA(pag-1));
       wrapper.querySelector('#pag2-next-t')?.addEventListener('click', () => irA(pag+1));
       wrapper.querySelector('#pag2-prev-b')?.addEventListener('click', () => irA(pag-1));
       wrapper.querySelector('#pag2-next-b')?.addEventListener('click', () => irA(pag+1));
-      wrapper.querySelectorAll('.pag2-pill[data-pag]').forEach(pill =>
-        pill.addEventListener('click', () => irA(parseInt(pill.dataset.pag, 10)))
-      );
       wrapper.querySelector('#pag2-sig')?.addEventListener('click', () => {
         if (pag < totalPages-1) irA(pag+1);
         else if (typeof window.mostrarPuntuacionTotal === 'function')
