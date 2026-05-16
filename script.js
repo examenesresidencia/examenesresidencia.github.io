@@ -1,4 +1,4 @@
-//PRUEBA 19  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 22  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -656,28 +656,37 @@
     } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
 
     // ── Cargar desde Firestore ──────────────────────────────────────
-    _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
-
-    // Guard: si ya hay una carga activa para esta sección, esperar a que termine
-    // en lugar de iniciar una segunda carga en paralelo (doble clic, simulador, etc.)
+    // Guard: si ya hay una carga activa, esperar sin duplicar la request a Firestore
     if (_seccionesEnCarga.has(seccionId)) {
-      return new Promise((resolve) => {
-        const poll = setInterval(() => {
-          if (!_seccionesEnCarga.has(seccionId)) {
-            clearInterval(poll);
-            resolve();
-          }
+      return new Promise(function(resolve) {
+        var poll = setInterval(function() {
+          if (!_seccionesEnCarga.has(seccionId)) { clearInterval(poll); resolve(); }
         }, 80);
-        // Timeout de seguridad: si después de 15s sigue cargando, resolver igual
-        setTimeout(() => { clearInterval(poll); resolve(); }, 15000);
+        setTimeout(function() { clearInterval(poll); resolve(); }, 15000);
       });
     }
-
-    _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
+    _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
+    _seccionesEnCarga.add(seccionId); // marcar inicio de carga
     return new Promise((resolve) => {
       function intentarCarga() {
         if (!window.__firebaseReady || !window.__firebase_firestore) {
-          document.addEventListener('firebaseReady', intentarCarga, { once: true });
+          // Polling: si firebaseReady ya se disparo antes de esta llamada,
+          // { once:true } no volvera a disparar y la promesa quedaria congelada.
+          var fbPoll = setInterval(function() {
+            if (window.__firebaseReady && window.__firebase_firestore) {
+              clearInterval(fbPoll);
+              intentarCarga();
+            }
+          }, 200);
+          setTimeout(function() {
+            clearInterval(fbPoll);
+            console.warn('[cargarSeccion] Timeout esperando Firebase:', seccionId);
+            _seccionesEnCarga.delete(seccionId);
+            resolve();
+          }, 20000);
+          document.addEventListener('firebaseReady', function() {
+            clearInterval(fbPoll); intentarCarga();
+          }, { once: true });
           return;
         }
         if (typeof fbInit === 'function') fbInit();
@@ -687,9 +696,8 @@
             const { collection, getDocs, query, orderBy } = window.__firebase_firestore;
             const db = _fbDb;
             if (!db) {
-              // Firestore aún no inicializado — reintentar en 200ms en lugar de resolver vacío
-              console.warn('⚠️ Firestore aún no inicializado, reintentando en 200ms:', seccionId);
-              setTimeout(intentarCarga, 200);
+              console.warn('⚠️ Firestore aun no listo, reintentando en 300ms:', seccionId);
+              setTimeout(intentarCarga, 300);
               return;
             }
             const itemsRef = collection(db, 'preguntas', seccionId, 'items');
@@ -811,17 +819,26 @@
    * Muestra un spinner mientras se descarga el archivo de la sección.
    */
   function mostrarSpinnerCarga(seccionId) {
-    const cont = document.getElementById(`cuestionario-${seccionId}`);
-    if (cont) {
-      cont.innerHTML = `
-        <div style="text-align:center;padding:60px 20px;color:#64748b;">
-          <div style="width:42px;height:42px;border:4px solid #e2e8f0;
-            border-top-color:#0891b2;border-radius:50%;
-            animation:spin 0.7s linear infinite;margin:0 auto 16px;"></div>
-          <p style="font-size:0.95rem;">Cargando preguntas…</p>
-        </div>
-        <style>@keyframes spin{to{transform:rotate(360deg);}}</style>`;
-    }
+    const cont = document.getElementById('cuestionario-' + seccionId);
+    if (!cont) return;
+    const sid = 'spinner-carga-' + seccionId;
+    cont.innerHTML = '<div id="' + sid + '" style="text-align:center;padding:60px 20px;color:#64748b;">'
+      + '<div style="width:42px;height:42px;border:4px solid #e2e8f0;border-top-color:#0891b2;border-radius:50%;animation:spin 0.7s linear infinite;margin:0 auto 16px;"></div>'
+      + '<p style="font-size:0.95rem;">Cargando preguntas...</p>'
+      + '</div>'
+      + '<style>@keyframes spin{to{transform:rotate(360deg);}}</style>';
+    // Si tras 12s el spinner sigue, mostrar boton de reintento
+    setTimeout(function() {
+      var sp = document.getElementById(sid);
+      if (!sp) return;
+      sp.innerHTML = '<div style="font-size:2rem;margin-bottom:14px;">&#9200;</div>'
+        + '<p style="font-size:1rem;font-weight:600;color:#94a3b8;margin-bottom:6px;">Tardando mas de lo esperado...</p>'
+        + '<p style="font-size:0.83rem;color:#64748b;margin-bottom:20px;">Puede ser un problema de conexion o de Firebase.</p>'
+        + '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'
+        + '<button onclick="location.reload()" style="padding:10px 22px;border-radius:10px;border:none;background:linear-gradient(135deg,#0d7490,#0891b2);color:#fff;font-size:.9rem;font-weight:700;cursor:pointer;">Recargar pagina</button>'
+        + '<button onclick="window.mostrarCuestionario && window.mostrarCuestionario(\'' + seccionId + '\')" style="padding:10px 22px;border-radius:10px;border:1.5px solid rgba(148,163,184,.3);background:rgba(255,255,255,.04);color:#94a3b8;font-size:.9rem;font-weight:600;cursor:pointer;">Reintentar</button>'
+        + '</div>';
+    }, 12000);
   }
 
   function showSection(seccionId) {
@@ -854,15 +871,11 @@
       }
       return Promise.resolve();
     }).then(() => {
-      // ── Guard: si el usuario navegó a otra sección mientras cargaba, no renderizar ──
-      // Evita el bug donde una sección tarda en cargar desde Firestore y cuando
-      // resuelve, el usuario ya volvió al menú o abrió otra sección → el cuestionario
-      // se renderizaba igual, apareciendo "en la parte de abajo de la página principal".
+      // Guard: si el usuario navego a otra seccion mientras cargaba, no renderizar
       if (currentSection !== seccionId) {
-        console.log('[showSection] Carga completada para', seccionId, 'pero la sección activa ahora es', currentSection, '— renderizado cancelado.');
+        console.log('[showSection] Carga completada para', seccionId, 'pero la seccion activa es', currentSection, 'cancelado.');
         return;
       }
-
       aplicarExtrapolacion(esCompilado(seccionId) ? seccionId : undefined);
       // Si es una especialidad (no compilado, no simulador), forzar re-extrapolación
       // de todas las fuentes ya en memoria (Únicos, UBA y compilados) hacia esta
@@ -2581,26 +2594,14 @@
   function generarCuestionario(seccionId) {
     const preguntas = preguntasPorSeccion[seccionId];
     if (!preguntas || preguntas.length === 0) {
-      // Limpiar spinner estático del HTML y mostrar mensaje de error
-      const cont = document.getElementById(`cuestionario-${seccionId}`);
+      const cont = document.getElementById('cuestionario-' + seccionId);
       if (cont) {
-        cont.innerHTML = `
-          <div style="text-align:center;padding:60px 20px 40px;color:#64748b;">
-            <div style="font-size:2.5rem;margin-bottom:16px;">⚠️</div>
-            <p style="font-size:1rem;font-weight:600;color:#94a3b8;margin-bottom:8px;">
-              No se pudieron cargar las preguntas de esta sección.
-            </p>
-            <p style="font-size:0.85rem;color:#64748b;margin-bottom:24px;">
-              Verificá tu conexión a internet y volvé a intentarlo.
-            </p>
-            <button onclick="location.reload()"
-              style="padding:10px 24px;border-radius:10px;border:none;
-                background:linear-gradient(135deg,#0d7490,#0891b2);
-                color:#fff;font-size:0.9rem;font-weight:700;cursor:pointer;
-                box-shadow:0 4px 14px rgba(13,116,144,.35);">
-              🔄 Recargar página
-            </button>
-          </div>`;
+        cont.innerHTML = '<div style="text-align:center;padding:60px 20px;color:#64748b;">'
+          + '<div style="font-size:2.5rem;margin-bottom:16px;">&#9888;&#65039;</div>'
+          + '<p style="font-size:1rem;font-weight:600;color:#94a3b8;margin-bottom:8px;">No se pudieron cargar las preguntas.</p>'
+          + '<p style="font-size:0.85rem;color:#64748b;margin-bottom:24px;">Verifica tu conexion y recarga la pagina.</p>'
+          + '<button onclick="location.reload()" style="padding:10px 24px;border-radius:10px;border:none;background:linear-gradient(135deg,#0d7490,#0891b2);color:#fff;font-size:.9rem;font-weight:700;cursor:pointer;">Recargar</button>'
+          + '</div>';
       }
       return;
     }
