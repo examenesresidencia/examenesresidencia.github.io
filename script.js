@@ -1,4 +1,4 @@
-//PRUEBA 23  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 24  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -854,7 +854,7 @@
       }
 
       _scrollOnNextRender = true;
-      generarCuestionario(seccionId);
+      (window.generarCuestionario || generarCuestionario)(seccionId);
 
       if (seccionId === 'simulador') {
         const timerState = loadJSON(TIMER_STORAGE_KEY, null);
@@ -2449,6 +2449,11 @@
       // Botón Editar (solo admin) — disponible en todas las secciones
       if (window.fbInjectEditButtonIfAdmin) {
         window.fbInjectEditButtonIfAdmin(seccionId, originalIdx, botonesDiv);
+      }
+
+      // Botón Reclasificar (admin + usuario autorizado)
+      if (window.fbInjectReclasificarButton) {
+        window.fbInjectReclasificarButton(seccionId, originalIdx, botonesDiv);
       }
 
       div.appendChild(botonesDiv);
