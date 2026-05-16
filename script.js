@@ -835,6 +835,15 @@
       }
       return Promise.resolve();
     }).then(() => {
+      // ── Guard: si el usuario navegó a otra sección mientras cargaba, no renderizar ──
+      // Evita el bug donde una sección tarda en cargar desde Firestore y cuando
+      // resuelve, el usuario ya volvió al menú o abrió otra sección → el cuestionario
+      // se renderizaba igual, apareciendo "en la parte de abajo de la página principal".
+      if (currentSection !== seccionId) {
+        console.log('[showSection] Carga completada para', seccionId, 'pero la sección activa ahora es', currentSection, '— renderizado cancelado.');
+        return;
+      }
+
       aplicarExtrapolacion(esCompilado(seccionId) ? seccionId : undefined);
       // Si es una especialidad (no compilado, no simulador), forzar re-extrapolación
       // de todas las fuentes ya en memoria (Únicos, UBA y compilados) hacia esta
