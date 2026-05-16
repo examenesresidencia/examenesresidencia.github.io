@@ -1,4 +1,4 @@
-//PRUEBA 25  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 27  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2213,7 +2213,7 @@
       for (let i = chunkIndex; i < end; i++) {
         const originalIdx = displayOrder[i];
         const displayPosition = i;
-        window._renderPregunta(originalIdx, displayPosition);
+        window._renderPregunta(seccionId, originalIdx, displayPosition);
       }
       chunkIndex = end;
 
@@ -2255,10 +2255,10 @@
       cont.appendChild(progressDiv);
     }
 
-    window._renderPregunta = (originalIdx, displayPosition) => {
+    window._renderPregunta = (seccionId, originalIdx, displayPosition) => {
+      const preguntas = preguntasPorSeccion[seccionId] || [];
+      const cont = document.getElementById(`cuestionario-${seccionId}`);
       const preg = preguntas[originalIdx];
-      const div = document.createElement("div");
-      div.className = "pregunta";
 
       // Cabecera resultado
       const resultado = document.createElement("div");
@@ -9490,7 +9490,7 @@ function fbSaveProgressToCloud() {
     const cont = document.getElementById('cuestionario-' + seccionId);
     if (!cont) return;
     indices.forEach(function(originalIdx, localPos) {
-      window._renderPregunta(originalIdx, posOffset + localPos);
+      window._renderPregunta(seccionId, originalIdx, posOffset + localPos);
     });
     restoreSelectionsAndGrades(seccionId);
   };
