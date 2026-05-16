@@ -872,9 +872,7 @@
       // Limpiar el estado solo si el cuestionario ya fue completado (totalShown)
       clearSectionStateIfCompletedAndBack(currentSection);
 
-      // Re-mezclar preguntas sin responder al salir: borramos unansweredOrder
-      // para que al volver se genere un nuevo orden aleatorio.
-      // Las respondidas (answeredOrder + graded) quedan intactas.
+      // Re-mezclar preguntas sin responder al salir
       const _s = state[currentSection];
       if (_s && _s.unansweredOrder && !_s.totalShown &&
           currentSection !== 'simulador' &&
@@ -9485,9 +9483,7 @@ function fbSaveProgressToCloud() {
     const cont = document.getElementById('cuestionario-' + seccionId);
     if (!preguntas || !cont) return;
     ensureSectionState(seccionId, preguntas.length);
-    // posOffset: número de preguntas antes de esta página (para numeración correlativa)
     const offset = (typeof posOffset === 'number') ? posOffset : 0;
-    // NO limpiar cont: el paginador mide antesRender y mueve los hijos después.
     indices.forEach((originalIdx, pos) => {
       _renderPregunta(seccionId, originalIdx, offset + pos, cont);
     });
