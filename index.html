@@ -1001,13 +1001,13 @@
 <!-- Base de datos de preguntas -->
 <script>window.preguntasPorSeccion = {};</script>
 <!-- Script principal de la aplicación -->
-<script src="script.js?v=29"></script>
+<script src="script.js?v=31"></script>
 <!-- Editor admin de preguntas (módulo independiente, depende de script.js) -->
 <script src="editor-admin.js?v=18"></script>
 <!-- Reclasificador de preguntas (admin + usuario seleccionado) -->
 <script src="reclasificador-preguntas.js?v=1"></script>
 <!-- Paginador de cuestionarios (solo usuarios, admin ve todo en una sola hoja) -->
-<script src="paginador-cuestionario.js?v=6"></script>
+<script src="paginador-cuestionario.js?v=1"></script>
 <!-- Buscador de preguntas duplicadas (módulo independiente, depende de script.js) -->
 <script src="buscador-duplicados.js?v=3"></script>
 <!-- subir preguntas a firebase -->
@@ -1117,24 +1117,32 @@
 
         // ── Algoritmo CA Cervical ──────────────────────────
         function mostrarAlgoritmoCACervical() {
-          document.getElementById('menu-principal').style.display = 'none';
+          const menu = document.getElementById('menu-principal');
+          menu.style.display = '';           // limpiar inline antes de agregar clase
+          menu.classList.add('oculto');
           const panel = document.getElementById('algoritmo-ca-cervical-panel');
           panel.style.display = 'flex';
         }
         function cerrarAlgoritmoCACervical() {
           document.getElementById('algoritmo-ca-cervical-panel').style.display = 'none';
-          document.getElementById('menu-principal').style.display = 'block';
+          const menu = document.getElementById('menu-principal');
+          menu.style.display = '';           // limpiar inline style para que el CSS tome control
+          menu.classList.remove('oculto');
         }
 
         // ── Amenorrea Secundaria ───────────────────────────
         function mostrarAmenorreaSecundaria() {
-          document.getElementById('menu-principal').style.display = 'none';
+          const menu = document.getElementById('menu-principal');
+          menu.style.display = '';           // limpiar inline antes de agregar clase
+          menu.classList.add('oculto');
           const panel = document.getElementById('amenorrea-secundaria-panel');
           panel.style.display = 'flex';
         }
         function cerrarAmenorreaSecundaria() {
           document.getElementById('amenorrea-secundaria-panel').style.display = 'none';
-          document.getElementById('menu-principal').style.display = 'block';
+          const menu = document.getElementById('menu-principal');
+          menu.style.display = '';           // limpiar inline style para que el CSS tome control
+          menu.classList.remove('oculto');
         }
 
         // 6. Prevenir impresión con CSS y JS
