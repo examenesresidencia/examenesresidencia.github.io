@@ -1,19 +1,34 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V17
+// editor-admin.js  — V18
 // ────────────────────────────────────────────────────────────────
+// V18: se agrega _eaCanDelete() para que soloquimicayaruqui@gmail.com
+//      también pueda ver el botón 🗑 y eliminar preguntas repetidas,
+//      igual que admin. El botón ✏️ Editar sigue siendo solo admin.
 
 
 (function () {
   'use strict';
 
+  // ── Email con permiso de eliminación (sin ser admin completo) ─
+  const EMAIL_PUEDE_ELIMINAR = 'soloquimicayaruqui@gmail.com';
+
   // ── Helpers ───────────────────────────────────────────────────
-  function _eaIsAdmin()          { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
-  function _eaToast(m, t)        { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
-  function _eaAuthStyles()       { if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
+  function _eaIsAdmin()   { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
+  function _eaToast(m, t) { if (typeof window.fbToast === 'function') window.fbToast(m, t); }
+  function _eaAuthStyles(){ if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles(); }
+
+  // Puede eliminar: admin O la cuenta autorizada
+  function _eaCanDelete() {
+    if (_eaIsAdmin()) return true;
+    const user = window._currentUser;
+    return !!(user && user.email && user.email.toLowerCase() === EMAIL_PUEDE_ELIMINAR);
+  }
   function fbShowEditErr(id, msg) {
     const el = document.getElementById(id);
     if (el) { el.textContent = msg; el.classList.add('visible'); }
   }
+
+
 
   // ── Bloquear / desbloquear scroll de fondo ────────────────────
   let _scrollY = 0;
@@ -1221,49 +1236,59 @@
     };
   }
 
-  // ════════════════════════════════════════════════════════════════
   // fbInjectEditButtonIfAdmin
   // ════════════════════════════════════════════════════════════════
+  // Botón ✏️ Editar    → solo admin
+  // Botón 🗑 Eliminar → admin + soloquimicayaruqui@gmail.com
+  // ════════════════════════════════════════════════════════════════
   function fbInjectEditButtonIfAdmin(seccionId, qIndex, botonesDiv) {
-    if (!_eaIsAdmin()) return;
+    const puedeEliminar = _eaCanDelete();
+    const esAdmin       = _eaIsAdmin();
 
-    // ── Botón Editar ──────────────────────────────────────────────
-    const btnEdit = document.createElement('button');
-    btnEdit.textContent = '✏️ Editar';
-    btnEdit.style.cssText = [
-      'padding:6px 14px','border-radius:8px',
-      'border:1.5px solid rgba(251,191,36,0.4)',
-      'background:rgba(251,191,36,0.08)',
-      'color:#fbbf24','font-size:13px','cursor:pointer',
-      'font-weight:500','transition:background 0.15s'
-    ].join(';');
-    btnEdit.onmouseover = () => { btnEdit.style.background = 'rgba(251,191,36,0.18)'; };
-    btnEdit.onmouseout  = () => { btnEdit.style.background = 'rgba(251,191,36,0.08)'; };
-    btnEdit.addEventListener('click', () => abrirModalEdicionAdmin(seccionId, qIndex));
-    botonesDiv.appendChild(btnEdit);
+    // Si no tiene ninguno de los dos permisos, no inyectar nada
+    if (!esAdmin && !puedeEliminar) return;
 
-    // ── Botón Eliminar ────────────────────────────────────────────
-    const btnDel = document.createElement('button');
-    btnDel.textContent = '🗑';
-    btnDel.title = 'Eliminar pregunta';
-    btnDel.style.cssText = [
-      'padding:6px 10px','border-radius:8px',
-      'border:1.5px solid rgba(239,68,68,0.35)',
-      'background:rgba(239,68,68,0.07)',
-      'color:#f87171','font-size:15px','cursor:pointer',
-      'font-weight:500','transition:background 0.15s,border-color 0.15s',
-      'line-height:1'
-    ].join(';');
-    btnDel.onmouseover = () => {
-      btnDel.style.background   = 'rgba(239,68,68,0.18)';
-      btnDel.style.borderColor  = 'rgba(239,68,68,0.65)';
-    };
-    btnDel.onmouseout = () => {
-      btnDel.style.background   = 'rgba(239,68,68,0.07)';
-      btnDel.style.borderColor  = 'rgba(239,68,68,0.35)';
-    };
-    btnDel.addEventListener('click', () => eliminarPreguntaAdmin(seccionId, qIndex));
-    botonesDiv.appendChild(btnDel);
+    // ── Botón Editar (solo admin) ─────────────────────────────────
+    if (esAdmin) {
+      const btnEdit = document.createElement('button');
+      btnEdit.textContent = '✏️ Editar';
+      btnEdit.style.cssText = [
+        'padding:6px 14px','border-radius:8px',
+        'border:1.5px solid rgba(251,191,36,0.4)',
+        'background:rgba(251,191,36,0.08)',
+        'color:#fbbf24','font-size:13px','cursor:pointer',
+        'font-weight:500','transition:background 0.15s'
+      ].join(';');
+      btnEdit.onmouseover = () => { btnEdit.style.background = 'rgba(251,191,36,0.18)'; };
+      btnEdit.onmouseout  = () => { btnEdit.style.background = 'rgba(251,191,36,0.08)'; };
+      btnEdit.addEventListener('click', () => abrirModalEdicionAdmin(seccionId, qIndex));
+      botonesDiv.appendChild(btnEdit);
+    }
+
+    // ── Botón Eliminar (admin + cuenta autorizada) ────────────────
+    if (puedeEliminar) {
+      const btnDel = document.createElement('button');
+      btnDel.textContent = '🗑';
+      btnDel.title = 'Eliminar pregunta';
+      btnDel.style.cssText = [
+        'padding:6px 10px','border-radius:8px',
+        'border:1.5px solid rgba(239,68,68,0.35)',
+        'background:rgba(239,68,68,0.07)',
+        'color:#f87171','font-size:15px','cursor:pointer',
+        'font-weight:500','transition:background 0.15s,border-color 0.15s',
+        'line-height:1'
+      ].join(';');
+      btnDel.onmouseover = () => {
+        btnDel.style.background  = 'rgba(239,68,68,0.18)';
+        btnDel.style.borderColor = 'rgba(239,68,68,0.65)';
+      };
+      btnDel.onmouseout = () => {
+        btnDel.style.background  = 'rgba(239,68,68,0.07)';
+        btnDel.style.borderColor = 'rgba(239,68,68,0.35)';
+      };
+      btnDel.addEventListener('click', () => eliminarPreguntaAdmin(seccionId, qIndex));
+      botonesDiv.appendChild(btnDel);
+    }
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -1272,7 +1297,7 @@
   // local quirúrgicamente (sin releer la sección completa).
   // ════════════════════════════════════════════════════════════════
   async function eliminarPreguntaAdmin(seccionId, qIndex) {
-    if (!_eaIsAdmin()) return;
+    if (!_eaCanDelete()) return;
 
     const preguntasPorSeccion = window.preguntasPorSeccion || {};
     const preg = (preguntasPorSeccion[seccionId] || [])[qIndex];
