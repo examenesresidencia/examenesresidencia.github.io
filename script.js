@@ -1,4 +1,4 @@
-//PRUEBA 24  SIN EXTRAPOLACIÓN <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 24  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -9461,7 +9461,7 @@ function fbSaveProgressToCloud() {
     get: function () { return _currentUser; },
     configurable: true
   });
-  window._bumpContentVersion         = _bumpContentVersion;
+ window._bumpContentVersion         = _bumpContentVersion;
   window._registrarEdicionPendiente  = _registrarEdicionPendiente;
   window._aplicarEdicionPuntual      = _aplicarEdicionPuntual;
   window._seccionesYaCargadas = _seccionesYaCargadas;
@@ -9474,5 +9474,25 @@ function fbSaveProgressToCloud() {
     get: function () { return currentSection; },
     configurable: true
   });
+
+  // ── Exponer funciones para paginador-cuestionario.js ──────────
+  window._getDisplayOrder = function(seccionId, total) {
+    ensureSectionState(seccionId, total);
+    return getDisplayOrder(seccionId, total);
+  };
+
+  window._renderIndicesToCont = function(seccionId, indices, posOffset) {
+    if (!Array.isArray(indices) || indices.length === 0) return;
+    posOffset = (typeof posOffset === 'number') ? posOffset : 0;
+    const preguntas = preguntasPorSeccion[seccionId];
+    if (!preguntas || preguntas.length === 0) return;
+    ensureSectionState(seccionId, preguntas.length);
+    const cont = document.getElementById('cuestionario-' + seccionId);
+    if (!cont) return;
+    indices.forEach(function(originalIdx, localPos) {
+      renderPregunta(originalIdx, posOffset + localPos);
+    });
+    restoreSelectionsAndGrades(seccionId);
+  };
 
 })();
