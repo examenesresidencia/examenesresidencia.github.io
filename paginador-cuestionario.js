@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V2
+// paginador-cuestionario.js  — V3
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -377,7 +377,8 @@
       const antesRender = cont.children.length;
 
       // Llamar a script.js para renderizar estos índices
-      window._renderIndicesToCont(seccionId, indicesPage);
+      // posOffset: preguntas antes de esta página, para numeración correlativa (pág 4 → 151-200)
+      window._renderIndicesToCont(seccionId, indicesPage, pag * PAGE_SIZE);
 
       // Los nuevos divs fueron agregados por script.js al final de cont
       const nuevosHijos = Array.from(cont.children).slice(antesRender);
