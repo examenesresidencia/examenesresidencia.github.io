@@ -2187,71 +2187,8 @@
   }
 
   // ======== Render del cuestionario ========
-  function generarCuestionario(seccionId) {
+  function _renderPregunta(seccionId, originalIdx, displayPosition, cont) {
     const preguntas = preguntasPorSeccion[seccionId];
-    if (!preguntas) return;
-
-    ensureSectionState(seccionId, preguntas.length);
-
-    const cont = document.getElementById(`cuestionario-${seccionId}`);
-    if (!cont) return;
-    cont.innerHTML = "";
-
-    // Obtener orden de visualización (respondidas arriba fijas, no respondidas abajo aleatorias)
-    const displayOrder = getDisplayOrder(seccionId, preguntas.length);
-
-    // Renderizar preguntas en lotes para no bloquear el hilo principal
-    const CHUNK_SIZE = 50;
-    let chunkIndex = 0;
-
-    const renderChunk = () => {
-      const end = Math.min(chunkIndex + CHUNK_SIZE, displayOrder.length);
-      for (let i = chunkIndex; i < end; i++) {
-        const originalIdx = displayOrder[i];
-        const displayPosition = i;
-        renderPregunta(originalIdx, displayPosition);
-      }
-      chunkIndex = end;
-
-      if (chunkIndex < displayOrder.length) {
-        // Actualizar spinner con progreso
-        const spinner = cont.querySelector('.chunk-progress');
-        if (spinner) spinner.textContent = `Cargando preguntas… ${chunkIndex} / ${displayOrder.length}`;
-        // Restaurar solo el último lote renderizado (no todo desde el principio)
-        setTimeout(renderChunk, 0);
-      } else {
-        // Todo renderizado: eliminar spinner, conectar botón total, restaurar estado y scroll
-        const spinner = cont.querySelector('.chunk-progress');
-        if (spinner) {
-          const spinnerParent = spinner.closest('div') || spinner.parentElement;
-          if (spinnerParent && spinnerParent !== cont) spinnerParent.remove();
-          else spinner.remove();
-        }
-        const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
-        if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
-        restoreSelectionsAndGrades(seccionId);
-        // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
-        // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
-        // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
-        if (!esExamenUnico(seccionId) && !esExamenUBA(seccionId) && seccionId !== 'simulador') {
-          actualizarSeparador(seccionId, cont);
-        }
-        if (_scrollOnNextRender) {
-          _scrollOnNextRender = false;
-          scrollToFirstUnanswered(seccionId);
-        }
-      }
-    };
-
-    // Mostrar spinner de progreso mientras se renderizan los lotes
-    if (displayOrder.length > CHUNK_SIZE) {
-      const progressDiv = document.createElement('div');
-      progressDiv.style.cssText = 'text-align:center;padding:16px 20px 8px;color:#64748b;font-size:0.9rem;';
-      progressDiv.innerHTML = `<span class="chunk-progress">Cargando preguntas… 0 / ${displayOrder.length}</span>`;
-      cont.appendChild(progressDiv);
-    }
-
-    const renderPregunta = (originalIdx, displayPosition) => {
       const preg = preguntas[originalIdx];
       const div = document.createElement("div");
       div.className = "pregunta";
@@ -2605,7 +2542,73 @@
       }
 
       cont.appendChild(div);
-    }; // fin renderPregunta
+  } // fin _renderPregunta
+
+  function generarCuestionario(seccionId) {
+    const preguntas = preguntasPorSeccion[seccionId];
+    if (!preguntas) return;
+
+    ensureSectionState(seccionId, preguntas.length);
+
+    const cont = document.getElementById(`cuestionario-${seccionId}`);
+    if (!cont) return;
+    cont.innerHTML = "";
+
+    // Obtener orden de visualización (respondidas arriba fijas, no respondidas abajo aleatorias)
+    const displayOrder = getDisplayOrder(seccionId, preguntas.length);
+
+    // Renderizar preguntas en lotes para no bloquear el hilo principal
+    const CHUNK_SIZE = 50;
+    let chunkIndex = 0;
+
+    const renderChunk = () => {
+      const end = Math.min(chunkIndex + CHUNK_SIZE, displayOrder.length);
+      for (let i = chunkIndex; i < end; i++) {
+        const originalIdx = displayOrder[i];
+        const displayPosition = i;
+        renderPregunta(originalIdx, displayPosition);
+      }
+      chunkIndex = end;
+
+      if (chunkIndex < displayOrder.length) {
+        // Actualizar spinner con progreso
+        const spinner = cont.querySelector('.chunk-progress');
+        if (spinner) spinner.textContent = `Cargando preguntas… ${chunkIndex} / ${displayOrder.length}`;
+        // Restaurar solo el último lote renderizado (no todo desde el principio)
+        setTimeout(renderChunk, 0);
+      } else {
+        // Todo renderizado: eliminar spinner, conectar botón total, restaurar estado y scroll
+        const spinner = cont.querySelector('.chunk-progress');
+        if (spinner) {
+          const spinnerParent = spinner.closest('div') || spinner.parentElement;
+          if (spinnerParent && spinnerParent !== cont) spinnerParent.remove();
+          else spinner.remove();
+        }
+        const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
+        if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
+        restoreSelectionsAndGrades(seccionId);
+        // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
+        // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
+        // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
+        if (!esExamenUnico(seccionId) && !esExamenUBA(seccionId) && seccionId !== 'simulador') {
+          actualizarSeparador(seccionId, cont);
+        }
+        if (_scrollOnNextRender) {
+          _scrollOnNextRender = false;
+          scrollToFirstUnanswered(seccionId);
+        }
+      }
+    };
+
+    // Mostrar spinner de progreso mientras se renderizan los lotes
+    if (displayOrder.length > CHUNK_SIZE) {
+      const progressDiv = document.createElement('div');
+      progressDiv.style.cssText = 'text-align:center;padding:16px 20px 8px;color:#64748b;font-size:0.9rem;';
+      progressDiv.innerHTML = `<span class="chunk-progress">Cargando preguntas… 0 / ${displayOrder.length}</span>`;
+      cont.appendChild(progressDiv);
+    }
+
+    const renderPregunta = (originalIdx, displayPosition) => _renderPregunta(seccionId, originalIdx, displayPosition, cont);
 
     renderChunk();
   }
@@ -9473,9 +9476,10 @@ function fbSaveProgressToCloud() {
     const preguntas = preguntasPorSeccion[seccionId];
     const cont = document.getElementById('cuestionario-' + seccionId);
     if (!preguntas || !cont) return;
+    cont.innerHTML = '';
     ensureSectionState(seccionId, preguntas.length);
     indices.forEach((originalIdx, pos) => {
-      renderPregunta(originalIdx, pos);
+      _renderPregunta(seccionId, originalIdx, pos, cont);
     });
     // Restaurar estado visual (respuestas ya dadas)
     restoreSelectionsAndGrades(seccionId);
