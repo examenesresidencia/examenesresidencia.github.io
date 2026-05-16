@@ -2446,6 +2446,10 @@
       if (window.fbInjectEditButtonIfAdmin) {
         window.fbInjectEditButtonIfAdmin(seccionId, originalIdx, botonesDiv);
       }
+      // Botón Reclasificar (admin + usuario seleccionado)
+      if (window.fbInjectReclasificarButton) {
+        window.fbInjectReclasificarButton(seccionId, originalIdx, botonesDiv);
+      }
 
       div.appendChild(botonesDiv);
 
