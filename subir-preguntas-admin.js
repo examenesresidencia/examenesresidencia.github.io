@@ -1,4 +1,4 @@
-//V6 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V7 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -849,6 +849,17 @@
     let totalPreguntas = 0;
 
     for (const sec of TODAS_LAS_SECCIONES) {
+      // Priorizar memoria RAM (fuente de verdad después del rescan)
+      const enMem = window.preguntasPorSeccion && window.preguntasPorSeccion[sec.id];
+      if (enMem && Array.isArray(enMem) && enMem.length > 0) {
+        for (const p of enMem) {
+          const n = _norm(p.pregunta);
+          if (n) { enunciados.add(n); totalPreguntas++; }
+        }
+        seccionesConDatos++;
+        continue;
+      }
+      // Fallback: localStorage (secciones pequeñas que entraron en cuota)
       try {
         const raw = localStorage.getItem(CACHE_KEY_PREFIX + sec.id);
         if (!raw) continue;
@@ -860,18 +871,6 @@
         }
         seccionesConDatos++;
       } catch (_) {}
-    }
-
-    // También revisar window.preguntasPorSeccion (en memoria)
-    if (window.preguntasPorSeccion) {
-      for (const secId of Object.keys(window.preguntasPorSeccion)) {
-        const pregs = window.preguntasPorSeccion[secId];
-        if (!Array.isArray(pregs)) continue;
-        for (const p of pregs) {
-          const n = _norm(p.pregunta);
-          if (n) enunciados.add(n);
-        }
-      }
     }
 
     return { enunciados, seccionesConDatos, totalPreguntas };
@@ -889,12 +888,11 @@
     const db = window._fbDb;
     if (!db) throw new Error('Base de datos no inicializada.');
 
-    // Limpiar TODO el caché local antes de descargar desde Firebase
-    // para garantizar que lo que quede refleje exactamente el estado actual de Firebase
+    // Limpiar caché local y memoria antes de descargar
     for (const sec of TODAS_LAS_SECCIONES) {
       try { localStorage.removeItem(CACHE_KEY_PREFIX + sec.id); } catch (_) {}
     }
-    if (window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+    window.preguntasPorSeccion = {};
 
     let totalDescargadas = 0;
     for (let i = 0; i < TODAS_LAS_SECCIONES.length; i++) {
@@ -904,20 +902,24 @@
         const itemsRef = collection(db, 'preguntas', sec.id, 'items');
         const q = query(itemsRef, orderBy('_idx'));
         const snap = await getDocs(q);
-        // Si la sección está vacía en Firebase, el caché ya fue limpiado arriba
-        // así que no hace falta guardar nada — simplemente continuamos
         if (snap.empty) continue;
         const preguntas = snap.docs.map(d => {
           const { _idx, ...p } = d.data();
           p._firestoreIdx = _idx;
           return p;
         });
-        localStorage.setItem(CACHE_KEY_PREFIX + sec.id, JSON.stringify({
-          ts: Date.now(), preguntas
-        }));
-        if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+
+        // Guardar en memoria RAM siempre (sin límite de tamaño)
         window.preguntasPorSeccion[sec.id] = preguntas;
         totalDescargadas += preguntas.length;
+
+        // Intentar guardar en localStorage (puede fallar por cuota — no es crítico)
+        try {
+          localStorage.setItem(CACHE_KEY_PREFIX + sec.id, JSON.stringify({
+            ts: Date.now(), preguntas
+          }));
+        } catch (_) { /* quota excedida — OK, los datos ya están en memoria */ }
+
       } catch (e) {
         console.warn('[SP] Error descargando', sec.id, e.message);
         if (onProgress) onProgress(i + 1, TODAS_LAS_SECCIONES.length, sec.id, e.message);
