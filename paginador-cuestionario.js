@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V6
+// paginador-cuestionario.js  — V7
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -63,9 +63,18 @@
   }
 
   function _paginaLogica(seccionId, pages) {
-    const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
+    // Usar graded del state (disponible antes del render) en lugar de
+    // puntajesPorSeccion, que se popula DESPUÉS de renderizar la página.
+    // Esto garantiza que al entrar desde otro dispositivo o con localStorage
+    // limpio se abra directamente la primera página con preguntas pendientes.
+    const SK = window.STORAGE_KEY || 'quiz_state_v3';
+    let graded = {};
+    try {
+      const s = JSON.parse(localStorage.getItem(SK) || '{}');
+      graded = (s[seccionId] && s[seccionId].graded) ? s[seccionId].graded : {};
+    } catch (_) {}
     for (let p = 0; p < pages.length; p++) {
-      if (pages[p].some(i => { const v = puntajes[i]; return v === null || v === undefined; }))
+      if (pages[p].some(i => !graded[i]))
         return p;
     }
     return pages.length - 1;
@@ -409,15 +418,16 @@
       wrapper.appendChild(progEl);
 
       // ── Cabecera de página ──
+      // NOTA: st se recalcula DESPUÉS del render (ver más abajo) porque
+      // puntajesPorSeccion se popula dentro de _renderIndicesToCont →
+      // restoreSelectionsAndGrades. Si usamos st aquí el badge siempre
+      // mostraría "50 restantes" aunque las preguntas ya estén respondidas.
       const headerEl = document.createElement('div');
       headerEl.className = 'pag2-page-header';
       headerEl.innerHTML = `
         <div class="pag2-page-title">Página ${pag+1} · Preguntas ${inicio}–${fin}</div>
-        <div class="pag2-page-stats">
-          ${st.ok   > 0 ? `<span class="pag2-badge pag2-badge-ok">✓ ${st.ok} correctas</span>`    : ''}
-          ${st.err  > 0 ? `<span class="pag2-badge pag2-badge-err">✗ ${st.err} incorrectas</span>` : ''}
-          ${st.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${st.pend} restantes</span>`   : ''}
-          ${st.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`    : ''}
+        <div class="pag2-page-stats" id="pag2-stats-${seccionId}">
+          <span class="pag2-badge pag2-badge-pend">…</span>
         </div>`;
       wrapper.appendChild(headerEl);
 
@@ -434,11 +444,22 @@
       // Los nuevos divs fueron agregados por script.js al final de cont
       const nuevosHijos = Array.from(cont.children).slice(antesRender);
 
-      // Encontrar primera sin responder DESPUÉS de renderizar:
-      // restoreSelectionsAndGrades (dentro de _renderIndicesToCont) ya pobló
-      // puntajesPorSeccion con 1/0. Usamos el array actualizado, no la variable
-      // capturada antes del render (que tenía todos los valores en null).
+      // Ahora puntajesPorSeccion está populado por restoreSelectionsAndGrades.
+      // Recalcular stats con valores reales y actualizar el header.
       const puntajesActualizados = (window.puntajesPorSeccion || {})[seccionId] || [];
+      const stReal = _stats(seccionId, indicesPage);
+      const statsDiv = document.getElementById(`pag2-stats-${seccionId}`);
+      if (statsDiv) {
+        statsDiv.innerHTML =
+          (stReal.ok   > 0 ? `<span class="pag2-badge pag2-badge-ok">✓ ${stReal.ok} correctas</span>`    : '') +
+          (stReal.err  > 0 ? `<span class="pag2-badge pag2-badge-err">✗ ${stReal.err} incorrectas</span>` : '') +
+          (stReal.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${stReal.pend} restantes</span>`   : '') +
+          (stReal.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`         : '');
+      }
+      // También actualizar el footer (respEnPag puede haber sido calculado con st vacío)
+      const respLabelEl = wrapper.querySelector('.pag2-resp-label');
+      if (respLabelEl) respLabelEl.textContent = `${stReal.ok + stReal.err}/${stReal.total} respondidas`;
+
       const primeraSinRespPos = indicesPage.findIndex(i => {
         const v = puntajesActualizados[i]; return v === null || v === undefined;
       });
