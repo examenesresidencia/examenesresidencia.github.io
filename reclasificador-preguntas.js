@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// reclasificador-preguntas.js  — V3
+// reclasificador-preguntas.js  — V4
 // ────────────────────────────────────────────────────────────────
 // Permite reclasificar preguntas hacia otra especialidad con impacto
 // directo en Firestore. Visible solo para admin y usuario elegido.
@@ -572,13 +572,27 @@
         }
         try { localStorage.removeItem('fb_edits_cache_' + destino); } catch (_) {}
 
-        // 5c. Limpiar estado del quiz para la sección origen
+        // 5c. Parche quirúrgico en localStorage del admin (su propia sesión)
         const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
         let state = {};
         try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
         if (state[seccionOrigen]) {
-          delete state[seccionOrigen];
+          _reindexSectionStateRecl(state[seccionOrigen], idxEnSeccion);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        // 5d. Parche en Firestore para TODOS los usuarios:
+        //   - Reindexar unansweredOrder de la sección origen
+        //   - Migrar la pregunta respondida a la sección destino
+        try {
+          await _reindexAllUsersProgressRecl(seccionOrigen, idxEnSeccion, {
+            seccionDestino : destino,
+            nuevoDocId     : nuevoDocId,
+            nuevoIdx       : nuevoIndiceDestino - 1,
+            textoNorm      : _norm(pregClonada.pregunta),
+          });
+        } catch (_reindexErr) {
+          console.warn('[RECLASIF] Error reindexando progress de usuarios:', _reindexErr.message);
         }
 
         // 6. Re-renderizar la sección origen
@@ -751,14 +765,9 @@
         const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
         const localState = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
 
-        // Limpiar origen en local
+        // Limpiar origen en local con reindexado completo
         if (localState[seccionOrigen]) {
-          const lo = localState[seccionOrigen];
-          if (lo.answeredOrder) lo.answeredOrder.splice(entradaIdx, 1);
-          if (lo.graded)     delete lo.graded[idxEnSeccion];
-          if (lo.answers)    delete lo.answers[idxEnSeccion];
-          if (lo.shuffleMap) delete lo.shuffleMap[idxEnSeccion];
-          lo.unansweredOrder = (lo.unansweredOrder || []).filter(i => i !== idxEnSeccion);
+          _reindexSectionStateRecl(localState[seccionOrigen], idxEnSeccion);
         }
 
         // Insertar en destino en local
@@ -809,5 +818,133 @@
   // ── Exponer globalmente ───────────────────────────────────────
   window.fbInjectReclasificarButton   = fbInjectReclasificarButton;
   window.abrirModalReclasificacion    = abrirModalReclasificacion;
+
+  // ════════════════════════════════════════════════════════════════
+  // _reindexSectionStateRecl
+  // Reindexar en memoria el estado de UNA sección tras mover/eliminar
+  // la pregunta en removedIdx. Todos los índices > removedIdx se decrementan en 1.
+  // ════════════════════════════════════════════════════════════════
+  function _reindexSectionStateRecl(sectionState, removedIdx) {
+    if (!sectionState) return;
+    const s = sectionState;
+    const shift = i => i > removedIdx ? i - 1 : i;
+    if (Array.isArray(s.answeredOrder)) {
+      s.answeredOrder = s.answeredOrder
+        .filter(e => (typeof e === 'number' ? e : e.idx) !== removedIdx)
+        .map(e => typeof e === 'number' ? shift(e) : { ...e, idx: shift(e.idx) });
+    }
+    if (Array.isArray(s.unansweredOrder)) {
+      s.unansweredOrder = s.unansweredOrder.filter(i => i !== removedIdx).map(shift);
+    }
+    ['graded', 'answers', 'shuffleMap'].forEach(campo => {
+      if (!s[campo]) return;
+      const nuevo = {};
+      Object.entries(s[campo]).forEach(([k, v]) => {
+        const ki = parseInt(k, 10);
+        if (isNaN(ki) || ki === removedIdx) return;
+        nuevo[ki > removedIdx ? ki - 1 : ki] = v;
+      });
+      s[campo] = nuevo;
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // _reindexAllUsersProgressRecl
+  // Reindexea la sección origen en TODOS los progress/{uid} de Firestore
+  // y, si se provee `migracion`, también mueve la pregunta respondida
+  // a la sección destino para cada usuario que la había respondido.
+  //
+  // migracion = { seccionDestino, nuevoDocId, nuevoIdx (base-0), textoNorm }
+  // ════════════════════════════════════════════════════════════════
+  async function _reindexAllUsersProgressRecl(seccionId, removedIdx, migracion) {
+    const { getDocs, collection, writeBatch, doc } = window.__fb;
+    const _fbDb = window._fbDb;
+    if (!getDocs || !_fbDb) return;
+
+    const snap = await getDocs(collection(_fbDb, 'progress'));
+    if (snap.empty) return;
+
+    const BATCH_LIMIT = 500;
+    let batch = writeBatch(_fbDb);
+    let opsInBatch = 0;
+    let totalActualizados = 0;
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      if (!data?.state?.[seccionId]) continue;
+      const sOrig = data.state[seccionId];
+      const unanswered = sOrig.unansweredOrder || [];
+      const answered   = sOrig.answeredOrder   || [];
+      const necesita =
+        unanswered.some(i => i >= removedIdx) ||
+        answered.some(e => (typeof e === 'number' ? e : e.idx) >= removedIdx);
+      if (!necesita) continue;
+
+      const newState = { ...data.state };
+      newState[seccionId] = JSON.parse(JSON.stringify(sOrig));
+
+      // Capturar datos respondidos ANTES de reindexar (para migrar al destino)
+      let entradaRespondida = null;
+      if (migracion) {
+        const aoOrig = newState[seccionId].answeredOrder || [];
+        const tiene = aoOrig.findIndex(e =>
+          (typeof e === 'number' ? e : e.idx) === removedIdx
+        );
+        if (tiene !== -1) {
+          entradaRespondida = {
+            graded    : newState[seccionId].graded    ?.[removedIdx],
+            answers   : newState[seccionId].answers   ?.[removedIdx],
+            shuffleMap: newState[seccionId].shuffleMap?.[removedIdx],
+          };
+        }
+      }
+
+      // Reindexar origen
+      _reindexSectionStateRecl(newState[seccionId], removedIdx);
+
+      // Migrar al destino si la pregunta estaba respondida
+      const updatePayload = { [`state.${seccionId}`]: newState[seccionId] };
+      if (migracion && entradaRespondida !== null) {
+        const { seccionDestino, nuevoDocId, nuevoIdx, textoNorm } = migracion;
+        if (!newState[seccionDestino]) {
+          newState[seccionDestino] = {
+            shuffleMap: {}, answeredOrder: [], unansweredOrder: [],
+            answers: {}, graded: {}, totalShown: false,
+          };
+        }
+        const sDest = newState[seccionDestino];
+        sDest.answeredOrder = sDest.answeredOrder || [];
+        const yaEsta = sDest.answeredOrder.some(e =>
+          (typeof e === 'number' ? e : e.idx) === nuevoIdx ||
+          (e?.docId && e.docId === nuevoDocId)
+        );
+        if (!yaEsta) {
+          sDest.answeredOrder.push({ idx: nuevoIdx, docId: nuevoDocId, texto: textoNorm });
+          sDest.graded      = sDest.graded      || {};
+          sDest.answers     = sDest.answers     || {};
+          sDest.shuffleMap  = sDest.shuffleMap  || {};
+          if (entradaRespondida.graded    !== undefined) sDest.graded[nuevoIdx]     = entradaRespondida.graded;
+          if (entradaRespondida.answers   !== undefined) sDest.answers[nuevoIdx]    = entradaRespondida.answers;
+          if (entradaRespondida.shuffleMap !== undefined) sDest.shuffleMap[nuevoIdx] = entradaRespondida.shuffleMap;
+          sDest.unansweredOrder = (sDest.unansweredOrder || []).filter(i => i !== nuevoIdx);
+        }
+        updatePayload[`state.${seccionDestino}`] = newState[seccionDestino];
+      }
+
+      const ref = doc(_fbDb, 'progress', docSnap.id);
+      batch.update(ref, updatePayload);
+      opsInBatch++;
+      totalActualizados++;
+
+      if (opsInBatch >= BATCH_LIMIT) {
+        await batch.commit();
+        batch = writeBatch(_fbDb);
+        opsInBatch = 0;
+      }
+    }
+    if (opsInBatch > 0) await batch.commit();
+    const migMsg = migracion ? ` + migración a "${migracion.seccionDestino}"` : '';
+    console.log(`[RECLASIF] reindexAllUsers: ${totalActualizados} docs actualizados en "${seccionId}"${migMsg}`);
+  }
 
 })();
