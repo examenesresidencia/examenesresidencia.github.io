@@ -920,7 +920,7 @@
         totalDescargadas += preguntas.length;
       } catch (e) {
         console.warn('[SP] Error descargando', sec.id, e.message);
-        if (onProgress) onProgress(i + 1, TODAS_LAS_SECCIONES.length, sec.id + ' ⚠️');
+        if (onProgress) onProgress(i + 1, TODAS_LAS_SECCIONES.length, sec.id, e.message);
       }
     }
     return totalDescargadas;
@@ -1319,9 +1319,18 @@
       _log('warn', '🗑 Limpiando caché local anterior…');
       _log('info', 'Iniciando descarga completa desde Firebase (todas las secciones)…');
       try {
-        const total = await _descargarCacheFirestore((actual, maximo, secId) => {
-          _log('dim', `→ Descargando ${secId} (${actual}/${maximo})…`);
+        let seccionesFallidas = 0;
+        const total = await _descargarCacheFirestore((actual, maximo, secId, errorMsg) => {
+          if (errorMsg) {
+            seccionesFallidas++;
+            _log('warn', `⚠️ Error en ${secId} (${actual}/${maximo}): ${errorMsg}`);
+          } else {
+            _log('dim', `→ Descargando ${secId} (${actual}/${maximo})…`);
+          }
         });
+        if (seccionesFallidas > 0) {
+          _log('warn', `⚠️ ${seccionesFallidas} sección(es) fallaron — revisá los errores arriba`);
+        }
         _log('ok', `✅ Descarga completa: ${total.toLocaleString()} preguntas en caché`);
         _actualizarCacheEstado();
         _toast('✅ Caché actualizado desde Firebase', 'success');
