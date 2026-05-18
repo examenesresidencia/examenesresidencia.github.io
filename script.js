@@ -1,4 +1,4 @@
-//PRUEBA 30  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 20  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -8000,7 +8000,7 @@ function fbSaveProgressToCloud() {
     console.log('[CONTENT-SYNC] Sección recargada:', seccionId);
   }
 
-  // _cargarSeccionIncremental eliminada — reemplazada por invalidación de caché
+
 
 
 
@@ -8356,13 +8356,8 @@ function fbSaveProgressToCloud() {
           console.log('[CONTENT-SYNC] Subida nueva detectada → sección:', seccionId, '| startIdx:', startIdx);
           try { localStorage.setItem(_CONTENT_VERSION_KEY + '_' + seccionId, String(version)); } catch (_) {}
 
-          if (startIdx !== null) {
-            // Carga incremental: solo las preguntas nuevas
-            _cargarSeccionIncremental(seccionId, startIdx);
-          } else {
-            // Fallback: invalidar y recargar todo (no debería ocurrir con subir-preguntas-admin.js)
-            _invalidarYRecargarSeccion(seccionId, null, null);
-          }
+          // Invalidar caché y recargar la sección completa
+          _invalidarYRecargarSeccion(seccionId, null, null);
         },
         (err) => { console.warn('[CONTENT-SYNC] Error en listener de', seccionId, ':', err.message); }
       );
