@@ -1,5 +1,108 @@
-//V7 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V8 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
+
+// ── CacheDisk: caché persistente en IndexedDB ─────────────────
+// Reemplaza localStorage para el caché de preguntas.
+// Sin límite de tamaño · Persiste entre sesiones · API async.
+// Uso: await window.CacheDisk.get(id) / .set(id, datos) / .delete(id) / .clear() / .info()
+(function () {
+  'use strict';
+  const _DB_NAME    = 'fb_preguntas_cache';
+  const _DB_VERSION = 1;
+  const _STORE      = 'secciones';
+
+  function _abrirDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(_DB_NAME, _DB_VERSION);
+      req.onupgradeneeded = function (e) {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(_STORE)) {
+          db.createObjectStore(_STORE, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  async function set(seccionId, datos) {
+    const db = await _abrirDB();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(_STORE, 'readwrite').objectStore(_STORE);
+      const req = store.put({ id: seccionId, ...datos });
+      req.onsuccess = () => resolve(true);
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  async function get(seccionId) {
+    const db = await _abrirDB();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(_STORE, 'readonly').objectStore(_STORE);
+      const req   = store.get(seccionId);
+      req.onsuccess = e => {
+        const r = e.target.result;
+        if (!r) { resolve(null); return; }
+        const { id, ...datos } = r;
+        resolve(datos);
+      };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  async function eliminar(seccionId) {
+    const db = await _abrirDB();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(_STORE, 'readwrite').objectStore(_STORE);
+      const req = store.delete(seccionId);
+      req.onsuccess = () => resolve(true);
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  async function keys() {
+    const db = await _abrirDB();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(_STORE, 'readonly').objectStore(_STORE);
+      const req   = store.getAllKeys();
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  async function clear() {
+    const db = await _abrirDB();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(_STORE, 'readwrite').objectStore(_STORE);
+      const req   = store.clear();
+      req.onsuccess = () => resolve(true);
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  // Diagnóstico: devuelve [{ id, cantPreguntas, fechaHora }]
+  async function info() {
+    const db = await _abrirDB();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(_STORE, 'readonly').objectStore(_STORE);
+      const req   = store.getAll();
+      req.onsuccess = e => {
+        const filas = (e.target.result || []).map(r => ({
+          id           : r.id,
+          ts           : r.ts,
+          cantPreguntas: Array.isArray(r.preguntas) ? r.preguntas.length : 0,
+          fechaHora    : r.ts ? new Date(r.ts).toLocaleString('es-AR') : '—',
+        }));
+        resolve(filas);
+      };
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+
+  window.CacheDisk = { set, get, delete: eliminar, keys, clear, info };
+})();
+// ── Fin CacheDisk ─────────────────────────────────────────────
+
 (function () {
   'use strict';
 
@@ -817,12 +920,11 @@
   // ════════════════════════════════════════════════════════════════
   // Construir Set de enunciados solo del cuestionario destino
   // ════════════════════════════════════════════════════════════════
-  function _construirCacheDestino(seccionId) {
+  async function _construirCacheDestino(seccionId) {
     const enunciados = new Set();
     try {
-      const raw = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
-      if (raw) {
-        const cached = JSON.parse(raw);
+      if (window.CacheDisk) {
+        const cached = await window.CacheDisk.get(seccionId);
         if (cached?.preguntas) {
           for (const p of cached.preguntas) {
             const n = _norm(p.pregunta);
@@ -841,9 +943,9 @@
   }
 
   // ════════════════════════════════════════════════════════════════
-  // Construir caché de enunciados desde localStorage
+  // Construir caché de enunciados desde IndexedDB (disco) o RAM
   // ════════════════════════════════════════════════════════════════
-  function _construirCacheEnunciados() {
+  async function _construirCacheEnunciados() {
     const enunciados = new Set();
     let seccionesConDatos = 0;
     let totalPreguntas = 0;
@@ -859,17 +961,17 @@
         seccionesConDatos++;
         continue;
       }
-      // Fallback: localStorage (secciones pequeñas que entraron en cuota)
+      // IndexedDB (caché persistente en disco — sin límite de tamaño)
       try {
-        const raw = localStorage.getItem(CACHE_KEY_PREFIX + sec.id);
-        if (!raw) continue;
-        const cached = JSON.parse(raw);
-        if (!cached || !cached.preguntas || !Array.isArray(cached.preguntas)) continue;
-        for (const p of cached.preguntas) {
-          const n = _norm(p.pregunta);
-          if (n) { enunciados.add(n); totalPreguntas++; }
+        if (window.CacheDisk) {
+          const cached = await window.CacheDisk.get(sec.id);
+          if (!cached || !cached.preguntas || !Array.isArray(cached.preguntas)) continue;
+          for (const p of cached.preguntas) {
+            const n = _norm(p.pregunta);
+            if (n) { enunciados.add(n); totalPreguntas++; }
+          }
+          seccionesConDatos++;
         }
-        seccionesConDatos++;
       } catch (_) {}
     }
 
@@ -889,6 +991,9 @@
     if (!db) throw new Error('Base de datos no inicializada.');
 
     // Limpiar caché local y memoria antes de descargar
+    if (window.CacheDisk) {
+      try { await window.CacheDisk.clear(); } catch (_) {}
+    }
     for (const sec of TODAS_LAS_SECCIONES) {
       try { localStorage.removeItem(CACHE_KEY_PREFIX + sec.id); } catch (_) {}
     }
@@ -906,6 +1011,7 @@
         const preguntas = snap.docs.map(d => {
           const { _idx, ...p } = d.data();
           p._firestoreIdx = _idx;
+          p._firestoreDocId = d.id; // necesario para que buscador-duplicados pueda eliminar
           return p;
         });
 
@@ -913,12 +1019,14 @@
         window.preguntasPorSeccion[sec.id] = preguntas;
         totalDescargadas += preguntas.length;
 
-        // Intentar guardar en localStorage (puede fallar por cuota — no es crítico)
+        // Guardar en IndexedDB (caché persistente en disco — persiste entre sesiones)
         try {
-          localStorage.setItem(CACHE_KEY_PREFIX + sec.id, JSON.stringify({
-            ts: Date.now(), preguntas
-          }));
-        } catch (_) { /* quota excedida — OK, los datos ya están en memoria */ }
+          if (window.CacheDisk) {
+            await window.CacheDisk.set(sec.id, { ts: Date.now(), preguntas });
+          }
+        } catch (idbErr) {
+          console.warn('[SP] No se pudo guardar en IndexedDB:', idbErr);
+        }
 
       } catch (e) {
         console.warn('[SP] Error descargando', sec.id, e.message);
@@ -1238,14 +1346,15 @@
   }
 
   // ── Actualizar estado del caché en pantalla ───────────────────
-  function _actualizarCacheEstado() {
-    const { enunciados, seccionesConDatos, totalPreguntas } = _construirCacheEnunciados();
+  async function _actualizarCacheEstado() {
     const el = document.getElementById('sp-cache-estado');
     if (!el) return;
+    el.innerHTML = `<span style="color:#64748b;">⏳ Verificando caché…</span>`;
+    const { enunciados, seccionesConDatos, totalPreguntas } = await _construirCacheEnunciados();
     if (seccionesConDatos === 0) {
-      el.innerHTML = `<span style="color:#f87171;">⚠️ No hay caché local — necesitás forzar un escaneo para comparar duplicados</span>`;
+      el.innerHTML = `<span style="color:#f87171;">⚠️ No hay caché en disco — necesitás forzar un escaneo para comparar duplicados</span>`;
     } else {
-      el.innerHTML = `<span style="color:#34d399;">✅ Caché disponible</span> <span style="color:#475569;">— ${seccionesConDatos} secciones · ${totalPreguntas.toLocaleString()} preguntas</span>`;
+      el.innerHTML = `<span style="color:#34d399;">✅ Caché en disco</span> <span style="color:#475569;">— ${seccionesConDatos} secciones · ${totalPreguntas.toLocaleString()} preguntas</span>`;
     }
     _cacheEnunciados = enunciados;
   }
@@ -1270,14 +1379,14 @@
     });
 
     // Select destino
-    document.getElementById('sp-select-destino').addEventListener('change', function () {
+    document.getElementById('sp-select-destino').addEventListener('change', async function () {
       _seccionDestino = this.value;
-      _actualizarDestinoInfo();
+      await _actualizarDestinoInfo();
       _verificarListoParaAnalizar();
     });
 
     // Analizar
-    document.getElementById('sp-btn-analizar').addEventListener('click', _analizarPreguntas);
+    document.getElementById('sp-btn-analizar').addEventListener('click', () => _analizarPreguntas());
 
     // Tabs
     document.getElementById('sp-tab-nuevas').addEventListener('click',      () => _mostrarTab('nuevas'));
@@ -1400,15 +1509,14 @@
   }
 
   // ── Actualizar info del destino ───────────────────────────────
-  function _actualizarDestinoInfo() {
+  async function _actualizarDestinoInfo() {
     const info = document.getElementById('sp-destino-info');
     if (!_seccionDestino) { info.style.display = 'none'; return; }
     const sec = TODAS_LAS_SECCIONES.find(s => s.id === _seccionDestino);
     let cantActual = 0;
     try {
-      const raw = localStorage.getItem(CACHE_KEY_PREFIX + _seccionDestino);
-      if (raw) {
-        const c = JSON.parse(raw);
+      if (window.CacheDisk) {
+        const c = await window.CacheDisk.get(_seccionDestino);
         cantActual = c?.preguntas?.length || 0;
       }
     } catch (_) {}
@@ -1439,12 +1547,12 @@
   }
 
   // ── Analizar preguntas ────────────────────────────────────────
-  function _analizarPreguntas() {
+  async function _analizarPreguntas() {
     if (!_preguntasCargadas.length || !_seccionDestino) return;
 
-    // Construir ambos cachés
-    const { enunciados: enunciadosTodo } = _construirCacheEnunciados();
-    const enunciadosDestino = _construirCacheDestino(_seccionDestino);
+    // Construir ambos cachés (async — leen desde IndexedDB)
+    const { enunciados: enunciadosTodo } = await _construirCacheEnunciados();
+    const enunciadosDestino = await _construirCacheDestino(_seccionDestino);
     _cacheEnunciados = enunciadosTodo;
 
     _preguntasNuevas = [];
@@ -1746,26 +1854,23 @@
         }
       } catch (_) {}
 
-      // 4. Actualizar caché local con las nuevas preguntas
+      // 4. Actualizar caché en disco (IndexedDB) con las nuevas preguntas.
       //    REGLA: solo se actualiza si ya existe un caché completo de esta sección.
       //    Si no existe caché → no guardar nada. Cuando el usuario entre al cuestionario
       //    descargará todo completo desde Firestore. Así evitamos un caché incompleto
       //    (solo las nuevas sin las anteriores) que haría parecer que faltan preguntas.
-      _log('info', 'Actualizando caché local…');
+      _log('info', 'Actualizando caché en disco (IndexedDB)…');
       try {
-        const rawCache = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
-
-        // ── ¿Existe caché local completo? ──────────────────────────
         let cacheExistente = null;
-        if (rawCache) {
-          try { cacheExistente = JSON.parse(rawCache); } catch (_) {}
+        if (window.CacheDisk) {
+          try { cacheExistente = await window.CacheDisk.get(seccionId); } catch (_) {}
         }
-        // Fallback: si está en memoria (window.preguntasPorSeccion) pero no en localStorage
+        // Fallback: si está en memoria (window.preguntasPorSeccion) pero no en disco
         const enMemoria = window.preguntasPorSeccion?.[seccionId];
 
         if (!cacheExistente && !enMemoria) {
           // No hay caché — no guardar nada para no crear un caché incompleto
-          _log('info', 'Sin caché local previo — se omite la actualización. ' +
+          _log('info', 'Sin caché previo — se omite la actualización. ' +
             'El usuario descargará todo completo al entrar al cuestionario.');
         } else {
           // Hay caché existente — agregar solo las nuevas al final
@@ -1776,34 +1881,24 @@
           });
           const preguntasActualizadas = [...preguntasActuales, ...preguntasNuevasConIdx];
 
-          try {
-            localStorage.setItem(CACHE_KEY_PREFIX + seccionId, JSON.stringify({
+          if (window.CacheDisk) {
+            await window.CacheDisk.set(seccionId, {
               ts       : Date.now(),
               preguntas: preguntasActualizadas
-            }));
-            // Limpiar la referencia en memoria para que la próxima vez que el admin
-            // entre al cuestionario, cargarSeccion() lea el caché localStorage actualizado
-            // (con las 300 preguntas) en lugar de quedarse con las 200 que había en memoria.
-            // El caché localStorage NO se borra — 0 lecturas extra a Firestore.
-            if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
-            if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionId);
-            _log('ok', `✅ Caché local actualizado: ${preguntasActuales.length} anteriores + ` +
-              `${preguntasNuevasConIdx.length} nuevas = ${preguntasActualizadas.length} totales`);
-            _log('info', 'Memoria liberada — al entrar al cuestionario se leerán las ' +
-              preguntasActualizadas.length + ' preguntas desde caché local (0 lecturas a Firestore)');
-          } catch (storageErr) {
-            // localStorage lleno — limpiar el caché de esta sección para forzar
-            // descarga completa la próxima vez (mejor que un caché parcial)
-            try {
-              localStorage.removeItem(CACHE_KEY_PREFIX + seccionId);
-              if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
-              _log('warn', '⚠️ localStorage lleno — caché de ' + seccionId +
-                ' eliminado. Se descargará completo al entrar al cuestionario.');
-            } catch (_) {}
+            });
           }
+          // Limpiar la referencia en memoria para que la próxima vez que el admin
+          // entre al cuestionario, cargarSeccion() lea el caché del disco actualizado.
+          // El caché en disco NO se borra — 0 lecturas extra a Firestore.
+          if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+          if (window._seccionesYaCargadas) window._seccionesYaCargadas.delete(seccionId);
+          _log('ok', `✅ Caché en disco actualizado: ${preguntasActuales.length} anteriores + ` +
+            `${preguntasNuevasConIdx.length} nuevas = ${preguntasActualizadas.length} totales`);
+          _log('info', 'Al entrar al cuestionario se leerán las ' +
+            preguntasActualizadas.length + ' preguntas desde el disco (0 lecturas a Firestore)');
         }
       } catch (cacheErr) {
-        _log('warn', `⚠️ Error inesperado al actualizar caché local: ${cacheErr.message}`);
+        _log('warn', `⚠️ Error al actualizar caché en disco: ${cacheErr.message}`);
       }
 
       // 5. Invalidar caché del buscador de duplicados para que refleje los cambios
@@ -1888,7 +1983,7 @@
     const btnLimpiar  = document.getElementById('sp-btn-cache-limpiar');
     const btnTxt      = document.getElementById('sp-btn-cache-limpiar-txt');
 
-    selectCache.addEventListener('change', function () {
+    selectCache.addEventListener('change', async function () {
       const secId = this.value;
       if (!secId) {
         infoEl.className = 'sp-cache-info';
@@ -1898,15 +1993,19 @@
       }
 
       const sec = TODAS_LAS_SECCIONES.find(s => s.id === secId);
-      const cacheKey   = CACHE_KEY_PREFIX + secId;
       const editsKey   = 'fb_edits_cache_' + secId;
-      const tienePrincipal = !!localStorage.getItem(cacheKey);
-      const tieneEdits     = !!localStorage.getItem(editsKey);
+      const tieneEdits = !!localStorage.getItem(editsKey);
 
-      let cantPreguntas = 0;
+      let tienePrincipal = false;
+      let cantPreguntas  = 0;
       try {
-        const raw = localStorage.getItem(cacheKey);
-        if (raw) cantPreguntas = JSON.parse(raw)?.preguntas?.length || 0;
+        if (window.CacheDisk) {
+          const cached = await window.CacheDisk.get(secId);
+          if (cached?.preguntas) {
+            tienePrincipal = true;
+            cantPreguntas  = cached.preguntas.length;
+          }
+        }
       } catch (_) {}
 
       infoEl.classList.add('visible');
@@ -1922,16 +2021,17 @@
       btnTxt.textContent  = `LIMPIAR CACHÉ DE ${sec?.label?.toUpperCase()}`;
     });
 
-    btnLimpiar.addEventListener('click', function () {
+    btnLimpiar.addEventListener('click', async function () {
       const secId = selectCache.value;
       if (!secId) return;
 
       const sec      = TODAS_LAS_SECCIONES.find(s => s.id === secId);
-      const cacheKey = CACHE_KEY_PREFIX + secId;
       const editsKey = 'fb_edits_cache_' + secId;
 
-      // Eliminar caché de preguntas y de ediciones admin
-      localStorage.removeItem(cacheKey);
+      // Eliminar caché de preguntas (IndexedDB) y de ediciones admin (localStorage)
+      if (window.CacheDisk) {
+        try { await window.CacheDisk.delete(secId); } catch (_) {}
+      }
       localStorage.removeItem(editsKey);
 
       // Si la sección ya estaba cargada en memoria, también limpiarla
@@ -1984,7 +2084,7 @@
     const btnVaciar    = document.getElementById('sp-btn-vaciar');
     const btnTxt       = document.getElementById('sp-btn-vaciar-txt');
 
-    selectVaciar.addEventListener('change', function () {
+    selectVaciar.addEventListener('change', async function () {
       const seccionId = this.value;
       confirmInput.value = '';
       confirmInput.classList.remove('ok');
@@ -2001,8 +2101,10 @@
       // Mostrar cuántas preguntas hay actualmente
       let cantActual = 0;
       try {
-        const raw = localStorage.getItem(CACHE_KEY_PREFIX + seccionId);
-        if (raw) cantActual = JSON.parse(raw)?.preguntas?.length || 0;
+        if (window.CacheDisk) {
+          const cached = await window.CacheDisk.get(seccionId);
+          cantActual = cached?.preguntas?.length || 0;
+        }
       } catch (_) {}
       if (!cantActual && window.preguntasPorSeccion?.[seccionId]) {
         cantActual = window.preguntasPorSeccion[seccionId].length;
@@ -2132,8 +2234,11 @@
         }
       } catch (_) {}
 
-      // 4. Limpiar caché local
+      // 4. Limpiar caché local (IndexedDB + memoria)
       try {
+        if (window.CacheDisk) {
+          try { await window.CacheDisk.delete(seccionId); } catch (_) {}
+        }
         localStorage.removeItem(CACHE_KEY_PREFIX + seccionId);
         if (window.preguntasPorSeccion) {
           delete window.preguntasPorSeccion[seccionId];
@@ -2144,15 +2249,18 @@
         const especialidadesAfectadas = new Set(
           Object.values(window.MAPA_ESPECIALIDAD_KEY || {})
         );
-        especialidadesAfectadas.forEach(espId => {
+        for (const espId of especialidadesAfectadas) {
+          if (window.CacheDisk) {
+            try { await window.CacheDisk.delete(espId); } catch (_) {}
+          }
           try { localStorage.removeItem(CACHE_KEY_PREFIX + espId); } catch (_) {}
           if (window.preguntasPorSeccion) {
             delete window.preguntasPorSeccion[espId];
           }
-        });
-        logV('ok', '✅ Caché local limpiado (sección + especialidades extrapoladas)');
+        }
+        logV('ok', '✅ Caché en disco limpiado (sección + especialidades extrapoladas)');
       } catch (cacheErr) {
-        logV('warn', `⚠️ No se pudo limpiar el caché local: ${cacheErr.message}`);
+        logV('warn', `⚠️ No se pudo limpiar el caché: ${cacheErr.message}`);
       }
 
       // 5. Notificar a usuarios conectados
@@ -2303,6 +2411,37 @@
   function _escapeHtml(str) {
     return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // ════════════════════════════════════════════════════════════════
+  // Auto-carga desde IndexedDB al iniciar
+  // ════════════════════════════════════════════════════════════════
+  // Al cargar el script, pobla window.preguntasPorSeccion desde el disco
+  // para que el análisis de duplicados y el buscador funcionen sin rescan.
+  // Se ejecuta en segundo plano — no bloquea nada.
+  (async function _cargarMemoriaDesdeIndexedDB() {
+    if (!window.CacheDisk) return;
+    // Esperar a que CacheDisk esté listo (debería ser inmediato, pero por las dudas)
+    if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+
+    let cargadas = 0;
+    let totalPreguntas = 0;
+
+    for (const sec of TODAS_LAS_SECCIONES) {
+      // No sobreescribir si ya está en RAM (rescan reciente tiene prioridad)
+      if (window.preguntasPorSeccion[sec.id]?.length > 0) continue;
+      try {
+        const cached = await window.CacheDisk.get(sec.id);
+        if (!cached || !Array.isArray(cached.preguntas) || cached.preguntas.length === 0) continue;
+        window.preguntasPorSeccion[sec.id] = cached.preguntas;
+        cargadas++;
+        totalPreguntas += cached.preguntas.length;
+      } catch (_) {}
+    }
+
+    if (cargadas > 0) {
+      console.log(`[SP] Auto-carga desde IndexedDB: ${cargadas} secciones, ${totalPreguntas.toLocaleString()} preguntas → memoria lista`);
+    }
+  })();
 
   // ════════════════════════════════════════════════════════════════
   // Exponer globalmente
