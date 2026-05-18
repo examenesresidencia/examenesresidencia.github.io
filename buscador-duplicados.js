@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js - V3
+// buscador-duplicados.js - V4
 // ────────────────────────────────────────────────────────────────
 
 
@@ -176,77 +176,233 @@
   // ════════════════════════════════════════════════════════════════
   // _escanearDuplicados — lee Firestore y agrupa por enunciado
   // ════════════════════════════════════════════════════════════════
+  // ── Helper: indexar una lista de preguntas en mapa y mapaInterna ──
+  function _indexarPreguntas(seccionId, preguntas, mapa, mapaInterna, contador) {
+    let total = contador;
+    preguntas.forEach((data, idx) => {
+      total++;
+      const clave = _normalizarEnunciado(data.pregunta);
+      if (!clave) return;
+      const item = {
+        seccionId,
+        docId   : data._firestoreDocId || data.docId || null,
+        idx     : data._firestoreIdx ?? data._idx ?? idx,
+        pregunta: data.pregunta || '(sin enunciado)',
+        huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
+      };
+      if (!mapa.has(clave)) mapa.set(clave, []);
+      mapa.get(clave).push(item);
+      const claveInterna = seccionId + '::' + clave;
+      if (!mapaInterna.has(claveInterna)) mapaInterna.set(claveInterna, []);
+      mapaInterna.get(claveInterna).push(item);
+    });
+    return total;
+  }
+
+  // ── Helper: construir grupos y renderizar resultado ─────────────
+  function _procesarResultadosDuplicados(mapa, mapaInterna, totalPreguntas, seccionesEscaneadas, erroresSecciones, lista, resumen, fuenteLabel) {
+    if (totalPreguntas === 0) {
+      const tieneErrores = erroresSecciones.length > 0;
+      lista.innerHTML = `<div style="color:#f87171;background:rgba(239,68,68,0.1);
+        border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:18px 20px;">
+        ❌ <strong>No se pudo leer ninguna pregunta.</strong><br><br>
+        ${tieneErrores ? `<strong style="color:#fbbf24;">Errores:</strong><br>
+        <code style="font-size:0.75rem;color:#fca5a5;display:block;margin-top:6px;">
+          ${erroresSecciones.slice(0,8).join('<br>')}
+        </code><br>` : ''}
+        <strong style="color:#94a3b8;font-size:0.82rem;">Posibles causas:</strong>
+        <ul style="color:#94a3b8;font-size:0.8rem;margin-top:6px;padding-left:18px;line-height:1.8;">
+          <li>Sin caché en disco — hacé "Forzar nuevo escaneo" en el panel de admin</li>
+          <li>Las reglas de Firestore no permiten leer como este usuario</li>
+          <li>La colección <code>preguntas/{seccion}/items</code> no existe o está vacía</li>
+        </ul>
+      </div>`;
+      resumen.innerHTML = `<span style="color:#f87171;">⚠️ Sin datos</span>`;
+      return;
+    }
+
+    if (erroresSecciones.length > 0) {
+      lista.innerHTML = `<div style="color:#fbbf24;background:rgba(251,191,36,0.08);
+        border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:14px 18px;margin-bottom:14px;">
+        ⚠️ <strong>Errores en ${erroresSecciones.length} sección(es):</strong><br>
+        <code style="font-size:0.75rem;color:#fca5a5;">${erroresSecciones.slice(0,5).join('<br>')}</code>
+        ${erroresSecciones.length > 5 ? `<br>…y ${erroresSecciones.length - 5} más` : ''}
+      </div>`;
+    } else {
+      lista.innerHTML = '';
+    }
+
+    _dupGruposCache = [];
+    mapa.forEach(items => { if (items.length > 1) _dupGruposCache.push(items); });
+    _dupGruposCache.sort((a, b) => b.length - a.length);
+
+    _dupGruposInternoCache = [];
+    mapaInterna.forEach(items => { if (items.length > 1) _dupGruposInternoCache.push(items); });
+    _dupGruposInternoCache.sort((a, b) => b.length - a.length);
+
+    // Intentar guardar grupos en localStorage (pequeño — solo los grupos duplicados, no todas las preguntas)
+    try {
+      localStorage.setItem(_DUP_CACHE_KEY, JSON.stringify({
+        ts: Date.now(), grupos: _dupGruposCache,
+        gruposInternos: _dupGruposInternoCache, totalPreguntas, seccionesEscaneadas
+      }));
+    } catch (_) { /* quota excedida — no crítico */ }
+
+    const btnRescan = `<button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">🔄 Forzar nuevo escaneo</button>`;
+    const etiqueta = fuenteLabel || `<span style="color:#475569;font-size:0.75rem;">✅ Leído desde Firestore — ${btnRescan}</span>`;
+
+    resumen.innerHTML = `
+      Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
+      <strong style="color:#f1f5f9">${totalPreguntas.toLocaleString()}</strong> preguntas totales ·
+      Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos ·
+      Dentro de cuestionario: <strong style="color:${_dupGruposInternoCache.length > 0 ? '#fb923c' : '#4ade80'}">${_dupGruposInternoCache.length}</strong> grupos
+      <br><span class="dup-modo-badge" style="color:#a78bfa;font-size:0.75rem;">🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos</span>
+      <span style="margin-left:8px;">${etiqueta}</span>`;
+
+    _aplicarFiltrosDuplicados();
+  }
+
   async function _escanearDuplicados(forzar = false) {
     const lista   = document.getElementById('dup-lista');
     const resumen = document.getElementById('dup-resumen');
     const btnScan = document.getElementById('dup-btn-scan');
     if (!lista || !resumen) return;
 
-    // Intentar desde caché localStorage primero
+    // ── Fuente 0: grupos ya calculados en localStorage (el más rápido) ─────────
+    // Solo guarda los grupos duplicados — es liviano y entra en localStorage.
     if (!forzar) {
       try {
         const cached = JSON.parse(localStorage.getItem(_DUP_CACHE_KEY) || 'null');
-        // Invalidar caché si se guardó con 0 secciones (escaneo fallido anterior)
         if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL && cached.seccionesEscaneadas > 0) {
           _dupGruposCache = cached.grupos;
           _dupGruposInternoCache = cached.gruposInternos || [];
           const edad = Math.round((Date.now() - cached.ts) / 60000);
           const edadTexto = edad < 60 ? `${edad} min` : `${Math.round(edad / 60)} hs`;
+          const btnRescan = `<button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">🔄 Forzar nuevo escaneo</button>`;
           resumen.innerHTML = `
             Escaneadas: <strong style="color:#f1f5f9">${cached.seccionesEscaneadas}</strong> secciones ·
             <strong style="color:#f1f5f9">${cached.totalPreguntas.toLocaleString()}</strong> preguntas totales ·
             Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos ·
             Dentro de cuestionario: <strong style="color:${_dupGruposInternoCache.length > 0 ? '#fb923c' : '#4ade80'}">${_dupGruposInternoCache.length}</strong> grupos
             <br><span class="dup-modo-badge" style="color:#a78bfa;font-size:0.75rem;">🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos</span>
-            <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
-              📦 Desde caché (hace ${edadTexto}) —
-              <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
-                🔄 Forzar nuevo escaneo
-              </button>
-            </span>`;
+            <span style="color:#475569;font-size:0.75rem;margin-left:8px;">📦 Desde caché (hace ${edadTexto}) — ${btnRescan}</span>`;
           _aplicarFiltrosDuplicados();
-          console.log(`[DUP-SCAN] Usando caché (${edad} min de antigüedad, ${_dupGruposCache.length} grupos)`);
+          console.log(`[DUP-SCAN] Usando caché localStorage (${edad} min, ${_dupGruposCache.length} grupos)`);
           return;
         }
-      } catch (_) { /* caché corrupto → ignorar */ }
+      } catch (_) {}
     }
 
     btnScan.disabled    = true;
     btnScan.textContent = '⏳ Escaneando…';
-    lista.innerHTML     = `<div style="text-align:center;padding:40px;color:#94a3b8;">
-      Leyendo Firestore… esto consume lecturas, usá el caché cuando sea posible.
-    </div>`;
     resumen.textContent = '';
 
+    const mapa        = new Map();
+    const mapaInterna = new Map();
+    let totalPreguntas    = 0;
+    let seccionesEscaneadas = 0;
+    const erroresSecciones  = [];
+
+    // ── Fuente 1: memoria RAM (window.preguntasPorSeccion) ─────────────────────
+    // Poblada al arrancar (desde IndexedDB) o tras rescan manual — 0 lecturas Firebase.
+    const memCache = window.preguntasPorSeccion;
+    const seccionesEnMem = memCache
+      ? Object.keys(memCache).filter(k => Array.isArray(memCache[k]) && memCache[k].length > 0)
+      : [];
+    const umbral = Math.floor(TODAS_LAS_SECCIONES.length * 0.8);
+
+    if (!forzar && seccionesEnMem.length >= umbral) {
+      lista.innerHTML = `<div style="text-align:center;padding:20px;color:#94a3b8;font-size:0.85rem;">⚡ Analizando desde memoria… (0 lecturas Firebase)</div>`;
+      console.log(`[DUP-SCAN] RAM: ${seccionesEnMem.length} secciones — 0 lecturas`);
+      for (const seccionId of TODAS_LAS_SECCIONES) {
+        const preguntas = memCache[seccionId];
+        if (!Array.isArray(preguntas) || preguntas.length === 0) continue;
+        seccionesEscaneadas++;
+        totalPreguntas = _indexarPreguntas(seccionId, preguntas, mapa, mapaInterna, totalPreguntas - preguntas.length) + preguntas.length - (totalPreguntas - totalPreguntas);
+        // contar correctamente
+        totalPreguntas = 0;
+      }
+      // recontar limpio
+      mapa.clear(); mapaInterna.clear(); seccionesEscaneadas = 0; totalPreguntas = 0;
+      for (const seccionId of TODAS_LAS_SECCIONES) {
+        const preguntas = memCache[seccionId];
+        if (!Array.isArray(preguntas) || preguntas.length === 0) continue;
+        seccionesEscaneadas++;
+        preguntas.forEach((data, idx) => {
+          totalPreguntas++;
+          const clave = _normalizarEnunciado(data.pregunta);
+          if (!clave) return;
+          const item = { seccionId, docId: data._firestoreDocId || null,
+            idx: data._firestoreIdx ?? idx, pregunta: data.pregunta || '(sin enunciado)',
+            huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined };
+          if (!mapa.has(clave)) mapa.set(clave, []);
+          mapa.get(clave).push(item);
+          const ci = seccionId + '::' + clave;
+          if (!mapaInterna.has(ci)) mapaInterna.set(ci, []);
+          mapaInterna.get(ci).push(item);
+        });
+      }
+      _procesarResultadosDuplicados(mapa, mapaInterna, totalPreguntas, seccionesEscaneadas,
+        erroresSecciones, lista, resumen,
+        `<span style="color:#4ade80;font-size:0.75rem;">⚡ Desde memoria RAM (0 lecturas Firebase) — <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">🔄 Forzar nuevo escaneo</button></span>`);
+      if (btnScan) { btnScan.disabled = false; btnScan.textContent = '🔍 Escanear'; }
+      return;
+    }
+
+    // ── Fuente 2: IndexedDB / CacheDisk (disco, persiste entre sesiones) ───────
+    if (!forzar && window.CacheDisk) {
+      lista.innerHTML = `<div style="text-align:center;padding:20px;color:#94a3b8;font-size:0.85rem;">💾 Leyendo caché del disco… (0 lecturas Firebase)</div>`;
+      let seccionesEnDisco = 0;
+      for (const seccionId of TODAS_LAS_SECCIONES) {
+        try {
+          const cached = await window.CacheDisk.get(seccionId);
+          if (!cached || !Array.isArray(cached.preguntas) || cached.preguntas.length === 0) continue;
+          seccionesEnDisco++;
+          cached.preguntas.forEach((data, idx) => {
+            totalPreguntas++;
+            const clave = _normalizarEnunciado(data.pregunta);
+            if (!clave) return;
+            const item = { seccionId, docId: data._firestoreDocId || null,
+              idx: data._firestoreIdx ?? idx, pregunta: data.pregunta || '(sin enunciado)',
+              huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined };
+            if (!mapa.has(clave)) mapa.set(clave, []);
+            mapa.get(clave).push(item);
+            const ci = seccionId + '::' + clave;
+            if (!mapaInterna.has(ci)) mapaInterna.set(ci, []);
+            mapaInterna.get(ci).push(item);
+          });
+        } catch (_) {}
+      }
+      if (seccionesEnDisco >= umbral) {
+        console.log(`[DUP-SCAN] IndexedDB: ${seccionesEnDisco} secciones — 0 lecturas`);
+        _procesarResultadosDuplicados(mapa, mapaInterna, totalPreguntas, seccionesEnDisco,
+          erroresSecciones, lista, resumen,
+          `<span style="color:#60a5fa;font-size:0.75rem;">💾 Desde disco (0 lecturas Firebase) — <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">🔄 Forzar nuevo escaneo</button></span>`);
+        if (btnScan) { btnScan.disabled = false; btnScan.textContent = '🔍 Escanear'; }
+        return;
+      }
+      mapa.clear(); mapaInterna.clear(); totalPreguntas = 0;
+    }
+
+    // ── Fuente 3: Firestore (último recurso — consume lecturas) ────────────────
+    lista.innerHTML = `<div style="text-align:center;padding:30px;color:#94a3b8;">
+      Sin caché disponible — leyendo desde Firestore…<br>
+      <small style="color:#64748b;">Podés evitarlo haciendo "Forzar nuevo escaneo" en el panel de admin.</small>
+    </div>`;
+
     try {
-      // Verificar que Firestore esté disponible
-      // Prioridad: window.__fb (expuesto por script.js tras fbInit) → window.__firebase_firestore
       const _fsModule = window.__fb || window.__firebase_firestore;
       if (!_fsModule || typeof _fsModule.collection !== 'function') {
-        lista.innerHTML = `<div style="color:#f87171;padding:20px;">
-          ❌ <strong>Firestore no disponible.</strong><br>
-          Asegurate de estar logueado y de que Firebase se haya inicializado.
-        </div>`;
+        lista.innerHTML = `<div style="color:#f87171;padding:20px;">❌ <strong>Firestore no disponible.</strong><br>Iniciá sesión primero.</div>`;
         return;
       }
       const { collection, getDocs } = _fsModule;
       const db = window._fbDb;
       if (!db) {
-        lista.innerHTML = `<div style="color:#f87171;padding:20px;">
-          ❌ <strong>Base de datos no inicializada (window._fbDb es null).</strong><br>
-          Iniciá sesión primero — Firebase se inicializa al autenticarse.
-        </div>`;
+        lista.innerHTML = `<div style="color:#f87171;padding:20px;">❌ <strong>Base de datos no inicializada.</strong><br>Iniciá sesión primero.</div>`;
         return;
       }
 
-      const mapa = new Map();        // global: clave → [items de cualquier sección]
-      const mapaInterna = new Map(); // interna: "seccion::clave" → [items de esa sección]
-      let totalPreguntas = 0;
-      let seccionesEscaneadas = 0;
-      const erroresSecciones = [];
-      let primeraSeccionConDatos = null;
-
-      // Mostrar progreso en tiempo real
       lista.innerHTML = `<div id="dup-progreso" style="text-align:center;padding:20px;color:#94a3b8;font-size:0.85rem;">
         Leyendo sección 1 de ${TODAS_LAS_SECCIONES.length}…
       </div>`;
@@ -254,35 +410,24 @@
       for (let i = 0; i < TODAS_LAS_SECCIONES.length; i++) {
         const seccionId = TODAS_LAS_SECCIONES[i];
         const progresoEl = document.getElementById('dup-progreso');
-        if (progresoEl) progresoEl.textContent = `Leyendo ${seccionId} (${i+1}/${TODAS_LAS_SECCIONES.length})… ${totalPreguntas} preguntas leídas`;
-
+        if (progresoEl) progresoEl.textContent = `Leyendo ${seccionId} (${i+1}/${TODAS_LAS_SECCIONES.length})… ${totalPreguntas} preguntas`;
         try {
-          const itemsRef = collection(db, 'preguntas', seccionId, 'items');
-          const snap = await getDocs(itemsRef);
-          console.log(`[DUP-SCAN] ${seccionId}: ${snap.size} docs`);
+          const snap = await getDocs(collection(db, 'preguntas', seccionId, 'items'));
           if (snap.empty) continue;
-          if (!primeraSeccionConDatos) primeraSeccionConDatos = seccionId;
           seccionesEscaneadas++;
           snap.forEach(docSnap => {
             totalPreguntas++;
             const data = docSnap.data();
             const clave = _normalizarEnunciado(data.pregunta);
             if (!clave) return;
-            if (!mapa.has(clave)) mapa.set(clave, []);
-            const itemData = {
-              seccionId,
-              docId   : docSnap.id,
-              idx     : data._idx ?? null,
-              // Solo guardamos lo mínimo para identificar y eliminar — reduce peso del caché
+            const item = { seccionId, docId: docSnap.id, idx: data._idx ?? null,
               pregunta: data.pregunta || '(sin enunciado)',
-              huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined
-              // opciones y correcta se omiten del caché para no exceder los 5MB de localStorage
-            };
-            mapa.get(clave).push(itemData);
-            // También indexamos por sección para detectar duplicados internos
-            const claveInterna = seccionId + '::' + clave;
-            if (!mapaInterna.has(claveInterna)) mapaInterna.set(claveInterna, []);
-            mapaInterna.get(claveInterna).push(itemData);
+              huerfana: !data.opciones || data.opciones.length === 0 || data.correcta === undefined };
+            if (!mapa.has(clave)) mapa.set(clave, []);
+            mapa.get(clave).push(item);
+            const ci = seccionId + '::' + clave;
+            if (!mapaInterna.has(ci)) mapaInterna.set(ci, []);
+            mapaInterna.get(ci).push(item);
           });
         } catch (errSec) {
           console.error(`[DUP-SCAN] Error en ${seccionId}:`, errSec);
@@ -290,89 +435,8 @@
         }
       }
 
-      // Si no se leyó NADA, mostrar diagnóstico y NO guardar caché
-      if (totalPreguntas === 0) {
-        const tieneErrores = erroresSecciones.length > 0;
-        lista.innerHTML = `<div style="color:#f87171;background:rgba(239,68,68,0.1);
-          border:1px solid rgba(239,68,68,0.3);border-radius:10px;padding:18px 20px;">
-          ❌ <strong>No se pudo leer ninguna pregunta de Firestore.</strong><br><br>
-          ${tieneErrores ? `
-          <strong style="color:#fbbf24;">Errores detectados:</strong><br>
-          <code style="font-size:0.75rem;color:#fca5a5;display:block;margin-top:6px;">
-            ${erroresSecciones.slice(0,8).join('<br>')}
-          </code>
-          <br>` : ''}
-          <strong style="color:#94a3b8;font-size:0.82rem;">Posibles causas:</strong>
-          <ul style="color:#94a3b8;font-size:0.8rem;margin-top:6px;padding-left:18px;line-height:1.8;">
-            <li>Las reglas de Firestore no permiten leer como este usuario</li>
-            <li>La colección <code>preguntas/{seccion}/items</code> no existe o está vacía</li>
-            <li>El usuario no tiene rol <code>admin</code> en Firestore</li>
-          </ul>
-          <div style="margin-top:10px;font-size:0.78rem;color:#64748b;">
-            Abrí F12 → Consola para ver el detalle exacto de cada sección.
-          </div>
-        </div>`;
-        resumen.innerHTML = `<span style="color:#f87171;">⚠️ Sin datos — caché no guardada</span>`;
-        return;
-      }
-
-      // Mostrar errores parciales si los hubo (pero sí se leyeron datos)
-      if (erroresSecciones.length > 0) {
-        lista.innerHTML = `<div style="color:#fbbf24;background:rgba(251,191,36,0.08);
-          border:1px solid rgba(251,191,36,0.3);border-radius:10px;padding:14px 18px;margin-bottom:14px;">
-          ⚠️ <strong>Errores en ${erroresSecciones.length} sección(es) — el resto se escaneó OK:</strong><br>
-          <code style="font-size:0.75rem;color:#fca5a5;">${erroresSecciones.slice(0,5).join('<br>')}</code>
-          ${erroresSecciones.length > 5 ? `<br>…y ${erroresSecciones.length - 5} más` : ''}
-        </div>`;
-      } else {
-        lista.innerHTML = '';
-      }
-
-      // Filtrar grupos con más de 1 entrada — modo global (entre secciones)
-      _dupGruposCache = [];
-      mapa.forEach((items) => {
-        if (items.length > 1) _dupGruposCache.push(items);
-      });
-      _dupGruposCache.sort((a, b) => b.length - a.length);
-
-      // Modo interno: duplicados DENTRO de la misma sección
-      _dupGruposInternoCache = [];
-      mapaInterna.forEach((items) => {
-        if (items.length > 1) _dupGruposInternoCache.push(items);
-      });
-      _dupGruposInternoCache.sort((a, b) => b.length - a.length);
-
-      // Guardar en caché localStorage SOLO si hay datos reales
-      try {
-        localStorage.setItem(_DUP_CACHE_KEY, JSON.stringify({
-          ts: Date.now(),
-          grupos: _dupGruposCache,
-          gruposInternos: _dupGruposInternoCache,
-          totalPreguntas,
-          seccionesEscaneadas
-        }));
-        console.log(`[DUP-SCAN] Caché guardada: ${_dupGruposCache.length} grupos, ${totalPreguntas} preguntas`);
-      } catch (storageErr) {
-        console.warn('[DUP-SCAN] No se pudo guardar caché en localStorage:', storageErr.message);
-        // Mostrar aviso en el resumen para que el admin sepa que no hay caché
-        const resumenEl = document.getElementById('dup-resumen');
-        if (resumenEl) resumenEl.innerHTML += ' <span style="color:#fbbf24;font-size:0.75rem;">⚠️ Caché no guardada (localStorage lleno) — se releerá Firestore la próxima vez</span>';
-      }
-
-      resumen.innerHTML = `
-        Escaneadas: <strong style="color:#f1f5f9">${seccionesEscaneadas}</strong> secciones ·
-        <strong style="color:#f1f5f9">${totalPreguntas.toLocaleString()}</strong> preguntas totales ·
-        Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos ·
-        Dentro de cuestionario: <strong style="color:${_dupGruposInternoCache.length > 0 ? '#fb923c' : '#4ade80'}">${_dupGruposInternoCache.length}</strong> grupos
-        <br><span class="dup-modo-badge" style="color:#a78bfa;font-size:0.75rem;">🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos</span>
-        <span style="color:#475569;font-size:0.75rem;margin-left:8px;">
-          ✅ Caché actualizada — sin expiración automática —
-          <button onclick="window._dupForzarRescan()" style="background:none;border:none;color:#7dd3fc;font-size:0.75rem;cursor:pointer;padding:0;text-decoration:underline;">
-            🔄 Forzar nuevo escaneo
-          </button>
-        </span>`;
-
-      _aplicarFiltrosDuplicados();
+      _procesarResultadosDuplicados(mapa, mapaInterna, totalPreguntas, seccionesEscaneadas,
+        erroresSecciones, lista, resumen, null);
 
     } catch (e) {
       lista.innerHTML = `<div style="color:#f87171;padding:20px;">❌ Error al escanear: ${e.message}<br><small style="color:#64748b;">${e.stack || ''}</small></div>`;
