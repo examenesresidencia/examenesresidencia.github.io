@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V18
+// editor-admin.js  — V19
 // ────────────────────────────────────────────────────────────────
 // V18: se agrega _eaCanDelete() para que soloquimicayaruqui@gmail.com
 //      también pueda ver el botón 🗑 y eliminar preguntas repetidas,
@@ -1423,15 +1423,23 @@
         const scrollAntes = window.scrollY;
         cerrarDlg();
 
-        // Limpiar estado de quiz para esta sección (graded, explanationShown, etc.)
+        // Parche quirúrgico en localStorage del admin (su propia sesión):
+        // Reindexar en lugar de borrar preserva answeredOrder y unansweredOrder.
         const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
         let state = {};
         try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
         if (state[seccionId]) {
-          // Reasignar graded/shuffleMap/etc. quitando el índice eliminado
-          // (simplificado: limpiar solo el estado de esta sección)
-          delete state[seccionId];
+          _reindexSectionState(state[seccionId], qIndex);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        // Parche en Firestore: reindexar unansweredOrder de TODOS los usuarios.
+        // answeredOrder sobrevive por la ancla doble (docId+texto), pero
+        // unansweredOrder son índices crudos que quedan desfasados en -1.
+        try {
+          await _reindexAllUsersProgress(seccionId, qIndex);
+        } catch (_reindexErr) {
+          console.warn('[EA] Error reindexando progress de usuarios:', _reindexErr.message);
         }
 
         if (typeof window.generarCuestionario === 'function') {
@@ -1481,6 +1489,84 @@
 
     // Si no había marcador guardado, no inyectamos nada automáticamente.
     // El admin lo inserta manualmente con el botón 💉 de la toolbar.
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // _reindexSectionState
+  // Reindexar en memoria el estado de UNA sección tras eliminar la
+  // pregunta en removedIdx. Decrementamos en 1 todos los índices > removedIdx.
+  // ════════════════════════════════════════════════════════════════
+  function _reindexSectionState(sectionState, removedIdx) {
+    if (!sectionState) return;
+    const s = sectionState;
+    const shift = i => i > removedIdx ? i - 1 : i;
+    if (Array.isArray(s.answeredOrder)) {
+      s.answeredOrder = s.answeredOrder
+        .filter(e => (typeof e === 'number' ? e : e.idx) !== removedIdx)
+        .map(e => typeof e === 'number' ? shift(e) : { ...e, idx: shift(e.idx) });
+    }
+    if (Array.isArray(s.unansweredOrder)) {
+      s.unansweredOrder = s.unansweredOrder.filter(i => i !== removedIdx).map(shift);
+    }
+    ['graded', 'answers', 'shuffleMap'].forEach(campo => {
+      if (!s[campo]) return;
+      const nuevo = {};
+      Object.entries(s[campo]).forEach(([k, v]) => {
+        const ki = parseInt(k, 10);
+        if (isNaN(ki) || ki === removedIdx) return;
+        nuevo[ki > removedIdx ? ki - 1 : ki] = v;
+      });
+      s[campo] = nuevo;
+    });
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // _reindexAllUsersProgress
+  // Lee todos los progress/{uid} de Firestore y reindexea unansweredOrder
+  // (e indices legacy en answeredOrder) para la sección afectada.
+  // Solo escribe los documentos que tienen índices que corregir.
+  // ════════════════════════════════════════════════════════════════
+  async function _reindexAllUsersProgress(seccionId, removedIdx) {
+    const { getDocs, collection, writeBatch, doc } = window.__fb;
+    const _fbDb = window._fbDb;
+    if (!getDocs || !_fbDb) return;
+
+    const snap = await getDocs(collection(_fbDb, 'progress'));
+    if (snap.empty) return;
+
+    const BATCH_LIMIT = 500;
+    let batch = writeBatch(_fbDb);
+    let opsInBatch = 0;
+    let totalActualizados = 0;
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      if (!data?.state?.[seccionId]) continue;
+      const sOrig = data.state[seccionId];
+      const unanswered = sOrig.unansweredOrder || [];
+      const answered   = sOrig.answeredOrder   || [];
+      const necesita =
+        unanswered.some(i => i >= removedIdx) ||
+        answered.some(e => (typeof e === 'number' ? e : e.idx) >= removedIdx);
+      if (!necesita) continue;
+
+      const newState = { ...data.state };
+      newState[seccionId] = JSON.parse(JSON.stringify(sOrig));
+      _reindexSectionState(newState[seccionId], removedIdx);
+
+      const ref = doc(_fbDb, 'progress', docSnap.id);
+      batch.update(ref, { [`state.${seccionId}`]: newState[seccionId] });
+      opsInBatch++;
+      totalActualizados++;
+
+      if (opsInBatch >= BATCH_LIMIT) {
+        await batch.commit();
+        batch = writeBatch(_fbDb);
+        opsInBatch = 0;
+      }
+    }
+    if (opsInBatch > 0) await batch.commit();
+    console.log(`[EA] _reindexAllUsersProgress: ${totalActualizados} docs actualizados en "${seccionId}" (removedIdx=${removedIdx})`);
   }
 
   // ── Exponer globalmente ───────────────────────────────────────
