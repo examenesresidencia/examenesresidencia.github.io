@@ -1,4 +1,4 @@
-//V5 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
+//V6 <-- SIN EXTRAPOLACIÓN - RECONOCIMIENTO DE DUPLICADOS POR SECCIÓN Y GLOBAL
 // ════════════════════════════════════════════════════════════════
 (function () {
   'use strict';
@@ -889,6 +889,13 @@
     const db = window._fbDb;
     if (!db) throw new Error('Base de datos no inicializada.');
 
+    // Limpiar TODO el caché local antes de descargar desde Firebase
+    // para garantizar que lo que quede refleje exactamente el estado actual de Firebase
+    for (const sec of TODAS_LAS_SECCIONES) {
+      try { localStorage.removeItem(CACHE_KEY_PREFIX + sec.id); } catch (_) {}
+    }
+    if (window.preguntasPorSeccion) window.preguntasPorSeccion = {};
+
     let totalDescargadas = 0;
     for (let i = 0; i < TODAS_LAS_SECCIONES.length; i++) {
       const sec = TODAS_LAS_SECCIONES[i];
@@ -897,6 +904,8 @@
         const itemsRef = collection(db, 'preguntas', sec.id, 'items');
         const q = query(itemsRef, orderBy('_idx'));
         const snap = await getDocs(q);
+        // Si la sección está vacía en Firebase, el caché ya fue limpiado arriba
+        // así que no hace falta guardar nada — simplemente continuamos
         if (snap.empty) continue;
         const preguntas = snap.docs.map(d => {
           const { _idx, ...p } = d.data();
@@ -911,6 +920,7 @@
         totalDescargadas += preguntas.length;
       } catch (e) {
         console.warn('[SP] Error descargando', sec.id, e.message);
+        if (onProgress) onProgress(i + 1, TODAS_LAS_SECCIONES.length, sec.id + ' ⚠️');
       }
     }
     return totalDescargadas;
@@ -1306,7 +1316,8 @@
       btn.textContent = '⏳ Descargando desde Firebase…';
       const logWrap = document.getElementById('sp-log-wrap');
       logWrap.style.display = 'block';
-      _log('info', 'Iniciando descarga de todas las secciones desde Firebase…');
+      _log('warn', '🗑 Limpiando caché local anterior…');
+      _log('info', 'Iniciando descarga completa desde Firebase (todas las secciones)…');
       try {
         const total = await _descargarCacheFirestore((actual, maximo, secId) => {
           _log('dim', `→ Descargando ${secId} (${actual}/${maximo})…`);
