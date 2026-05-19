@@ -1,4 +1,4 @@
-//PRUEBA 21  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 22  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2194,6 +2194,34 @@
     // NOTA: ya NO borramos unansweredOrder aquí. Queda congelado para toda la duración
     // del intento. Solo se limpia en limpiarSeccion() al iniciar un intento nuevo.
 
+    // ── COMPACTACIÓN AUTOMÁTICA ──────────────────────────────────────────────────
+    // Si las respondidas no están en orden secuencial (por índice numérico),
+    // las reordenamos automáticamente. Esto ocurre cuando el admin borró/reclasificó
+    // preguntas y el answeredOrder quedó con índices en orden cronológico aleatorio,
+    // haciendo que las respondidas queden dispersas en páginas distintas en lugar de
+    // agruparse al inicio. El orden por índice garantiza que las primeras N páginas
+    // estén densamente llenas de respondidas antes de mostrar las pendientes.
+    {
+      const _idsActuales = answered;
+      const _idsOrdenados = [..._idsActuales].sort((a, b) => a - b);
+      if (JSON.stringify(_idsActuales) !== JSON.stringify(_idsOrdenados)) {
+        // Reconstruir answeredOrder respetando las anclas { idx, docId, texto }
+        const _mapEntry = new Map();
+        s.answeredOrder.forEach(e => {
+          const idx = typeof e === 'number' ? e : e.idx;
+          _mapEntry.set(idx, e);
+        });
+        s.answeredOrder = _idsOrdenados.map(idx => _mapEntry.get(idx) || idx);
+        if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+        console.log('[COMPACTACIÓN AUTO] answeredOrder reordenado por índice:',
+          _idsOrdenados.length, 'respondidas en', seccionId);
+        // Retornar con el nuevo orden ya compactado
+        _debugLog('getDisplayOrder (compactado): ' + seccionId + ' → answered=' + _idsOrdenados.length + ' unanswered=' + shuffledUnanswered.length);
+        return [..._idsOrdenados, ...shuffledUnanswered];
+      }
+    }
+    // ── FIN COMPACTACIÓN AUTOMÁTICA ──────────────────────────────────────────────
+
     // Concatenar: respondidas primero (fijas), luego sin responder
     _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
     return [...answered, ...shuffledUnanswered];
@@ -2614,16 +2642,63 @@
     saveJSON(STORAGE_KEY, state);
     console.log('💾 Estado guardado');
 
-    // ── Notificar si se respondió fuera de la secuencia activa (paginador) ──────
+    // ── Migrar respuesta fuera de secuencia a su posición secuencial ─────────────
+    // Si el usuario responde una pregunta de una página "lejana" (ej: pág 11 cuando
+    // solo completó hasta la pág 2), movemos su entrada en answeredOrder para que
+    // quede al final del bloque secuencial y no dispersa. El próximo render mostrará
+    // esa pregunta en la posición secuencial correcta.
     if (!esSimulacro && !esExamenUnico(seccionId) && !esExamenUBA(seccionId) && !esCompilado(seccionId)) {
-      if (typeof window._detectarFueraDeSecuencia === 'function') {
-        try {
-          const _infoConsol = window._detectarFueraDeSecuencia(seccionId, qIndex);
-          if (_infoConsol && typeof window._notificarConsolidacion === 'function') {
-            window._notificarConsolidacion(_infoConsol);
+      try {
+        const _n = (window.preguntasPorSeccion?.[seccionId] || []).length;
+        if (_n > 50 && state[seccionId] && state[seccionId].answeredOrder) {
+          const _s2        = state[seccionId];
+          const _graded2   = _s2.graded || {};
+          const _PAGE_SIZE = 50;
+          // displayOrder recién calculado (ya incluye qIndex en answered)
+          const _displayOrd = getDisplayOrder(seccionId, _n);
+          const _totalPages = Math.ceil(_n / _PAGE_SIZE);
+
+          // Calcular última página completa de forma secuencial (desde pág 0)
+          let _ultimaSeq = -1;
+          for (let _p = 0; _p < _totalPages; _p++) {
+            const _desde = _p * _PAGE_SIZE;
+            const _hasta = Math.min(_desde + _PAGE_SIZE, _n);
+            const _todos = _displayOrd.slice(_desde, _hasta).every(i => _graded2[i]);
+            if (_todos) _ultimaSeq = _p; else break;
           }
-        } catch (_e) { /* no crítico */ }
-      }
+          const _paginaSeq     = _ultimaSeq + 1;            // próxima página a completar
+          const _posEnDisplay  = _displayOrd.indexOf(qIndex);
+          const _paginaDeEsta  = Math.floor(_posEnDisplay / _PAGE_SIZE);
+
+          if (_paginaDeEsta > _paginaSeq && _posEnDisplay !== -1) {
+            // La pregunta quedó fuera de secuencia: moverla al final del bloque secuencial.
+            // Eliminamos su entrada de donde esté y la reinsertamos justo después de la
+            // última respondida secuencialmente (= al inicio del bloque no-secuencial).
+            const _posSecAbsoluta = _paginaSeq * _PAGE_SIZE; // primera pos de la página secuencial
+            // Contar cuántas respondidas hay antes de esa posición en el displayOrder actual
+            const _respondAntesDeSeq = _displayOrd.slice(0, _posSecAbsoluta).filter(i => _graded2[i]).length;
+
+            // Reordenar answeredOrder: poner qIndex en la posición _respondAntesDeSeq
+            const _aO = _s2.answeredOrder;
+            const _entryIdx = _aO.findIndex(e => (typeof e === 'number' ? e : e.idx) === qIndex);
+            if (_entryIdx !== -1) {
+              const [_entry] = _aO.splice(_entryIdx, 1);
+              // Insertar en la posición secuencial correcta
+              const _insertPos = Math.min(_respondAntesDeSeq, _aO.length);
+              _aO.splice(_insertPos, 0, _entry);
+              if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+              console.log('[MIGRACIÓN] Pregunta', qIndex, 'movida a posición secuencial', _insertPos,
+                '(pág.', _paginaSeq + 1, ')');
+            }
+
+            // Toast informativo
+            const _numEnBloque = _respondAntesDeSeq + 1; // 1-based
+            const _msg = `📌 Pregunta respondida → reubicada como nº ${_numEnBloque} (pág. ${_paginaSeq + 1})`;
+            if (typeof window.fbToast === 'function') window.fbToast(_msg, 'info');
+            else if (typeof fbToast === 'function') fbToast(_msg, 'info');
+          }
+        }
+      } catch (_e) { console.warn('[MIGRACIÓN] Error no crítico:', _e.message); }
     }
     
     // ── Mover físicamente el div de la pregunta al área de respondidas ──────────
@@ -6923,6 +6998,19 @@
       document.body.appendChild(bar);
     }
     const isAdmin = _currentUserData.role === 'admin';
+    // FIX: el botón "🔧 Reordenar" se inyecta directamente en el HTML de la barra
+    // para que sobreviva cualquier re-renderizado de la barra (antes se inyectaba
+    // vía evento y desaparecía al recrear la barra con innerHTML).
+    const _esCoadminConsolid = (_currentUserData.email || '').toLowerCase() === EMAIL_COADMIN_CONSOLIDACION;
+    const _btnReordenarHTML = _esCoadminConsolid
+      ? `<button id="btn-consolidar-progreso"
+           title="Reordenar las preguntas respondidas para que queden todas juntas al inicio"
+           style="color:#fbbf24;cursor:pointer;font-size:0.8rem;background:none;
+                  border:1px solid rgba(251,191,36,0.4);padding:4px 10px;
+                  border-radius:6px;font-weight:600;transition:all 0.15s;">
+           🔧 Reordenar
+         </button>`
+      : '';
     bar.innerHTML = `
       <span class="ub-info">
         ${isAdmin ? '👑 ' : ''}
@@ -6931,6 +7019,7 @@
       </span>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="ub-ver-progreso" id="fb-bar-ver-progreso">📊 Ver mi progreso</button>
+        ${_btnReordenarHTML}
         <button class="ub-logout" id="fb-bar-logout">Cerrar sesión</button>
       </div>`;
     bar.classList.add('visible');
@@ -6939,6 +7028,13 @@
       const btn = document.getElementById('btn-ver-progreso');
       if (btn) btn.click();
     };
+    // Reconectar onclick del botón de reordenar (si existe)
+    const _btnConsol = document.getElementById('btn-consolidar-progreso');
+    if (_btnConsol) {
+      _btnConsol.onclick = _ejecutarConsolidacion;
+      _btnConsol.onmouseenter = () => { _btnConsol.style.background = 'rgba(251,191,36,0.12)'; };
+      _btnConsol.onmouseleave = () => { _btnConsol.style.background = 'none'; };
+    }
   }
 
   // ── Botón ADMIN en menú ───────────────────────────────────────
@@ -7960,11 +8056,36 @@ function fbSaveProgressToCloud() {
         state[seccionId].explanationShown = {};
       }
 
-      // Preservar el orden visual de las sin responder que capturamos antes
+      // Preservar el orden de las sin responder tras la edición del admin.
+      // FIX: el paginador solo renderiza la página activa, por lo que _unansweredOrdenDOM
+      // contiene SOLO las pendientes visibles en pantalla. Reemplazar directamente
+      // unansweredOrder con ese array borraría el orden de las pendientes de las otras
+      // páginas, forzando una re-aleatorización en el próximo getDisplayOrder.
+      // Solución: FUSIONAR — las pendientes del DOM (página visible) mantienen su orden
+      // relativo, y las pendientes de las demás páginas (ya en unansweredOrder) se
+      // insertan al final en su orden previo, excluyendo las que ya fueron respondidas.
       if (state[seccionId]) {
-        state[seccionId].unansweredOrder = _unansweredOrdenDOM.length > 0
-          ? _unansweredOrdenDOM
-          : [];
+        const _s      = state[seccionId];
+        const _graded = _s.graded || {};
+
+        if (_unansweredOrdenDOM.length > 0) {
+          // Índices visibles en el DOM que siguen sin responder
+          const _domSet = new Set(_unansweredOrdenDOM);
+
+          // Del unansweredOrder anterior conservar solo los que NO están en el DOM
+          // (son las páginas no visibles) y que además siguen sin responder
+          const _restoPaginas = (_s.unansweredOrder || []).filter(
+            i => !_domSet.has(i) && !_graded[i]
+          );
+
+          // Resultado: primero las del DOM (orden visual preservado), luego el resto
+          _s.unansweredOrder = [..._unansweredOrdenDOM, ..._restoPaginas];
+        } else {
+          // No hay pendientes en el DOM (página completamente respondida o sección no visible).
+          // Limpiar solo los índices ya respondidos del unansweredOrder existente.
+          _s.unansweredOrder = (_s.unansweredOrder || []).filter(i => !_graded[i]);
+        }
+
         saveJSON(STORAGE_KEY, state);
       }
 
@@ -9303,9 +9424,11 @@ function fbSaveProgressToCloud() {
 
     fbToast('🔄 Reordenando progreso…', 'info');
 
-    // Compactar answeredOrder de cada sección: ordenar por índice numérico
-    // Esto garantiza que las respondidas queden en orden secuencial
-    // y el paginador las agrupe todas en las primeras páginas.
+    // Compactar answeredOrder de cada sección: ordenar por índice numérico.
+    // Esto garantiza que las respondidas queden en orden secuencial y el paginador
+    // las agrupe todas en las primeras páginas (sin huecos ni dispersión).
+    // También se limpia unansweredOrder para que se regenere desde cero en el
+    // próximo render (sin índices fantasma de preguntas ya respondidas).
     let cambios = 0;
     const seccionesConProgreso = Object.keys(state).filter(sid => {
       const s = state[sid];
@@ -9314,18 +9437,31 @@ function fbSaveProgressToCloud() {
 
     seccionesConProgreso.forEach(sid => {
       const s = state[sid];
-      // Verificar si hay desorden (respuestas dispersas en displayOrder)
-      // Comparar el orden actual vs el orden secuencial por índice
-      const ordenActual = s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx);
-      const ordenOrdenado = [...ordenActual].sort((a, b) => a - b);
-      if (JSON.stringify(ordenActual) !== JSON.stringify(ordenOrdenado)) {
-        // Reordenar answeredOrder por índice (secuencial)
+      const ordenActual  = s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx);
+      const ordenOrd     = [...ordenActual].sort((a, b) => a - b);
+      const estaDesordenado = JSON.stringify(ordenActual) !== JSON.stringify(ordenOrd);
+
+      if (estaDesordenado) {
+        // Reordenar preservando anclas { idx, docId, texto }
         s.answeredOrder.sort((a, b) => {
           const ia = typeof a === 'number' ? a : a.idx;
           const ib = typeof b === 'number' ? b : b.idx;
           return ia - ib;
         });
         cambios++;
+      }
+
+      // Limpiar unansweredOrder siempre que haya respondidas, para que se reconstruya
+      // limpio en el próximo getDisplayOrder (sin referencias a preguntas ya respondidas).
+      if (s.answeredOrder.length > 0) {
+        const respondidosSet = new Set(s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx));
+        if (Array.isArray(s.unansweredOrder)) {
+          const unansweredLimpio = s.unansweredOrder.filter(i => !respondidosSet.has(i));
+          if (unansweredLimpio.length !== s.unansweredOrder.length) {
+            s.unansweredOrder = unansweredLimpio;
+            if (!estaDesordenado) cambios++; // contar como cambio también
+          }
+        }
       }
     });
 
@@ -9346,11 +9482,11 @@ function fbSaveProgressToCloud() {
           updatedAt: serverTimestamp()
         });
       }
-      fbToast(`✅ Progreso reordenado (${cambios} sección${cambios !== 1 ? 'es' : ''} compactadas)`, 'success');
+      fbToast(`✅ Progreso reordenado (${cambios} sección${cambios !== 1 ? 'es' : ''} corregidas)`, 'success');
 
-      // Si hay una sección activa, re-renderizarla
+      // Si hay una sección activa, re-renderizarla para que el usuario vea el resultado
       if (window.currentSection && typeof window.generarCuestionario === 'function') {
-        window.generarCuestionario(window.currentSection);
+        setTimeout(() => window.generarCuestionario(window.currentSection), 400);
       }
     } catch (e) {
       fbToast('⚠️ Error al guardar en la nube: ' + e.message, 'error');
@@ -9362,9 +9498,16 @@ function fbSaveProgressToCloud() {
   window._detectarFueraDeSecuencia     = _detectarFueraDeSecuencia;
   window._notificarConsolidacion       = _notificarConsolidacion;
 
-  // Inyectar el botón cuando el usuario ya tiene sesión activa
+  // NOTA: el botón "🔧 Reordenar" ya se inyecta directamente en fbShowUserBar()
+  // para que sobreviva cualquier re-renderizado de la barra. El listener de evento
+  // queda como respaldo de compatibilidad (no-op si el botón ya existe).
   document.addEventListener('fb:usuarioAprobadoActivo', () => {
-    setTimeout(_inyectarBotonConsolidacion, 500);
+    setTimeout(() => {
+      // Solo inyectar si por algún motivo fbShowUserBar no lo incluyó
+      if (!document.getElementById('btn-consolidar-progreso')) {
+        _inyectarBotonConsolidacion();
+      }
+    }, 600);
   });
 
   // ════════════════════════════════════════════════════════════════
