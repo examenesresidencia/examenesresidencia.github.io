@@ -9529,8 +9529,7 @@ function fbSaveProgressToCloud() {
     localStorage.setItem(SK, JSON.stringify(st));
     localStorage.setItem('quiz_progress_ts', String(Date.now() + 10000));
     console.log('[REPARACIÓN] ' + cambios + ' secciones limpiadas. Recargá la página (F5).');
-    alert('✅ Reparación aplicada en ' + cambios + ' secciones.
-Ahora recargá la página (F5) para ver el resultado.');
+    alert('✅ Reparación aplicada en ' + cambios + ' secciones.\nAhora recargá la página (F5) para ver el resultado.');
   };
 
   // NOTA: el botón "🔧 Reordenar" ya se inyecta directamente en fbShowUserBar()
