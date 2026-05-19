@@ -1,4 +1,8 @@
-//PRUEBA 21  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 22  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix v22: LIMPIEZA automática en getDisplayOrder — elimina de answeredOrder cualquier entrada
+//          sin graded=true (y duplicados). Resuelve el problema de preguntas respondidas dispersas
+//          en todas las páginas cuando answeredOrder quedó inflado/corrompido tras borrar o
+//          reclasificar preguntas. La limpieza corre ANTES de la reparación existente.
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -1997,6 +2001,35 @@
     if (!s.answeredOrder) {
       s.answeredOrder = [];
     }
+
+    // ── LIMPIEZA: eliminar de answeredOrder entradas sin graded=true ────────────
+    // Ocurre cuando answeredOrder quedó inflado por un bug previo (p.ej. reordenamiento
+    // numérico tras borrar/reclasificar preguntas). graded es la fuente de verdad:
+    // si una entrada no tiene graded=true, no debería estar en answeredOrder.
+    // Esta limpieza se ejecuta ANTES de la reparación para que el recuento sea correcto.
+    {
+      const _gradedTrue = new Set(
+        Object.keys(s.graded || {})
+          .map(k => parseInt(k, 10))
+          .filter(k => !isNaN(k) && s.graded[k] === true)
+      );
+      const _antesLimpieza = s.answeredOrder.length;
+      // Además de filtrar por graded=true, eliminar duplicados (mismo idx dos veces)
+      const _idxVistos = new Set();
+      s.answeredOrder = s.answeredOrder.filter(e => {
+        const idx = typeof e === 'number' ? e : e.idx;
+        if (!_gradedTrue.has(idx) || _idxVistos.has(idx)) return false;
+        _idxVistos.add(idx);
+        return true;
+      });
+      if (s.answeredOrder.length !== _antesLimpieza) {
+        console.log('[LIMPIEZA] answeredOrder depurado: '
+          + _antesLimpieza + ' → ' + s.answeredOrder.length
+          + ' (solo entradas con graded=true, sin duplicados)');
+        if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+      }
+    }
+    // ── FIN LIMPIEZA ────────────────────────────────────────────────────────────
 
     // ── REPARACIÓN AUTOMÁTICA: reconstruir answeredOrder desde graded ──────────
     // Ocurre cuando el progreso se restaura desde Firestore pero answeredOrder
@@ -7390,7 +7423,12 @@ let _fbProgressUnsubscribe = null;
 // Cuenta el total de preguntas respondidas en un objeto state
 function _contarRespuestas(s) {
   if (!s || typeof s !== 'object') return 0;
-  return Object.values(s).reduce((n, sec) => n + Object.keys(sec?.graded || {}).length, 0);
+  // Fix v22: contar solo graded===true — evita que answeredOrder corrupto (con entradas sin graded=true)
+  // infle el conteo de la nube y haga que siempre gane sobre el estado reparado local.
+  return Object.values(s).reduce((n, sec) => {
+    const g = sec?.graded || {};
+    return n + Object.keys(g).filter(k => g[k] === true).length;
+  }, 0);
 }
 
 async function fbSyncProgressFromCloud() {
@@ -7466,8 +7504,9 @@ async function fbSyncProgressFromCloud() {
       console.log('[FB-SYNC] Nube más completa (', cloudAnswers, 'vs', localAnswers, ') → usando nube');
     } else {
       // Misma cantidad (o local tiene más) → el timestamp desempata
-      usarNube = cloudTs >= localTs;
-      console.log('[FB-SYNC] Misma cantidad de respuestas → timestamp decide → usarNube=', usarNube);
+      // Fix v22: si localTs > cloudTs el local gana (estado reparado manualmente tiene ts futuro)
+      usarNube = cloudTs > localTs;
+      console.log('[FB-SYNC] Misma cantidad de respuestas → timestamp decide → cloudTs=%d localTs=%d usarNube=%s', cloudTs, localTs, usarNube);
     }
 
     if (usarNube) {
