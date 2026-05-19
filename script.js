@@ -1,8 +1,10 @@
 //PRUEBA 22  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix v22: LIMPIEZA automática en getDisplayOrder — elimina de answeredOrder cualquier entrada
-//          sin graded=true (y duplicados). Resuelve el problema de preguntas respondidas dispersas
-//          en todas las páginas cuando answeredOrder quedó inflado/corrompido tras borrar o
-//          reclasificar preguntas. La limpieza corre ANTES de la reparación existente.
+// Fix v22: LIMPIEZA automática en getDisplayOrder — 4 correcciones en un solo bloque:
+//   1. Elimina de answeredOrder entradas sin graded=true (corrupción por reordenamiento)
+//   2. Elimina duplicados en answeredOrder (mismo idx dos veces)
+//   3. Corrige _contarRespuestas: cuenta solo graded===true (evita que Firestore gane merge)
+//   4. Elimina índices fuera de rango (preguntas "fantasma" borradas que dejaron huérfanos)
+//      También limpia graded/answers/shuffleMap de esos índices fantasma.
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2007,6 +2009,8 @@
     // numérico tras borrar/reclasificar preguntas). graded es la fuente de verdad:
     // si una entrada no tiene graded=true, no debería estar en answeredOrder.
     // Esta limpieza se ejecuta ANTES de la reparación para que el recuento sea correcto.
+    // Fix 4: también elimina entradas cuyo índice supera el total actual de preguntas
+    // (preguntas "fantasma" que fueron borradas y dejaron un índice huérfano).
     {
       const _gradedTrue = new Set(
         Object.keys(s.graded || {})
@@ -2014,18 +2018,26 @@
           .filter(k => !isNaN(k) && s.graded[k] === true)
       );
       const _antesLimpieza = s.answeredOrder.length;
-      // Además de filtrar por graded=true, eliminar duplicados (mismo idx dos veces)
+      // Filtrar por graded=true, sin duplicados, y dentro del rango válido de preguntas
       const _idxVistos = new Set();
       s.answeredOrder = s.answeredOrder.filter(e => {
         const idx = typeof e === 'number' ? e : e.idx;
         if (!_gradedTrue.has(idx) || _idxVistos.has(idx)) return false;
+        if (idx >= preguntasLen) return false; // Fix 4: índice fuera de rango (pregunta borrada)
         _idxVistos.add(idx);
         return true;
+      });
+      // Fix 4: también limpiar graded, answers y shuffleMap de índices fuera de rango
+      ['graded', 'answers', 'shuffleMap'].forEach(campo => {
+        if (!s[campo]) return;
+        Object.keys(s[campo]).forEach(k => {
+          if (parseInt(k, 10) >= preguntasLen) delete s[campo][k];
+        });
       });
       if (s.answeredOrder.length !== _antesLimpieza) {
         console.log('[LIMPIEZA] answeredOrder depurado: '
           + _antesLimpieza + ' → ' + s.answeredOrder.length
-          + ' (solo entradas con graded=true, sin duplicados)');
+          + ' (graded=true, sin duplicados, sin índices fuera de rango)');
         if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
       }
     }
@@ -2765,6 +2777,14 @@
       actualizarSeparador(seccionId);
     }
     // Nota: para especialidades el separador ya fue actualizado dentro del bloque de movimiento.
+
+    // ── Actualizar contador de stats y pills en tiempo real ─────────────────────
+    // El paginador renderiza stats y pills solo al llamar renderPagina(). Aquí
+    // actualizamos ambos widgets directamente en el DOM sin re-renderizar la página,
+    // para que el usuario vea el cambio inmediatamente al responder cada pregunta.
+    if (typeof window._pag2UpdateStats === 'function') {
+      window._pag2UpdateStats(seccionId);
+    }
 
     // ===== Verificar si se respondió la ÚLTIMA pregunta y mostrar puntuación automáticamente =====
     const todasRespondidas = preguntas.every((_, idx) => 
