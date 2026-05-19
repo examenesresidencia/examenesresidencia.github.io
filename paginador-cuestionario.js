@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V7
+// paginador-cuestionario.js  — V8
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -121,14 +121,40 @@
         return !set.has(idx);
       });
     }
-    if (Array.isArray(s.unansweredOrder))
+    // FIX: al reiniciar, congelar el orden actual de las preguntas de esta página
+    // (agregar los índices de vuelta a unansweredOrder en el orden que ya tenían,
+    //  para que no se re-aleatoricen hasta que se completen las 50 preguntas).
+    if (Array.isArray(s.unansweredOrder)) {
+      // Quitar del unansweredOrder los índices que vamos a reinsertar
       s.unansweredOrder = s.unansweredOrder.filter(i => !set.has(i));
+    } else {
+      s.unansweredOrder = [];
+    }
+    // Insertar los índices de la página en el mismo orden que los venía mostrando el paginador
+    // (los recibimos ya ordenados en el array `indices` que pasó el paginador)
+    s.unansweredOrder = [...indices, ...s.unansweredOrder];
+    // Marcar que este unansweredOrder está congelado para esta página específica
+    // (el flag shuffleFrozen evita que getDisplayOrder vuelva a aleatorizar)
+    s.shuffleFrozen = true;
+
     try { localStorage.setItem(SK, JSON.stringify(state)); } catch (_) {}
-    if (typeof window.fbToast === 'function') window.fbToast('↺ Página reiniciada', 'success');
+    if (typeof window.fbToast === 'function') window.fbToast('↺ Página reiniciada — el orden de preguntas se mantuvo', 'success');
   }
 
   // ── Modal de reinicio ─────────────────────────────────────────
   function _modalReinicio(seccionId, pag, indices, onConfirm) {
+    // FIX: solo permitir reiniciar si la página fue completamente respondida
+    const s = _stats(seccionId, indices);
+    if (s.pend > 0) {
+      if (typeof window.fbToast === 'function') {
+        window.fbToast(
+          `⚠️ Debés completar las ${s.pend} preguntas restantes antes de reiniciar esta página`,
+          'error'
+        );
+      }
+      return; // no abrir el modal
+    }
+
     if (typeof window.fbInjectAuthStyles === 'function') window.fbInjectAuthStyles();
     document.getElementById('pag2-modal-overlay')?.remove();
     const ov = document.createElement('div');
