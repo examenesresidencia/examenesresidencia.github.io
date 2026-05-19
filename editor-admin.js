@@ -1,9 +1,14 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V19
+// editor-admin.js  — V20
 // ────────────────────────────────────────────────────────────────
 // V18: se agrega _eaCanDelete() para que soloquimicayaruqui@gmail.com
 //      también pueda ver el botón 🗑 y eliminar preguntas repetidas,
 //      igual que admin. El botón ✏️ Editar sigue siendo solo admin.
+// V20: se agrega gestión dinámica de opciones en el modal de edición.
+//      Admin puede agregar opciones (botón ＋, máx. 6) y eliminar
+//      opciones individuales (botón ✕, mín. 2). Los cambios se
+//      guardan en Firestore y se propagan al caché local y a los
+//      usuarios igual que cualquier otra edición.
 
 
 (function () {
@@ -577,14 +582,128 @@
     // Bloquear scroll de fondo
     bloquearScrollFondo();
 
-    const opcionesHTML = preg.opciones.map((op, i) => `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
-        <input type="radio" name="edit-correcta" value="${i}"
-          ${preg.correcta.includes(i) ? 'checked' : ''}
-          style="accent-color:#0891b2;width:16px;height:16px;flex-shrink:0;">
-        <textarea class="fb-input edit-opcion" data-idx="${i}"
-          rows="1" style="flex:1;resize:vertical;font-size:0.85rem;padding:6px 10px;"></textarea>
-      </div>`).join('');
+    // ── Renderizador dinámico de opciones ────────────────────────
+    // Se llama cada vez que se agrega o elimina una opción.
+    // Mantiene el radio marcado en el índice correcto tras reordenar.
+    function renderizarOpciones(opciones, correctaIdx) {
+      const cont = document.getElementById('edit-opciones-cont');
+      if (!cont) return;
+      cont.innerHTML = '';
+      opciones.forEach((op, i) => {
+        const fila = document.createElement('div');
+        fila.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;';
+        fila.dataset.opIdx = i;
+
+        // Radio
+        const radio = document.createElement('input');
+        radio.type  = 'radio';
+        radio.name  = 'edit-correcta';
+        radio.value = i;
+        radio.checked = (i === correctaIdx);
+        radio.style.cssText = 'accent-color:#0891b2;width:16px;height:16px;flex-shrink:0;margin-top:9px;';
+
+        // Textarea
+        const ta = document.createElement('textarea');
+        ta.className = 'fb-input edit-opcion';
+        ta.dataset.idx = i;
+        ta.rows = 1;
+        ta.style.cssText = 'flex:1;resize:vertical;font-size:0.85rem;padding:6px 10px;';
+        ta.value = op;
+
+        // Botón eliminar opción (solo si hay más de 2)
+        const btnDel = document.createElement('button');
+        btnDel.type  = 'button';
+        btnDel.title = 'Eliminar esta opción';
+        btnDel.textContent = '✕';
+        btnDel.style.cssText = [
+          'flex-shrink:0','margin-top:5px',
+          'width:26px','height:26px',
+          'border-radius:6px',
+          'border:1.5px solid rgba(239,68,68,0.35)',
+          'background:rgba(239,68,68,0.07)',
+          'color:#f87171','font-size:0.8rem',
+          'cursor:pointer','transition:background 0.15s',
+          'display:flex','align-items:center','justify-content:center'
+        ].join(';');
+        btnDel.onmouseover = () => { btnDel.style.background = 'rgba(239,68,68,0.22)'; btnDel.style.borderColor = 'rgba(239,68,68,0.65)'; };
+        btnDel.onmouseout  = () => { btnDel.style.background = 'rgba(239,68,68,0.07)'; btnDel.style.borderColor = 'rgba(239,68,68,0.35)'; };
+        btnDel.addEventListener('click', () => {
+          if (_opcionesActuales.length <= 2) {
+            _eaToast('⚠️ La pregunta debe tener al menos 2 opciones.', 'error');
+            return;
+          }
+          // Guardar textos actuales antes de eliminar
+          _sincronizarOpciones();
+          const correctaActual = _getCorrectaActual();
+          _opcionesActuales.splice(i, 1);
+          // Ajustar índice correcta si es necesario
+          let nuevaCorrecta = correctaActual;
+          if (correctaActual === i)         nuevaCorrecta = 0;
+          else if (correctaActual > i)      nuevaCorrecta = correctaActual - 1;
+          renderizarOpciones(_opcionesActuales, nuevaCorrecta);
+        });
+
+        // Solo mostrar botón eliminar si hay más de 2 opciones
+        fila.appendChild(radio);
+        fila.appendChild(ta);
+        if (opciones.length > 2) fila.appendChild(btnDel);
+        cont.appendChild(fila);
+      });
+
+      // Botón "Agregar opción" al final
+      const btnAgregar = document.createElement('button');
+      btnAgregar.type  = 'button';
+      btnAgregar.textContent = '＋ Agregar opción';
+      btnAgregar.style.cssText = [
+        'margin-top:4px','padding:5px 14px',
+        'border-radius:7px',
+        'border:1.5px dashed rgba(56,189,248,0.4)',
+        'background:rgba(56,189,248,0.06)',
+        'color:#38bdf8','font-size:0.82rem',
+        'font-weight:600','cursor:pointer',
+        'transition:background 0.15s,border-color 0.15s',
+        'width:100%'
+      ].join(';');
+      btnAgregar.onmouseover = () => { btnAgregar.style.background = 'rgba(56,189,248,0.14)'; btnAgregar.style.borderColor = 'rgba(56,189,248,0.7)'; };
+      btnAgregar.onmouseout  = () => { btnAgregar.style.background = 'rgba(56,189,248,0.06)'; btnAgregar.style.borderColor = 'rgba(56,189,248,0.4)'; };
+      btnAgregar.addEventListener('click', () => {
+        if (_opcionesActuales.length >= 6) {
+          _eaToast('⚠️ Máximo 6 opciones por pregunta.', 'error');
+          return;
+        }
+        _sincronizarOpciones();
+        const correctaActual = _getCorrectaActual();
+        _opcionesActuales.push('');
+        renderizarOpciones(_opcionesActuales, correctaActual);
+        // Foco en la nueva textarea
+        const nuevaTa = cont.querySelectorAll('.edit-opcion');
+        if (nuevaTa.length) nuevaTa[nuevaTa.length - 1].focus();
+      });
+      cont.appendChild(btnAgregar);
+    }
+
+    // Estado mutable de opciones (se actualiza al agregar/eliminar)
+    let _opcionesActuales = preg.opciones ? preg.opciones.slice() : ['', ''];
+
+    // Leer los valores actuales del DOM hacia _opcionesActuales
+    function _sincronizarOpciones() {
+      const cont = document.getElementById('edit-opciones-cont');
+      if (!cont) return;
+      cont.querySelectorAll('.edit-opcion').forEach((ta, i) => {
+        _opcionesActuales[i] = ta.value;
+      });
+    }
+
+    // Obtener el índice de la opción correcta seleccionada en el DOM
+    function _getCorrectaActual() {
+      const cont = document.getElementById('edit-opciones-cont');
+      if (!cont) return 0;
+      const radio = cont.querySelector('input[name="edit-correcta"]:checked');
+      return radio ? parseInt(radio.value, 10) : 0;
+    }
+
+    const correctaInicial = Array.isArray(preg.correcta) && preg.correcta.length > 0
+      ? preg.correcta[0] : 0;
 
     const overlay = document.createElement('div');
     overlay.id = 'fb-modal-edit-q';
@@ -617,7 +736,7 @@
         <!-- Opciones -->
         <div class="fb-field">
           <label class="fb-label">Opciones — marcá la correcta con el radio ●</label>
-          ${opcionesHTML}
+          <div id="edit-opciones-cont"></div>
         </div>
 
         <!-- Explicación -->
@@ -693,9 +812,8 @@
 
     // ── Poblar campos ─────────────────────────────────────────────
     overlay.querySelector('#edit-q-enunciado').value = preg.pregunta || '';
-    overlay.querySelectorAll('.edit-opcion').forEach((ta, i) => {
-      ta.value = preg.opciones[i] || '';
-    });
+    // Renderizar opciones dinámicas (soporta agregar/eliminar)
+    renderizarOpciones(_opcionesActuales, correctaInicial);
     cargarEnEditor(preg.explicacion || '');
 
     // ── Cerrar modal ──────────────────────────────────────────────
@@ -1105,11 +1223,14 @@
     document.getElementById('edit-q-save').onclick = async () => {
       const nuevaPreg      = document.getElementById('edit-q-enunciado').value.trim();
       const nuevaExpl      = serializarEditor();
-      const nuevasOpciones = Array.from(overlay.querySelectorAll('.edit-opcion'))
-                               .map(ta => ta.value.trim());
-      const correctaRadio  = overlay.querySelector('input[name="edit-correcta"]:checked');
+      // Sincronizar valores del DOM hacia _opcionesActuales antes de leer
+      _sincronizarOpciones();
+      const nuevasOpciones = _opcionesActuales.map(o => o.trim());
+      const correctaRadio  = document.getElementById('edit-opciones-cont')
+                               ?.querySelector('input[name="edit-correcta"]:checked');
 
       if (!nuevaPreg)     { fbShowEditErr('edit-q-err', 'El enunciado no puede estar vacío.'); return; }
+      if (nuevasOpciones.some(o => !o)) { fbShowEditErr('edit-q-err', 'Todas las opciones deben tener texto.'); return; }
       if (!correctaRadio) { fbShowEditErr('edit-q-err', 'Seleccioná la opción correcta.'); return; }
 
       const nuevaCorrecta    = [parseInt(correctaRadio.value, 10)];
