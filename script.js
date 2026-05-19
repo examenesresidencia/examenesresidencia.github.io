@@ -2203,16 +2203,27 @@
     // índices que ya están en answered, los eliminamos aquí como última línea de defensa.
     // Esto garantiza que displayOrder = [todas las respondidas][todas las sin responder]
     // sin ningún índice duplicado ni solapamiento, sin importar qué haya en Firestore.
+    // IMPORTANTE: cuando se detecta solapamiento, se guarda en localStorage Y se sube
+    // a Firestore de inmediato, para que cualquier otro dispositivo reciba el estado limpio.
     {
       const _answeredSet = new Set(answered);
       const _unansweredLimpio = shuffledUnanswered.filter(i => !_answeredSet.has(i));
       if (_unansweredLimpio.length !== shuffledUnanswered.length) {
-        // Había solapamiento: limpiar y persistir el unansweredOrder limpio
         shuffledUnanswered = _unansweredLimpio;
         s.unansweredOrder  = _unansweredLimpio.slice();
-        if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
         console.log('[DISPLAY-ORDER] Solapamiento detectado y corregido en', seccionId,
           '— answered:', answered.length, ', unanswered limpio:', _unansweredLimpio.length);
+        if (!window._fbSyncInProgress) {
+          saveJSON(STORAGE_KEY, state);
+          // Subir a Firestore con un pequeño delay para no bloquear el render
+          // Esto garantiza que otros dispositivos también reciban el estado limpio
+          setTimeout(() => {
+            if (typeof window._fbSaveProgressToCloud === 'function') {
+              window._fbSaveProgressToCloud();
+              console.log('[DISPLAY-ORDER] Estado limpio subido a Firestore desde', seccionId);
+            }
+          }, 2000);
+        }
       }
     }
     // ── FIN GARANTÍA ──────────────────────────────────────────────────────────────
