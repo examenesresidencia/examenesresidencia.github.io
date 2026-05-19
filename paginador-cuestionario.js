@@ -1,7 +1,10 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V9
+// paginador-cuestionario.js  — V8
 // ────────────────────────────────────────────────────────────────
-// Divide los cuestionarios de especialidad en páginas de 50 preguntas
+// V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
+//     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
+//     al separador "> Continuá desde aquí" de la nueva página. Si la página está completa
+//     o sin comenzar (sin separador), el scroll va al navbar top.
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
 //
 // ARQUITECTURA V2:
@@ -381,9 +384,8 @@
     for (let p = 0; p < totalPages; p++)
       pages.push(displayOrder.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE));
 
-    // Página inicial
-    let paginaInicial = _getPagina(seccionId);
-    if (paginaInicial >= totalPages) paginaInicial = _paginaLogica(seccionId, pages);
+    // Página inicial: SIEMPRE la primera con preguntas pendientes al entrar al cuestionario.
+    const paginaInicial = _paginaLogica(seccionId, pages);
 
     // ── Render de una página ─────────────────────────────────────
     function renderPagina(pag) {
@@ -547,10 +549,9 @@
       function irA(p) {
         if (p < 0 || p >= totalPages) return;
         renderPagina(p);
-        setTimeout(() => {
-          const nav = document.getElementById(`pag2-nav-${seccionId}`);
-          if (nav) nav.scrollIntoView({ behavior:'smooth', block:'start' });
-        }, 60);
+        // Scroll automático al separador "> Continuá desde aquí" de la nueva página.
+        // Si no hay separador (página completa o sin responder), scroll al navbar top.
+        setTimeout(() => _scrollAlSeparador(8), 80);
       }
 
       // ── Recalcular estados de pills DESPUÉS de restoreSelectionsAndGrades ──
