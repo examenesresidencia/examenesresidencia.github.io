@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V8
+// paginador-cuestionario.js  — V9
 // ────────────────────────────────────────────────────────────────
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
 //     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
@@ -582,6 +582,47 @@
       );
 
     } // fin renderPagina
+
+    // ── _pag2UpdateStats: actualiza stats y pills SIN re-renderizar la página ──
+    // Llamado desde script.js después de cada respuesta (window._pag2UpdateStats).
+    // Solo actualiza los widgets del DOM en la página activa.
+    window._pag2UpdateStats = function(sid) {
+      if (sid !== seccionId) return;
+
+      // Recalcular stats de la página actual
+      const indicesActuales = pages[_getPagina(seccionId)] || [];
+      const stAct = _stats(sid, indicesActuales);
+
+      // Actualizar badge de stats
+      const statsDiv = document.getElementById(`pag2-stats-${sid}`);
+      if (statsDiv) {
+        statsDiv.innerHTML =
+          (stAct.ok   > 0 ? `<span class="pag2-badge pag2-badge-ok">✓ ${stAct.ok} correctas</span>`    : '') +
+          (stAct.err  > 0 ? `<span class="pag2-badge pag2-badge-err">✗ ${stAct.err} incorrectas</span>` : '') +
+          (stAct.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${stAct.pend} restantes</span>`   : '') +
+          (stAct.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`        : '');
+      }
+
+      // Actualizar label del footer
+      const respLabel = document.querySelector(`#pag2-wrapper-${sid} .pag2-resp-label`);
+      if (respLabel) respLabel.textContent = `${stAct.ok + stAct.err}/${stAct.total} respondidas`;
+
+      // Recalcular estados de todas las páginas y repintar pills (top + bottom)
+      const estadosNuevos = pages.map(pg => _estadoPagina(sid, pg));
+      const pagActiva = _getPagina(sid);
+      const pillsNuevoHTML = _pillsHTML(totalPages, pagActiva, estadosNuevos);
+      document.querySelectorAll(`#pag2-wrapper-${sid} .pag2-nav-center`).forEach(c => {
+        c.innerHTML = pillsNuevoHTML;
+        c.querySelectorAll('.pag2-pill[data-pag]').forEach(pill =>
+          pill.addEventListener('click', () => {
+            const p = parseInt(pill.dataset.pag, 10);
+            if (p < 0 || p >= totalPages) return;
+            renderPagina(p);
+            setTimeout(() => _scrollAlSeparador(8), 80);
+          })
+        );
+      });
+    };
 
     renderPagina(paginaInicial);
 
