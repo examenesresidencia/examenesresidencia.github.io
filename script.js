@@ -1,4 +1,4 @@
-//PRUEBA 20  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 21  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2613,6 +2613,18 @@
     // Guardar el estado completo
     saveJSON(STORAGE_KEY, state);
     console.log('💾 Estado guardado');
+
+    // ── Notificar si se respondió fuera de la secuencia activa (paginador) ──────
+    if (!esSimulacro && !esExamenUnico(seccionId) && !esExamenUBA(seccionId) && !esCompilado(seccionId)) {
+      if (typeof window._detectarFueraDeSecuencia === 'function') {
+        try {
+          const _infoConsol = window._detectarFueraDeSecuencia(seccionId, qIndex);
+          if (_infoConsol && typeof window._notificarConsolidacion === 'function') {
+            window._notificarConsolidacion(_infoConsol);
+          }
+        } catch (_e) { /* no crítico */ }
+      }
+    }
     
     // ── Mover físicamente el div de la pregunta al área de respondidas ──────────
     // Solo en cuestionarios con orden dinámico (no simulacro, no exámenes fijos)
@@ -8093,33 +8105,79 @@ function fbSaveProgressToCloud() {
     const pregDiv = puntajeEl.closest('.pregunta');
     if (!pregDiv) return;
 
-    // 1. Enunciado
+    // 1. Enunciado — el h3 es el elemento que contiene el texto de la pregunta
+    //    (no existe .enunciado-texto en este sistema — se usa directamente h3)
     if (ed.pregunta !== undefined) {
-      const enunciadoEl = pregDiv.querySelector('.enunciado-texto, .pregunta-texto, p.enunciado');
-      if (enunciadoEl) enunciadoEl.textContent = ed.pregunta;
+      const h3El = pregDiv.querySelector('h3');
+      if (h3El) {
+        // Preservar el número de posición que está al inicio del h3 (ej: "42. ")
+        const textoCompleto = h3El.textContent || '';
+        const match = textoCompleto.match(/^(\d+\.\s*)/);
+        const prefijo = match ? match[1] : '';
+        h3El.textContent = prefijo + ed.pregunta;
+      }
     }
 
     // 2. Opciones — solo si la pregunta no fue respondida aún
+    //    Las labels tienen el texto directamente como nodo de texto (después del input)
     const sState = state[seccionId];
     const yaRespondida = sState?.graded?.[qIndex];
     if (!yaRespondida && ed.opciones !== undefined) {
       const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${qIndex}`));
-      inputs.forEach((inp, i) => {
+      inputs.forEach((inp, mixedIdx) => {
         const label = inp.closest('label') || inp.parentElement;
         if (!label) return;
-        const textoEl = label.querySelector('.opcion-texto') || label.querySelector('span:last-child');
-        if (textoEl && ed.opciones[i] !== undefined) textoEl.textContent = ed.opciones[i];
+        // El texto de la opción es un nodo de texto suelto dentro del label (después del input)
+        const nodoTexto = Array.from(label.childNodes)
+          .find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+        const originalIdx = parseInt(inp.getAttribute('data-original-index') ?? mixedIdx, 10);
+        if (nodoTexto && ed.opciones[originalIdx] !== undefined) {
+          nodoTexto.textContent = ' ' + ed.opciones[originalIdx];
+        }
       });
     }
 
     // 3. Explicación — solo si está abierta en este momento
+    //    FIX: actualizar solo el div interno de texto, no reemplazar el contenedor entero.
+    //    Así se preservan los estilos del contenedor (.explicacion-contenedor) que controlan
+    //    el ancho y box-sizing de las imágenes.
     if (ed.explicacion !== undefined) {
-      const explContainer = pregDiv.querySelector('.explicacion-contenedor');
+      const explContainer = document.getElementById(`explicacion-${seccionId}-${qIndex}`);
       if (explContainer && explContainer.style.display !== 'none') {
-        explContainer.innerHTML = ed.explicacion;
+        // Buscar el div de texto dentro del contenedor (segundo hijo, después del <strong>)
+        const textoDiv = explContainer.querySelector('div');
+        if (textoDiv) {
+          const htmlDetectado = /<(p|b|i|u|br|img|strong|em)[^>]*>/i.test(ed.explicacion);
+          if (htmlDetectado) {
+            textoDiv.innerHTML = ed.explicacion
+              .replace(/<p>\s*<\/p>/g, '')
+              .replace(/\n/g, '<br>')
+              .trim();
+          } else {
+            textoDiv.textContent = ed.explicacion;
+          }
+          // Aplicar estilos de imagen dentro del div de texto también
+          textoDiv.querySelectorAll('img').forEach(img => {
+            img.style.maxWidth  = '100%';
+            img.style.width     = 'auto';
+            img.style.height    = 'auto';
+            img.style.display   = 'block';
+            img.style.boxSizing = 'border-box';
+          });
+        }
         if (typeof window.fbInjectVacunasButtonIfAdmin === 'function') {
           window.fbInjectVacunasButtonIfAdmin(seccionId, explContainer);
         }
+      }
+      // Actualizar también el dataset (por si la pregunta tenía/no tenía explicación antes)
+      if (explContainer) {
+        explContainer.dataset.tieneContenido = (ed.explicacion && ed.explicacion.trim()) ? '1' : '0';
+      }
+      // Actualizar el botón de explicación si la pregunta no estaba abierta
+      const btnExpl = document.getElementById(`btn-explicacion-${seccionId}-${qIndex}`);
+      if (btnExpl && (!explContainer || explContainer.style.display === 'none')) {
+        const tieneContenido = ed.explicacion && ed.explicacion.trim();
+        btnExpl.textContent = tieneContenido ? 'Ver explicación' : '➕ Agregar explicación';
       }
     }
 
@@ -9106,8 +9164,212 @@ function fbSaveProgressToCloud() {
   window._inactReset         = _inactReset;
   window._inactStop          = _inactStop;
 
-  // ── Exports para módulos externos (editor-admin.js, buscador-duplicados.js) ──
-  window.fbToast            = fbToast;
+  // ════════════════════════════════════════════════════════════════
+  // MÓDULO: CONSOLIDACIÓN SECUENCIAL DE PROGRESO
+  // ════════════════════════════════════════════════════════════════
+  // Cuando el usuario "soloquimicayaruqui" tiene preguntas respondidas
+  // dispersas (consecuencia de un bug anterior al borrar/reclasificar),
+  // este módulo permite reordenar el progreso de forma que todas las
+  // respondidas queden compactadas al inicio.
+  //
+  // También muestra un toast informativo cuando el usuario responde
+  // una pregunta fuera de la secuencia activa (en una página no contigua).
+  // ════════════════════════════════════════════════════════════════
+
+  const EMAIL_COADMIN_CONSOLIDACION = 'soloquimicayaruqui@gmail.com';
+
+  /**
+   * Retorna la "posición secuencial" de un índice respondido:
+   * cuántas preguntas respondidas hay antes de él en el displayOrder de la sección.
+   * Útil para mostrar "tu pregunta pasó a ser la #N".
+   */
+  function _posicionSecuencialEnRespondidas(seccionId, qIndex) {
+    const s = state[seccionId];
+    if (!s || !s.answeredOrder) return -1;
+    const posicion = s.answeredOrder.findIndex(e =>
+      (typeof e === 'number' ? e : e.idx) === qIndex
+    );
+    return posicion; // 0-based, -1 si no está
+  }
+
+  /**
+   * Detecta si el usuario respondió en una página "fuera de secuencia":
+   * Si hay páginas intermedias sin completar entre la última página llena
+   * de respondidas y la página donde acaba de responder.
+   *
+   * Devuelve { fueraDeSecuencia, paginaSecuencial, numeroFinal } o null.
+   */
+  function _detectarFueraDeSecuencia(seccionId, qIndex) {
+    // Solo para cuestionarios paginados (especialidades)
+    const n = (window.preguntasPorSeccion?.[seccionId] || []).length;
+    if (n <= 50) return null;
+
+    const s = state[seccionId];
+    if (!s) return null;
+
+    const SK = window.STORAGE_KEY || 'quiz_state_v3';
+    let graded = {};
+    try { graded = (JSON.parse(localStorage.getItem(SK) || '{}')[seccionId] || {}).graded || {}; } catch (_) {}
+
+    // Calcular displayOrder actual
+    const displayOrder = getDisplayOrder(seccionId, n);
+    const totalRespondidas = Object.keys(graded).filter(k => graded[k]).length;
+
+    // Página donde está esta pregunta respondida en el displayOrder actual
+    const posEnDisplay = displayOrder.indexOf(qIndex);
+    if (posEnDisplay === -1) return null;
+
+    const PAGE_SIZE = 50;
+    const paginaDeLaPregunta = Math.floor(posEnDisplay / PAGE_SIZE);
+
+    // Última página completamente llena de respondidas
+    let ultimaPaginaLlena = -1;
+    const totalPages = Math.ceil(n / PAGE_SIZE);
+    for (let p = 0; p < totalPages; p++) {
+      const desde = p * PAGE_SIZE;
+      const hasta = Math.min(desde + PAGE_SIZE, n);
+      const indicesDePagina = displayOrder.slice(desde, hasta);
+      const todasRespondidas = indicesDePagina.every(i => graded[i]);
+      if (todasRespondidas) ultimaPaginaLlena = p;
+      else break;
+    }
+
+    // La página secuencial es la siguiente a la última completamente llena
+    const paginaSecuencial = ultimaPaginaLlena + 1;
+
+    // Si la pregunta está en la página secuencial o antes, no está fuera de secuencia
+    if (paginaDeLaPregunta <= paginaSecuencial) return null;
+
+    return {
+      fueraDeSecuencia: true,
+      paginaSecuencial: paginaSecuencial + 1,    // 1-based para el usuario
+      numeroPreguntaEnSecuencia: totalRespondidas // posición en el bloque de respondidas
+    };
+  }
+
+  /**
+   * Muestra un toast informativo cuando se detecta que se respondió
+   * fuera de la secuencia activa.
+   */
+  function _notificarConsolidacion(info) {
+    if (!info || !info.fueraDeSecuencia) return;
+    const msg = `📌 Pregunta respondida → reubicada en pág. ${info.paginaSecuencial} como #${info.numeroPreguntaEnSecuencia}`;
+    if (typeof window.fbToast === 'function') {
+      window.fbToast(msg, 'info');
+    } else if (typeof fbToast === 'function') {
+      fbToast(msg, 'info');
+    }
+  }
+
+  /**
+   * Inyecta en la barra de usuario un botón "🔧 Reordenar progreso"
+   * solo para el usuario coadmin con preguntas dispersas.
+   * Al presionarlo, compacta el answeredOrder de todas las secciones
+   * y actualiza Firestore + localStorage.
+   */
+  function _inyectarBotonConsolidacion() {
+    const user = window._currentUser;
+    if (!user || !user.email) return;
+    if (user.email.toLowerCase() !== EMAIL_COADMIN_CONSOLIDACION) return;
+    if (document.getElementById('btn-consolidar-progreso')) return;
+
+    const bar = document.getElementById('fb-user-bar');
+    if (!bar) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-consolidar-progreso';
+    btn.title = 'Reordenar las preguntas respondidas para que estén todas juntas al inicio';
+    btn.style.cssText = [
+      'color:#fbbf24', 'cursor:pointer', 'font-size:0.8rem',
+      'background:none', 'border:1px solid rgba(251,191,36,0.4)',
+      'padding:4px 10px', 'border-radius:6px', 'transition:all 0.15s',
+      'font-weight:600'
+    ].join(';');
+    btn.textContent = '🔧 Reordenar';
+    btn.onmouseenter = () => { btn.style.background = 'rgba(251,191,36,0.12)'; };
+    btn.onmouseleave = () => { btn.style.background = 'none'; };
+    btn.onclick = _ejecutarConsolidacion;
+
+    // Insertar antes del botón de logout
+    const logoutBtn = bar.querySelector('.ub-logout');
+    if (logoutBtn) bar.insertBefore(btn, logoutBtn);
+    else bar.appendChild(btn);
+  }
+
+  async function _ejecutarConsolidacion() {
+    const SK = window.STORAGE_KEY || 'quiz_state_v3';
+    const user = window._currentUser;
+    if (!user) { fbToast('⚠️ No hay sesión activa', 'error'); return; }
+
+    fbToast('🔄 Reordenando progreso…', 'info');
+
+    // Compactar answeredOrder de cada sección: ordenar por índice numérico
+    // Esto garantiza que las respondidas queden en orden secuencial
+    // y el paginador las agrupe todas en las primeras páginas.
+    let cambios = 0;
+    const seccionesConProgreso = Object.keys(state).filter(sid => {
+      const s = state[sid];
+      return s && s.answeredOrder && s.answeredOrder.length > 0;
+    });
+
+    seccionesConProgreso.forEach(sid => {
+      const s = state[sid];
+      // Verificar si hay desorden (respuestas dispersas en displayOrder)
+      // Comparar el orden actual vs el orden secuencial por índice
+      const ordenActual = s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx);
+      const ordenOrdenado = [...ordenActual].sort((a, b) => a - b);
+      if (JSON.stringify(ordenActual) !== JSON.stringify(ordenOrdenado)) {
+        // Reordenar answeredOrder por índice (secuencial)
+        s.answeredOrder.sort((a, b) => {
+          const ia = typeof a === 'number' ? a : a.idx;
+          const ib = typeof b === 'number' ? b : b.idx;
+          return ia - ib;
+        });
+        cambios++;
+      }
+    });
+
+    if (cambios === 0) {
+      fbToast('✅ El progreso ya estaba ordenado correctamente', 'success');
+      return;
+    }
+
+    // Guardar en localStorage
+    saveJSON(SK, state);
+
+    // Guardar en Firestore
+    try {
+      if (window.__fb && window._fbDb) {
+        const { doc, setDoc, serverTimestamp } = window.__fb;
+        await setDoc(doc(window._fbDb, 'progress', user.uid), {
+          state,
+          updatedAt: serverTimestamp()
+        });
+      }
+      fbToast(`✅ Progreso reordenado (${cambios} sección${cambios !== 1 ? 'es' : ''} compactadas)`, 'success');
+
+      // Si hay una sección activa, re-renderizarla
+      if (window.currentSection && typeof window.generarCuestionario === 'function') {
+        window.generarCuestionario(window.currentSection);
+      }
+    } catch (e) {
+      fbToast('⚠️ Error al guardar en la nube: ' + e.message, 'error');
+    }
+  }
+
+  // Exponer globalmente para llamarla desde otros módulos
+  window._inyectarBotonConsolidacion   = _inyectarBotonConsolidacion;
+  window._detectarFueraDeSecuencia     = _detectarFueraDeSecuencia;
+  window._notificarConsolidacion       = _notificarConsolidacion;
+
+  // Inyectar el botón cuando el usuario ya tiene sesión activa
+  document.addEventListener('fb:usuarioAprobadoActivo', () => {
+    setTimeout(_inyectarBotonConsolidacion, 500);
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // FIN MÓDULO CONSOLIDACIÓN SECUENCIAL
+  // ════════════════════════════════════════════════════════════════
   window.fbInjectAuthStyles = fbInjectAuthStyles;
   window.fbIsAdmin = function () {
     return !!(_currentUserData && _currentUserData.role === 'admin');
@@ -9284,6 +9546,8 @@ function fbSaveProgressToCloud() {
     explicacionDiv.style.borderRadius = '10px';
     explicacionDiv.style.boxSizing = 'border-box';
     explicacionDiv.style.width = '100%';
+    explicacionDiv.style.overflow = 'hidden';  // FIX: evita que imágenes se salgan del contenedor
+    explicacionDiv.style.maxWidth = '100%';    // FIX: garantía adicional de contención
     explicacionDiv.dataset.tieneContenido = _tieneExplicacion ? '1' : '0';
     var explicacionTitulo = document.createElement('strong');
     explicacionTitulo.textContent = 'Explicación:';
@@ -9291,10 +9555,21 @@ function fbSaveProgressToCloud() {
     explicacionTitulo.style.marginBottom = '8px';
     explicacionTitulo.style.color = '#0d7490';
     var explicacionTexto = document.createElement('div');
+    explicacionTexto.style.overflow = 'hidden';
+    explicacionTexto.style.boxSizing = 'border-box';
+    explicacionTexto.style.maxWidth = '100%';
     if (_tieneExplicacion) {
       var htmlDetectado = /<(p|b|i|u|br|img|strong|em)[^>]*>/i.test(preg.explicacion);
       if (htmlDetectado) {
         explicacionTexto.innerHTML = preg.explicacion.replace(/<p>\s*<\/p>/g,'').replace(/\n/g,'<br>').trim();
+        // FIX: limitar el ancho de todas las imágenes insertadas vía innerHTML
+        explicacionTexto.querySelectorAll('img').forEach(function(img) {
+          img.style.maxWidth  = '100%';
+          img.style.width     = 'auto';
+          img.style.height    = 'auto';
+          img.style.display   = 'block';
+          img.style.boxSizing = 'border-box';
+        });
       } else {
         explicacionTexto.textContent = preg.explicacion;
       }
