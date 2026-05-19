@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V8
+// paginador-cuestionario.js  — V9
 // ────────────────────────────────────────────────────────────────
 // Divide los cuestionarios de especialidad en páginas de 50 preguntas
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
@@ -586,20 +586,24 @@
 
     // Scroll automático a la primera sin responder — funciona en TODOS los casos
     // de entrada: navegación desde menú, F5, recarga directa por URL/hash.
-    // El paginador es completamente autónomo: no depende de _scrollOnNextRender
-    // de script.js (que solo se activa al pasar por showSection() desde el menú).
-    setTimeout(() => {
+    // Usamos un retry con delays crecientes porque _renderIndicesToCont es asíncrono
+    // (renderiza en lotes con setTimeout) y el separador puede no estar en el DOM aún.
+    function _scrollAlSeparador(intentos) {
       const sep = document.getElementById(`pag2-sep-${seccionId}`);
       if (sep) {
-        // Hay separador → hay preguntas respondidas antes: ir a la primera sin responder
         sep.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else {
-        // Sin separador: o todas respondidas, o ninguna respondida aún.
-        // En ambos casos, ir al navbar de la página (inicio del contenido).
-        const nav = document.getElementById(`pag2-nav-${seccionId}`);
-        if (nav) nav.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
       }
-    }, 150);
+      // Sin separador pero aún esperando el render completo: reintentar
+      if (intentos > 0) {
+        setTimeout(() => _scrollAlSeparador(intentos - 1), 200);
+        return;
+      }
+      // Sin separador definitivo: o todas respondidas, o ninguna respondida aún.
+      const nav = document.getElementById(`pag2-nav-${seccionId}`);
+      if (nav) nav.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setTimeout(() => _scrollAlSeparador(6), 120);  // hasta ~1.3s de espera total
 
     return true;
   }
