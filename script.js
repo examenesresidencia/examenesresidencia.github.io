@@ -1,4 +1,4 @@
-//PRUEBA 22  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 20  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
 //         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
 //         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
@@ -2194,33 +2194,13 @@
     // NOTA: ya NO borramos unansweredOrder aquí. Queda congelado para toda la duración
     // del intento. Solo se limpia en limpiarSeccion() al iniciar un intento nuevo.
 
-    // ── COMPACTACIÓN AUTOMÁTICA ──────────────────────────────────────────────────
-    // Si las respondidas no están en orden secuencial (por índice numérico),
-    // las reordenamos automáticamente. Esto ocurre cuando el admin borró/reclasificó
-    // preguntas y el answeredOrder quedó con índices en orden cronológico aleatorio,
-    // haciendo que las respondidas queden dispersas en páginas distintas en lugar de
-    // agruparse al inicio. El orden por índice garantiza que las primeras N páginas
-    // estén densamente llenas de respondidas antes de mostrar las pendientes.
-    {
-      const _idsActuales = answered;
-      const _idsOrdenados = [..._idsActuales].sort((a, b) => a - b);
-      if (JSON.stringify(_idsActuales) !== JSON.stringify(_idsOrdenados)) {
-        // Reconstruir answeredOrder respetando las anclas { idx, docId, texto }
-        const _mapEntry = new Map();
-        s.answeredOrder.forEach(e => {
-          const idx = typeof e === 'number' ? e : e.idx;
-          _mapEntry.set(idx, e);
-        });
-        s.answeredOrder = _idsOrdenados.map(idx => _mapEntry.get(idx) || idx);
-        if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
-        console.log('[COMPACTACIÓN AUTO] answeredOrder reordenado por índice:',
-          _idsOrdenados.length, 'respondidas en', seccionId);
-        // Retornar con el nuevo orden ya compactado
-        _debugLog('getDisplayOrder (compactado): ' + seccionId + ' → answered=' + _idsOrdenados.length + ' unanswered=' + shuffledUnanswered.length);
-        return [..._idsOrdenados, ...shuffledUnanswered];
-      }
-    }
-    // ── FIN COMPACTACIÓN AUTOMÁTICA ──────────────────────────────────────────────
+    // ── NOTA: NO se hace sort por índice numérico ────────────────────────────────
+    // Las respondidas se muestran en el ORDEN EN QUE ESTÁN EN answeredOrder (cronológico
+    // de respuesta, con posibles reubicaciones por migración secuencial). Ese orden ya
+    // garantiza que ocupen las primeras N posiciones del displayOrder de forma compacta,
+    // sin huecos. Ordenar por índice numérico causaría que la pregunta #501 caiga en la
+    // página 11 del display en vez de la posición secuencial compacta que le corresponde.
+    // ── FIN NOTA ─────────────────────────────────────────────────────────────────
 
     // Concatenar: respondidas primero (fijas), luego sin responder
     _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
@@ -9437,36 +9417,29 @@ function fbSaveProgressToCloud() {
 
     seccionesConProgreso.forEach(sid => {
       const s = state[sid];
-      const ordenActual  = s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx);
-      const ordenOrd     = [...ordenActual].sort((a, b) => a - b);
-      const estaDesordenado = JSON.stringify(ordenActual) !== JSON.stringify(ordenOrd);
-
-      if (estaDesordenado) {
-        // Reordenar preservando anclas { idx, docId, texto }
-        s.answeredOrder.sort((a, b) => {
-          const ia = typeof a === 'number' ? a : a.idx;
-          const ib = typeof b === 'number' ? b : b.idx;
-          return ia - ib;
-        });
-        cambios++;
-      }
-
-      // Limpiar unansweredOrder siempre que haya respondidas, para que se reconstruya
-      // limpio en el próximo getDisplayOrder (sin referencias a preguntas ya respondidas).
-      if (s.answeredOrder.length > 0) {
+      // CORRECCIÓN: NO ordenar por índice numérico (eso dispersaría las preguntas en páginas
+      // según su posición original, no según su posición compacta en el cuestionario).
+      // answeredOrder ya conserva el orden cronológico de respuesta con reubicaciones
+      // secuenciales aplicadas al momento de responder. Ese orden garantiza que las
+      // respondidas ocupen las primeras N posiciones de displayOrder de forma compacta.
+      // Lo que SÍ debemos hacer: limpiar unansweredOrder de índices ya respondidos y
+      // forzar re-render para que se muestre el orden correcto.
+      if (s.answeredOrder && s.answeredOrder.length > 0) {
         const respondidosSet = new Set(s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx));
+        cambios++;
+        // Limpiar unansweredOrder de índices ya respondidos
         if (Array.isArray(s.unansweredOrder)) {
-          const unansweredLimpio = s.unansweredOrder.filter(i => !respondidosSet.has(i));
-          if (unansweredLimpio.length !== s.unansweredOrder.length) {
-            s.unansweredOrder = unansweredLimpio;
-            if (!estaDesordenado) cambios++; // contar como cambio también
-          }
+          s.unansweredOrder = s.unansweredOrder.filter(i => !respondidosSet.has(i));
+        } else {
+          s.unansweredOrder = [];
         }
+        // Eliminar shuffleFrozen residual que pudiera bloquear el re-mezclado
+        delete s.shuffleFrozen;
       }
     });
 
     if (cambios === 0) {
-      fbToast('✅ El progreso ya estaba ordenado correctamente', 'success');
+      fbToast('ℹ️ No hay progreso guardado para reordenar', 'info');
       return;
     }
 
