@@ -708,6 +708,25 @@ img {
 .explicacion-contenedor img {
     pointer-events: auto;
     cursor: zoom-in;
+    /* FIX: contener imágenes dentro del contenedor de explicación sin importar su tamaño original */
+    max-width: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    display: block;
+    box-sizing: border-box;
+}
+
+/* Contenedor de explicación: garantizar que nunca se desborde */
+.explicacion-contenedor {
+    overflow: hidden;
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+/* Todos los elementos dentro de la explicación deben respetaar el ancho del contenedor */
+.explicacion-contenedor * {
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 /* ===== TEMPORIZADOR DEL SIMULACRO ===== */
