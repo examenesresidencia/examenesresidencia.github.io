@@ -2169,38 +2169,53 @@
     //    Así la "pregunta 10 sin responder" siempre es la misma pregunta en cualquier
     //    recarga: F5, login, volver al menú, recarga por edición del admin, etc.
     //    Solo se regenera cuando unansweredOrder está genuinamente vacío (intento nuevo).
+    // ── Construir shuffledUnanswered ─────────────────────────────────────────────
+    // unansweredSet contiene SOLO los índices verdaderamente sin responder (no en graded ni en answered).
+    // Es la fuente de verdad: cualquier índice que esté aquí y también en unansweredOrder se conserva;
+    // el resto se descarta. Si unansweredOrder llegó vacío (primer ingreso o limpieza por consolidador),
+    // se genera un orden aleatorio nuevo.
+    const unansweredSet = new Set(unanswered);
+
     let shuffledUnanswered;
     if (s.unansweredOrder && s.unansweredOrder.length > 0) {
-      // Usar el orden persistido — filtrar índices que ya fueron respondidos
-      const unansweredSet = new Set(unanswered);
+      // Filtrar: solo conservar los que realmente están sin responder
       const ordenFiltrado = s.unansweredOrder.filter(i => unansweredSet.has(i));
       // Agregar al final cualquier pregunta nueva (añadida por el admin después del inicio del intento)
       const enOrden = new Set(ordenFiltrado);
       unanswered.forEach(i => { if (!enOrden.has(i)) ordenFiltrado.push(i); });
       shuffledUnanswered = ordenFiltrado;
-      // Actualizar el orden persistido si cambió (respondidas eliminadas o nuevas añadidas)
+      // Actualizar el orden persistido si cambió
       if (JSON.stringify(shuffledUnanswered) !== JSON.stringify(s.unansweredOrder)) {
         s.unansweredOrder = shuffledUnanswered.slice();
         if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
       }
     } else {
-      // Primer ingreso al intento (o intento nuevo): generar orden aleatorio y PERSISTIRLO
+      // unansweredOrder vacío → primer ingreso o limpieza por consolidador: generar orden aleatorio
       shuffledUnanswered = shuffle(unanswered, seccionId + '-' + Date.now());
       s.unansweredOrder = shuffledUnanswered.slice();
-      if (!window._fbSyncInProgress) {
-        saveJSON(STORAGE_KEY, state);
+      if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+    }
+    // NOTA: unansweredOrder queda congelado para toda la duración del intento.
+    // Solo se limpia en limpiarSeccion() al iniciar un intento nuevo, o con el consolidador.
+
+    // ── Garantía final: sin solapamiento entre respondidas y sin responder ─────────
+    // Si por cualquier razón (Firestore viejo, bug previo) shuffledUnanswered tiene
+    // índices que ya están en answered, los eliminamos aquí como última línea de defensa.
+    // Esto garantiza que displayOrder = [todas las respondidas][todas las sin responder]
+    // sin ningún índice duplicado ni solapamiento, sin importar qué haya en Firestore.
+    {
+      const _answeredSet = new Set(answered);
+      const _unansweredLimpio = shuffledUnanswered.filter(i => !_answeredSet.has(i));
+      if (_unansweredLimpio.length !== shuffledUnanswered.length) {
+        // Había solapamiento: limpiar y persistir el unansweredOrder limpio
+        shuffledUnanswered = _unansweredLimpio;
+        s.unansweredOrder  = _unansweredLimpio.slice();
+        if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
+        console.log('[DISPLAY-ORDER] Solapamiento detectado y corregido en', seccionId,
+          '— answered:', answered.length, ', unanswered limpio:', _unansweredLimpio.length);
       }
     }
-    // NOTA: ya NO borramos unansweredOrder aquí. Queda congelado para toda la duración
-    // del intento. Solo se limpia en limpiarSeccion() al iniciar un intento nuevo.
-
-    // ── NOTA: NO se hace sort por índice numérico ────────────────────────────────
-    // Las respondidas se muestran en el ORDEN EN QUE ESTÁN EN answeredOrder (cronológico
-    // de respuesta, con posibles reubicaciones por migración secuencial). Ese orden ya
-    // garantiza que ocupen las primeras N posiciones del displayOrder de forma compacta,
-    // sin huecos. Ordenar por índice numérico causaría que la pregunta #501 caiga en la
-    // página 11 del display en vez de la posición secuencial compacta que le corresponde.
-    // ── FIN NOTA ─────────────────────────────────────────────────────────────────
+    // ── FIN GARANTÍA ──────────────────────────────────────────────────────────────
 
     // Concatenar: respondidas primero (fijas), luego sin responder
     _debugLog('getDisplayOrder: ' + seccionId + ' → answered=' + answered.length + ' unanswered=' + shuffledUnanswered.length);
@@ -9443,10 +9458,19 @@ function fbSaveProgressToCloud() {
       return;
     }
 
-    // Guardar en localStorage
+    // Guardar en localStorage PRIMERO (funciona aunque Firestore falle)
     saveJSON(SK, state);
+    // Marcar timestamp local como MÁS RECIENTE que la nube para que gane en el próximo sync
+    const _consolidTs = Date.now() + 5000; // +5s para asegurar que supere el cloudTs
+    localStorage.setItem('quiz_progress_ts', String(_consolidTs));
+    window._fbCloudUpdatedAt = 0; // forzar que el local sea más reciente que la nube
 
-    // Guardar en Firestore
+    // Re-renderizar INMEDIATAMENTE (no esperar a Firestore)
+    if (window.currentSection && typeof window.generarCuestionario === 'function') {
+      setTimeout(() => window.generarCuestionario(window.currentSection), 200);
+    }
+
+    // Intentar guardar en Firestore (no bloquea si falla)
     try {
       if (window.__fb && window._fbDb) {
         const { doc, setDoc, serverTimestamp } = window.__fb;
@@ -9454,15 +9478,15 @@ function fbSaveProgressToCloud() {
           state,
           updatedAt: serverTimestamp()
         });
-      }
-      fbToast(`✅ Progreso reordenado (${cambios} sección${cambios !== 1 ? 'es' : ''} corregidas)`, 'success');
-
-      // Si hay una sección activa, re-renderizarla para que el usuario vea el resultado
-      if (window.currentSection && typeof window.generarCuestionario === 'function') {
-        setTimeout(() => window.generarCuestionario(window.currentSection), 400);
+        fbToast(`✅ Reordenado y guardado en la nube (${cambios} sección${cambios !== 1 ? 'es' : ''} corregidas)`, 'success');
+      } else {
+        fbToast(`✅ Reordenado localmente (${cambios} sección${cambios !== 1 ? 'es' : ''} corregidas) — se sincronizará al cerrar sesión`, 'success');
       }
     } catch (e) {
-      fbToast('⚠️ Error al guardar en la nube: ' + e.message, 'error');
+      // Firestore falló pero el localStorage ya tiene el estado correcto
+      // Al cerrar sesión, fbLogout intentará subir el estado local a la nube
+      fbToast('✅ Reordenado localmente — se guardará en la nube al cerrar sesión', 'success');
+      console.warn('[CONSOLIDACIÓN] Firestore no disponible, guardado solo en localStorage:', e.message);
     }
   }
 
@@ -9470,6 +9494,33 @@ function fbSaveProgressToCloud() {
   window._inyectarBotonConsolidacion   = _inyectarBotonConsolidacion;
   window._detectarFueraDeSecuencia     = _detectarFueraDeSecuencia;
   window._notificarConsolidacion       = _notificarConsolidacion;
+  window._ejecutarConsolidacion        = _ejecutarConsolidacion;
+
+  // ── Función de reparación de emergencia ejecutable desde consola ──────────────
+  // Uso: pegar en la consola del navegador → _repararProgreso()
+  window._repararProgreso = function() {
+    const SK = window.STORAGE_KEY || 'quiz_state_v3';
+    let st;
+    try { st = JSON.parse(localStorage.getItem(SK) || '{}'); } catch(_) { st = {}; }
+    let cambios = 0;
+    Object.keys(st).forEach(sid => {
+      const s = st[sid];
+      if (!s || !s.answeredOrder || s.answeredOrder.length === 0) return;
+      const respondidosSet = new Set(s.answeredOrder.map(e => typeof e === 'number' ? e : e.idx));
+      if (Array.isArray(s.unansweredOrder)) {
+        s.unansweredOrder = s.unansweredOrder.filter(i => !respondidosSet.has(i));
+      } else {
+        s.unansweredOrder = [];
+      }
+      delete s.shuffleFrozen;
+      cambios++;
+    });
+    localStorage.setItem(SK, JSON.stringify(st));
+    localStorage.setItem('quiz_progress_ts', String(Date.now() + 10000));
+    console.log('[REPARACIÓN] ' + cambios + ' secciones limpiadas. Recargá la página (F5).');
+    alert('✅ Reparación aplicada en ' + cambios + ' secciones.
+Ahora recargá la página (F5) para ver el resultado.');
+  };
 
   // NOTA: el botón "🔧 Reordenar" ya se inyecta directamente en fbShowUserBar()
   // para que sobreviva cualquier re-renderizado de la barra. El listener de evento
