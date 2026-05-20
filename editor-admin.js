@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V20
+// editor-admin.js  — V23
 // ────────────────────────────────────────────────────────────────
 // V18: se agrega _eaCanDelete() para que soloquimicayaruqui@gmail.com
 //      también pueda ver el botón 🗑 y eliminar preguntas repetidas,
@@ -1262,33 +1262,91 @@
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
 
-        // ── Parche quirúrgico: actualizar SOLO esa pregunta en el caché local ──
-        // No borra ni recarga toda la sección. 0 lecturas de Firestore para el admin.
+        // ── Parche quirúrgico en caché IDB: actualizar SOLO esa pregunta ─────
+        // 0 lecturas de Firestore. Actualiza IndexedDB directamente.
+        const _ck = 'fb_q_cache_' + seccionId;
         try {
-          const _ck  = 'fb_q_cache_' + seccionId;
-          const _raw = localStorage.getItem(_ck);
-          if (_raw) {
-            const _c = JSON.parse(_raw);
-            if (_c?.preguntas?.[qIndex]) {
-              _c.preguntas[qIndex].pregunta    = nuevaPreg;
-              _c.preguntas[qIndex].opciones    = nuevasOpciones;
-              _c.preguntas[qIndex].correcta    = nuevaCorrecta;
-              _c.preguntas[qIndex].explicacion = nuevaExpl;
-              _c.ts = Date.now(); // renovar vigencia 24hs
-              localStorage.setItem(_ck, JSON.stringify(_c));
-              console.log('[EDITOR] Caché local parcheado → sección:', seccionId, '| qIndex:', qIndex);
-            }
+          const _cached = await window._idbCache.get(_ck);
+          if (_cached?.preguntas?.[qIndex]) {
+            _cached.preguntas[qIndex].pregunta    = nuevaPreg;
+            _cached.preguntas[qIndex].opciones    = nuevasOpciones;
+            _cached.preguntas[qIndex].correcta    = nuevaCorrecta;
+            _cached.preguntas[qIndex].explicacion = nuevaExpl;
+            _cached.ts = Date.now(); // renovar vigencia 24hs
+            await window._idbCache.set(_ck, _cached);
+            console.log('[EDITOR] Caché IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
           }
-        } catch (_) {
-          try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_2) {}
+        } catch (_idbErr) {
+          // Si IDB falla, invalidar el caché para forzar recarga desde Firestore
+          try { await window._idbCache.remove(_ck); } catch (_) {}
+          console.warn('[EDITOR] No se pudo parchar IDB, caché invalidado:', _idbErr.message);
         }
+
+        // También parchear la memoria (preguntasPorSeccion) en tiempo real
+        if (window.preguntasPorSeccion?.[seccionId]?.[qIndex]) {
+          window.preguntasPorSeccion[seccionId][qIndex].pregunta    = nuevaPreg;
+          window.preguntasPorSeccion[seccionId][qIndex].opciones    = nuevasOpciones;
+          window.preguntasPorSeccion[seccionId][qIndex].correcta    = nuevaCorrecta;
+          window.preguntasPorSeccion[seccionId][qIndex].explicacion = nuevaExpl;
+        }
+
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
 
-        // ── Notificación DIFERIDA: NO notifica usuarios en tiempo real ──
-        // Los usuarios reciben los cambios solo cuando el admin presione
-        // "Forzar actualización". El botón agrupa todas las ediciones en
-        // 1 sola escritura → ceil(N/30) lecturas por usuario, 1 re-renderización.
-        // Notificación INMEDIATA: los datos viajan embebidos en el snapshot →
+        // ── Actualización quirúrgica del DOM: solo esa pregunta ──────────────
+        // En vez de re-renderizar toda la página (cargarSeccion + generarCuestionario),
+        // actualizamos directamente los elementos del DOM de esa pregunta.
+        // 0 lecturas de Firestore, sin re-shuffle, sin perder el scroll.
+        const _pregEl = document.getElementById(`puntaje-${seccionId}-${qIndex}`)?.closest('.pregunta');
+        if (_pregEl) {
+          // Actualizar enunciado
+          const _enunciadoEl = _pregEl.querySelector('.pregunta-texto, .enunciado, p.pregunta, .pregunta-enunciado');
+          if (_enunciadoEl) _enunciadoEl.innerHTML = nuevaPreg;
+
+          // Actualizar opciones
+          const _opcionesEls = _pregEl.querySelectorAll('.opcion-label, label.opcion, .opcion-texto');
+          if (_opcionesEls.length === nuevasOpciones.length) {
+            _opcionesEls.forEach((el, i) => { el.textContent = nuevasOpciones[i]; });
+          }
+
+          // Actualizar explicación si está visible
+          const _explEl = document.getElementById(`explicacion-${seccionId}-${qIndex}`);
+          if (_explEl && _explEl.style.display !== 'none') {
+            _explEl.innerHTML = nuevaExpl || '';
+          }
+
+          console.log('[EDITOR] DOM actualizado quirúrgicamente para qIndex:', qIndex);
+
+          // Notificar al paginador para que actualice stats (si cambió la correcta)
+          if (cambioRespuesta && typeof window._pag2UpdateStats === 'function') {
+            window._pag2UpdateStats(seccionId);
+          }
+        } else {
+          // La pregunta no está en el DOM visible (otra página del paginador)
+          // Solo re-renderizar si es necesario (sin re-shuffle)
+          const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
+          let state = {};
+          try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
+          if (state[seccionId]) {
+            const contDOM = document.getElementById(`cuestionario-${seccionId}`);
+            const sState  = state[seccionId];
+            if (contDOM) {
+              const puntajeEls = contDOM.querySelectorAll('[id^="puntaje-' + seccionId + '-"]');
+              const ordenDOM = [];
+              puntajeEls.forEach(el => {
+                const idx = parseInt(el.id.replace(`puntaje-${seccionId}-`, ''), 10);
+                if (!isNaN(idx) && (!sState.graded || !sState.graded[idx])) ordenDOM.push(idx);
+              });
+              if (ordenDOM.length > 0) {
+                sState.unansweredOrder = ordenDOM;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+              }
+            }
+          }
+          if (typeof window.generarCuestionario === 'function') window.generarCuestionario(seccionId);
+        }
+
+        // ── Notificación en tiempo real a otros usuarios ─────────────────────
+        // Los datos viajan embebidos en el snapshot de meta/contentVersion →
         // el cliente los aplica directamente al DOM (0 lecturas extra a Firestore).
         if (typeof window._bumpContentVersion === 'function') {
           window._bumpContentVersion(seccionId, qIndex, cambioRespuesta ? nuevaCorrecta : null, {
@@ -1302,54 +1360,7 @@
           });
         }
 
-        // Guardar la posición de scroll ANTES de desbloquear
-        const scrollAntesSave = _scrollY;
-
-        cerrarModal(); // desbloquea scroll y elimina el overlay
-
-        if ('_scrollOnNextRender' in window) window._scrollOnNextRender = false;
-
-        const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
-        let state = {};
-        try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
-        if (state[seccionId] && state[seccionId].explanationShown) {
-          state[seccionId].explanationShown = {};
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        }
-
-        // ── Preservar el orden visual actual de las preguntas sin responder ──
-        // Antes de re-renderizar, capturamos del DOM el orden exacto en que están
-        // las preguntas sin responder y lo guardamos en unansweredOrder temporalmente.
-        // Así getDisplayOrder respeta ese orden en este re-render puntual y
-        // restoreSelectionsAndGrades puede restaurar cada respuesta en la pregunta
-        // correcta. Sin esto, las sin responder se re-mezclan con Date.now() y el
-        // shuffleMap queda desfasado → respuestas aparecen en preguntas equivocadas.
-        if (state[seccionId]) {
-          const contDOM = document.getElementById(`cuestionario-${seccionId}`);
-          const sState = state[seccionId];
-          if (contDOM) {
-            const puntajeEls = contDOM.querySelectorAll('[id^="puntaje-' + seccionId + '-"]');
-            const ordenDOM = [];
-            puntajeEls.forEach(el => {
-              const idx = parseInt(el.id.replace(`puntaje-${seccionId}-`, ''), 10);
-              if (!isNaN(idx) && (!sState.graded || !sState.graded[idx])) ordenDOM.push(idx);
-            });
-            if (ordenDOM.length > 0) {
-              sState.unansweredOrder = ordenDOM;
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-            }
-          }
-        }
-
-        if (typeof window.cargarSeccion === 'function')       await window.cargarSeccion(seccionId);
-        if (typeof window.generarCuestionario === 'function')  window.generarCuestionario(seccionId);
-
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            window.scrollTo({ top: scrollAntesSave, behavior: 'instant' });
-          });
-        });
-
+        cerrarModal();
       } catch (e) {
         fbShowEditErr('edit-q-err', 'Error al guardar: ' + e.message);
         btn.disabled = false; btn.textContent = '💾 Guardar en Firestore';
