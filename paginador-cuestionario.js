@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V24
+// paginador-cuestionario.js  — V25
 // ────────────────────────────────────────────────────────────────
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
 //     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
@@ -435,6 +435,14 @@
           <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:linear-gradient(135deg,#059669,#10b981)"></span><span>Completa</span></div>
           <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:linear-gradient(135deg,#b45309,#d97706)"></span><span>En progreso</span></div>
           <div class="pag2-leyenda-item"><span class="pag2-leyenda-dot" style="background:rgba(255,255,255,.18)"></span><span>Sin comenzar</span></div>
+          <button id="pag2-reordenar-${seccionId}" title="Reordenar las preguntas respondidas para que queden todas juntas al inicio"
+            style="display:inline-flex;align-items:center;gap:4px;padding:2px 9px;
+                   border-radius:5px;border:1px solid rgba(251,191,36,0.35);
+                   background:none;color:#fbbf24;font-size:11px;font-weight:600;
+                   cursor:pointer;font-family:inherit;letter-spacing:.01em;
+                   transition:background .15s,border-color .15s;white-space:nowrap;">
+            🔧 Reordenar
+          </button>
         </div>
         <div class="pag2-total-info">${displayOrder.length} preguntas · ${totalPages} páginas</div>`;
       wrapper.appendChild(infoEl);
@@ -581,6 +589,32 @@
         _modalReinicio(seccionId, pag, indicesPage, () => renderPagina(pag))
       );
 
+      // ── Conectar botón "🔧 Reordenar" de la leyenda ──
+      const btnReordenarLeyenda = wrapper.querySelector(`#pag2-reordenar-${seccionId}`);
+      if (btnReordenarLeyenda) {
+        btnReordenarLeyenda.addEventListener('mouseenter', () => {
+          btnReordenarLeyenda.style.background = 'rgba(251,191,36,0.12)';
+          btnReordenarLeyenda.style.borderColor = 'rgba(251,191,36,0.65)';
+        });
+        btnReordenarLeyenda.addEventListener('mouseleave', () => {
+          btnReordenarLeyenda.style.background = 'none';
+          btnReordenarLeyenda.style.borderColor = 'rgba(251,191,36,0.35)';
+        });
+        btnReordenarLeyenda.addEventListener('click', () => {
+          if (typeof window._ejecutarConsolidacion === 'function') {
+            window._ejecutarConsolidacion();
+          } else if (typeof _ejecutarConsolidacion === 'function') {
+            _ejecutarConsolidacion();
+          }
+        });
+      }
+
+      // ── Actualizar label del botón "📊" en la barra inferior ──
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        const stBarra = _stats(seccionId, indicesPage);
+        window._ubActualizarLabelProgreso(stBarra.ok + stBarra.err, stBarra.total);
+      }
+
     } // fin renderPagina
 
     // ── _pag2UpdateStats: actualiza stats y pills SIN re-renderizar la página ──
@@ -623,40 +657,9 @@
         );
       });
 
-      // ── Reubicar el separador "Continuá desde aquí" ──────────────
-      // Recalcular cuál es ahora la primera pregunta sin responder en la página activa,
-      // y mover (o remover) el separador en consecuencia sin re-renderizar la página.
-      const pregsZona = document.getElementById(`pag2-pregs-${sid}`);
-      if (pregsZona) {
-        const puntajesActualesUp = (window.puntajesPorSeccion || {})[sid] || [];
-        const primeraPendPos = indicesActuales.findIndex(i => {
-          const v = puntajesActualesUp[i]; return v === null || v === undefined;
-        });
-
-        // Quitar separador existente (si lo hay)
-        const sepExistente = pregsZona.querySelector('.pag2-separador');
-        if (sepExistente) sepExistente.remove();
-
-        // Reinsertarlo solo si hay preguntas pendientes que no son las primeras
-        if (primeraPendPos > 0) {
-          const sep = document.createElement('div');
-          sep.className = 'pag2-separador';
-          sep.setAttribute('id', `pag2-sep-${sid}`);
-          sep.innerHTML = `
-            <div class="pag2-sep-etiqueta">
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
-                fill="none" stroke="currentColor" stroke-width="2.5"
-                stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-              Continuá desde aquí
-            </div>`;
-          // Obtener todos los divs de preguntas en la zona (sin el separador ya removido)
-          const pregDivs = Array.from(pregsZona.children);
-          if (primeraPendPos < pregDivs.length) {
-            pregsZona.insertBefore(sep, pregDivs[primeraPendPos]);
-          }
-        }
+      // ── Actualizar label "📊 N/50" en la barra inferior ──
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        window._ubActualizarLabelProgreso(stAct.ok + stAct.err, stAct.total);
       }
     };
 
@@ -737,7 +740,7 @@
       };
     }
 
-    console.log('[PAGINADOR V2] ✓ Hook instalado (V24)');
+    console.log('[PAGINADOR V2] ✓ Hook instalado');
   }
 
   if (document.readyState === 'loading')
