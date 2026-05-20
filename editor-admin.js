@@ -194,6 +194,21 @@
       #meq-editor-wysiwyg ul   { padding-left: 1.5em; margin: 6px 0; list-style: disc; }
       #meq-editor-wysiwyg ol   { padding-left: 1.5em; margin: 6px 0; list-style: decimal; }
       #meq-editor-wysiwyg li   { margin: 2px 0; }
+
+      /* ── FIX: mismos estilos para los contenedores de explicación renderizada ── */
+      /* Cubre [id^="explicacion-"], .explicacion-contenido y .fb-explicacion */
+      [id^="explicacion-"] ul, .explicacion-contenido ul, .fb-explicacion ul,
+      .explicacion ul, [class*="explicacion"] ul {
+        padding-left: 1.5em; margin: 6px 0; list-style: disc;
+      }
+      [id^="explicacion-"] ol, .explicacion-contenido ol, .fb-explicacion ol,
+      .explicacion ol, [class*="explicacion"] ol {
+        padding-left: 1.5em; margin: 6px 0; list-style: decimal;
+      }
+      [id^="explicacion-"] li, .explicacion-contenido li, .fb-explicacion li,
+      .explicacion li, [class*="explicacion"] li {
+        margin: 2px 0;
+      }
       #meq-editor-wysiwyg p    { margin: 4px 0; }
       #meq-editor-wysiwyg div  { margin: 2px 0; }
 
@@ -991,19 +1006,35 @@
       }
       if (!ed.contains(rangeToUse.commonAncestorContainer)) { cmd(command, undefined, rangeRef); return; }
 
-      // Clonar el rango ANTES de aplicar el formato para poder restaurarlo
-      const rangeClone = rangeToUse.cloneRange();
+      // Aplicar el formato — _fmtToggleRange muta el DOM, así que el rango
+      // clonado ANTES quedaría apuntando a nodos obsoletos. Guardamos el
+      // ancestro común para poder reseleccionar el nodo wrapper resultante.
+      const ancAntes = rangeToUse.commonAncestorContainer;
       _fmtToggleRange(rangeToUse, _FMT_TAG[command], ed);
 
-      // Restaurar la selección visual tras el formato para que quede marcado
-      // y el usuario pueda aplicar otro formato consecutivo sin re-seleccionar
+      // Restaurar la selección visual tras el formato:
+      // buscar el nodo wrapper que _fmtToggleRange insertó (o el ancestro si se quitó)
+      // para que el texto quede visualmente marcado y se puedan aplicar más formatos.
       try {
+        // Encontrar el nodo más cercano que contiene el texto formateado
+        let nodoResultante = ancAntes;
+        if (nodoResultante.nodeType === 3) nodoResultante = nodoResultante.parentNode;
+        // Si el nodo es el editor mismo, buscar un hijo más específico
+        if (nodoResultante === ed) {
+          const sel2 = window.getSelection();
+          if (sel2 && sel2.rangeCount > 0) {
+            nodoResultante = sel2.getRangeAt(0).commonAncestorContainer;
+            if (nodoResultante.nodeType === 3) nodoResultante = nodoResultante.parentNode;
+          }
+        }
+        const rangePost = document.createRange();
+        rangePost.selectNodeContents(nodoResultante);
         const selAfter = window.getSelection();
         selAfter.removeAllRanges();
-        selAfter.addRange(rangeClone);
+        selAfter.addRange(rangePost);
         // Actualizar savedRange para la siguiente operación
-        _savedRange = rangeClone;
-        if (rangeRef) rangeRef.current = rangeClone;
+        _savedRange = rangePost.cloneRange();
+        if (rangeRef) rangeRef.current = _savedRange;
       } catch (_) {}
 
       actualizarEstadoBotones();
