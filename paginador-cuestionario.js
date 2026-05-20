@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V23
+// paginador-cuestionario.js  — V24
 // ────────────────────────────────────────────────────────────────
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
 //     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
@@ -622,6 +622,42 @@
           })
         );
       });
+
+      // ── Reubicar el separador "Continuá desde aquí" ──────────────
+      // Recalcular cuál es ahora la primera pregunta sin responder en la página activa,
+      // y mover (o remover) el separador en consecuencia sin re-renderizar la página.
+      const pregsZona = document.getElementById(`pag2-pregs-${sid}`);
+      if (pregsZona) {
+        const puntajesActualesUp = (window.puntajesPorSeccion || {})[sid] || [];
+        const primeraPendPos = indicesActuales.findIndex(i => {
+          const v = puntajesActualesUp[i]; return v === null || v === undefined;
+        });
+
+        // Quitar separador existente (si lo hay)
+        const sepExistente = pregsZona.querySelector('.pag2-separador');
+        if (sepExistente) sepExistente.remove();
+
+        // Reinsertarlo solo si hay preguntas pendientes que no son las primeras
+        if (primeraPendPos > 0) {
+          const sep = document.createElement('div');
+          sep.className = 'pag2-separador';
+          sep.setAttribute('id', `pag2-sep-${sid}`);
+          sep.innerHTML = `
+            <div class="pag2-sep-etiqueta">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              Continuá desde aquí
+            </div>`;
+          // Obtener todos los divs de preguntas en la zona (sin el separador ya removido)
+          const pregDivs = Array.from(pregsZona.children);
+          if (primeraPendPos < pregDivs.length) {
+            pregsZona.insertBefore(sep, pregDivs[primeraPendPos]);
+          }
+        }
+      }
     };
 
     // ── _pag2IrAQIndex: API pública para navegar a una pregunta por qIndex ────
@@ -701,7 +737,7 @@
       };
     }
 
-    console.log('[PAGINADOR V2] ✓ Hook instalado');
+    console.log('[PAGINADOR V2] ✓ Hook instalado (V24)');
   }
 
   if (document.readyState === 'loading')
