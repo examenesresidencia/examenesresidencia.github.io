@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// reclasificador-preguntas.js  — V4
+// reclasificador-preguntas.js  — V23
 // ────────────────────────────────────────────────────────────────
 // Permite reclasificar preguntas hacia otra especialidad con impacto
 // directo en Firestore. Visible solo para admin y usuario elegido.
@@ -528,25 +528,21 @@
           pregClonada,
         });
 
-        // ── 5. Parche quirúrgico en caché local ──────────────
+        // ── 5. Parche quirúrgico en caché IDB ────────────────────────
         // 5a. Quitar del caché del origen
         if (Array.isArray(pps[seccionOrigen])) {
           pps[seccionOrigen].splice(qIndex, 1);
         }
-        // Parche en localStorage del origen
         const _ckOrigen = 'fb_q_cache_' + seccionOrigen;
         try {
-          const _raw = localStorage.getItem(_ckOrigen);
-          if (_raw) {
-            const _c = JSON.parse(_raw);
-            if (Array.isArray(_c?.preguntas)) {
-              _c.preguntas.splice(qIndex, 1);
-              _c.ts = Date.now();
-              localStorage.setItem(_ckOrigen, JSON.stringify(_c));
-            }
+          const _cOrigen = await window._idbCache.get(_ckOrigen);
+          if (Array.isArray(_cOrigen?.preguntas)) {
+            _cOrigen.preguntas.splice(qIndex, 1);
+            _cOrigen.ts = Date.now();
+            await window._idbCache.set(_ckOrigen, _cOrigen);
           }
         } catch (_) {
-          try { localStorage.removeItem(_ckOrigen); } catch (_2) {}
+          try { await window._idbCache.remove(_ckOrigen); } catch (_2) {}
         }
         try { localStorage.removeItem('fb_edits_cache_' + seccionOrigen); } catch (_) {}
 
@@ -554,21 +550,16 @@
         if (Array.isArray(pps[destino])) {
           pps[destino].push(pregClonada);
         }
-        // Parche en localStorage del destino
         const _ckDestino = 'fb_q_cache_' + destino;
         try {
-          const _raw2 = localStorage.getItem(_ckDestino);
-          if (_raw2) {
-            const _c2 = JSON.parse(_raw2);
-            if (Array.isArray(_c2?.preguntas)) {
-              _c2.preguntas.push(pregClonada);
-              _c2.ts = Date.now();
-              localStorage.setItem(_ckDestino, JSON.stringify(_c2));
-            }
+          const _cDestino = await window._idbCache.get(_ckDestino);
+          if (Array.isArray(_cDestino?.preguntas)) {
+            _cDestino.preguntas.push(pregClonada);
+            _cDestino.ts = Date.now();
+            await window._idbCache.set(_ckDestino, _cDestino);
           }
         } catch (_) {
-          // Si falla, simplemente invalidar el caché del destino
-          try { localStorage.removeItem(_ckDestino); } catch (_2) {}
+          try { await window._idbCache.remove(_ckDestino); } catch (_2) {}
         }
         try { localStorage.removeItem('fb_edits_cache_' + destino); } catch (_) {}
 
@@ -598,6 +589,12 @@
         // 6. Re-renderizar la sección origen
         const scrollAntes = _scrollY; // capturado antes de desbloquear
         cerrarModal();
+
+        // Invalidar el índice del buscador para que refleje el movimiento
+        // (la pregunta ya no está en el origen y ahora está en el destino)
+        if (typeof window._buscadorInvalidarIndex === 'function') {
+          window._buscadorInvalidarIndex();
+        }
 
         if (typeof window.generarCuestionario === 'function') {
           window.generarCuestionario(seccionOrigen);
