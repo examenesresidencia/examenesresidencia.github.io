@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V9
+// paginador-cuestionario.js  — V23
 // ────────────────────────────────────────────────────────────────
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
 //     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
@@ -622,6 +622,22 @@
           })
         );
       });
+    };
+
+    // ── _pag2IrAQIndex: API pública para navegar a una pregunta por qIndex ────
+    // Usado por el buscador global (buscadorNavegar) para ir a la página correcta
+    // del paginador antes de hacer scroll a la pregunta destino.
+    // Devuelve true si navegó, false si qIndex no está en displayOrder.
+    window._pag2IrAQIndex = function(sid, qIndex, onReady) {
+      if (sid !== seccionId) return false;
+      // Buscar en qué página del displayOrder está este qIndex
+      const posEnDisplay = displayOrder.indexOf(qIndex);
+      if (posEnDisplay === -1) return false;
+      const paginaDestino = Math.floor(posEnDisplay / PAGE_SIZE);
+      renderPagina(paginaDestino);
+      // Llamar onReady después de que el DOM se haya actualizado
+      setTimeout(() => { if (typeof onReady === 'function') onReady(); }, 120);
+      return true;
     };
 
     renderPagina(paginaInicial);
