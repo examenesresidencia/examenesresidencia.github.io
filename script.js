@@ -1032,6 +1032,10 @@
     document.querySelectorAll(".pagina-cuestionario").forEach(p => p.classList.remove("activa"));
 
     restoreScrollPosition();
+    // Restablecer el label del botón de progreso al volver al menú
+    if (typeof window._ubActualizarLabelProgreso === 'function') {
+      window._ubActualizarLabelProgreso(null);
+    }
   }
 
   function showMenu() {
@@ -7230,19 +7234,6 @@
       document.body.appendChild(bar);
     }
     const isAdmin = _currentUserData.role === 'admin';
-    // FIX: el botón "🔧 Reordenar" se inyecta directamente en el HTML de la barra
-    // para que sobreviva cualquier re-renderizado de la barra (antes se inyectaba
-    // vía evento y desaparecía al recrear la barra con innerHTML).
-    const _esCoadminConsolid = (_currentUserData.email || '').toLowerCase() === EMAIL_COADMIN_CONSOLIDACION;
-    const _btnReordenarHTML = _esCoadminConsolid
-      ? `<button id="btn-consolidar-progreso"
-           title="Reordenar las preguntas respondidas para que queden todas juntas al inicio"
-           style="color:#fbbf24;cursor:pointer;font-size:0.8rem;background:none;
-                  border:1px solid rgba(251,191,36,0.4);padding:4px 10px;
-                  border-radius:6px;font-weight:600;transition:all 0.15s;">
-           🔧 Reordenar
-         </button>`
-      : '';
     bar.innerHTML = `
       <span class="ub-info">
         ${isAdmin ? '👑 ' : ''}
@@ -7251,7 +7242,6 @@
       </span>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="ub-ver-progreso" id="fb-bar-ver-progreso">📊 Ver mi progreso</button>
-        ${_btnReordenarHTML}
         <button class="ub-logout" id="fb-bar-logout">Cerrar sesión</button>
       </div>`;
     bar.classList.add('visible');
@@ -7260,14 +7250,20 @@
       const btn = document.getElementById('btn-ver-progreso');
       if (btn) btn.click();
     };
-    // Reconectar onclick del botón de reordenar (si existe)
-    const _btnConsol = document.getElementById('btn-consolidar-progreso');
-    if (_btnConsol) {
-      _btnConsol.onclick = _ejecutarConsolidacion;
-      _btnConsol.onmouseenter = () => { _btnConsol.style.background = 'rgba(251,191,36,0.12)'; };
-      _btnConsol.onmouseleave = () => { _btnConsol.style.background = 'none'; };
-    }
   }
+
+  // ── Actualiza el label del botón "Ver mi progreso" según el contexto ──
+  // En el menú: "📊 Ver mi progreso"
+  // Resolviendo cuestionario paginado: "📊 N/50"
+  window._ubActualizarLabelProgreso = function(respondidas, total) {
+    const btn = document.getElementById('fb-bar-ver-progreso');
+    if (!btn) return;
+    if (respondidas === null || respondidas === undefined) {
+      btn.textContent = '📊 Ver mi progreso';
+    } else {
+      btn.textContent = `📊 ${respondidas}/${total}`;
+    }
+  };
 
   // ── Botón ADMIN en menú ───────────────────────────────────────
   function fbUpdateAdminButton() {
@@ -8687,7 +8683,7 @@ function fbSaveProgressToCloud() {
   // ── Inicia el listener en tiempo real sobre meta/contentVersion ──
   const _CONTENT_VERSION_KEY = 'fb_content_version_known'; // versión conocida por el cliente
 
-  function _startContentVersionWatcher() {
+  async function _startContentVersionWatcher() {
     if (_contentVersionUnsubscribe) return; // ya activo
     if (!window.__firebase_firestore || !_fbDb) {
       document.addEventListener('firebaseReady', _startContentVersionWatcher, { once: true });
