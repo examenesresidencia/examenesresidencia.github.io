@@ -610,9 +610,10 @@
       }
 
       // ── Actualizar label del botón "📊" en la barra inferior ──
+      // FIX: usar el total GLOBAL de la sección, no solo el de la página actual
       if (typeof window._ubActualizarLabelProgreso === 'function') {
-        const stBarra = _stats(seccionId, indicesPage);
-        window._ubActualizarLabelProgreso(stBarra.ok + stBarra.err, stBarra.total);
+        const stGlobal = _stats(seccionId, displayOrder);
+        window._ubActualizarLabelProgreso(stGlobal.ok + stGlobal.err, stGlobal.total);
       }
 
     } // fin renderPagina
@@ -641,6 +642,43 @@
       const respLabel = document.querySelector(`#pag2-wrapper-${sid} .pag2-resp-label`);
       if (respLabel) respLabel.textContent = `${stAct.ok + stAct.err}/${stAct.total} respondidas`;
 
+      // ── FIX: reposicionar el separador "Continuá desde aquí" ──
+      // Al responder una pregunta, la primera sin responder cambia de posición.
+      const pregsZona = document.getElementById(`pag2-pregs-${sid}`);
+      if (pregsZona) {
+        // Quitar el separador anterior si existe
+        const sepViejo = document.getElementById(`pag2-sep-${sid}`);
+        if (sepViejo) sepViejo.remove();
+
+        const puntajesActuales = (window.puntajesPorSeccion || {})[sid] || [];
+        const primeraSinRespPos = indicesActuales.findIndex(i => {
+          const v = puntajesActuales[i]; return v === null || v === undefined;
+        });
+
+        // Solo insertar separador si hay una primera sin responder y no es la pos 0
+        if (primeraSinRespPos > 0) {
+          // Los hijos de pregsZona son los divs de pregunta (pueden tener el sep ya removido)
+          // Filtrar solo los divs de pregunta (excluir el separador)
+          const divPregs = Array.from(pregsZona.children).filter(el => !el.classList.contains('pag2-separador'));
+          const divDestino = divPregs[primeraSinRespPos];
+          if (divDestino) {
+            const sep = document.createElement('div');
+            sep.className = 'pag2-separador';
+            sep.setAttribute('id', `pag2-sep-${sid}`);
+            sep.innerHTML = `
+              <div class="pag2-sep-etiqueta">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" stroke-width="2.5"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+                Continuá desde aquí
+              </div>`;
+            pregsZona.insertBefore(sep, divDestino);
+          }
+        }
+      }
+
       // Recalcular estados de todas las páginas y repintar pills (top + bottom)
       const estadosNuevos = pages.map(pg => _estadoPagina(sid, pg));
       const pagActiva = _getPagina(sid);
@@ -658,8 +696,10 @@
       });
 
       // ── Actualizar label "📊 N/50" en la barra inferior ──
+      // FIX: usar el total GLOBAL de la sección, no solo el de la página actual
       if (typeof window._ubActualizarLabelProgreso === 'function') {
-        window._ubActualizarLabelProgreso(stAct.ok + stAct.err, stAct.total);
+        const stGlobal = _stats(sid, displayOrder);
+        window._ubActualizarLabelProgreso(stGlobal.ok + stGlobal.err, stGlobal.total);
       }
     };
 
