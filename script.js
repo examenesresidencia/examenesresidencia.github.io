@@ -2654,6 +2654,14 @@
   // Mueve (o crea) el separador "Continuá desde aquí" para que siempre quede
   // justo antes de la primera pregunta sin responder en el DOM.
   function actualizarSeparador(seccionId, cont) {
+    // FIX: cuando el paginador está activo, delegar en _pag2UpdateStats
+    // que ya maneja el separador dentro de #pag2-pregs-{seccionId}.
+    // Intentar operar sobre cont directamente causa "insertBefore: not a child"
+    // porque los .pregunta viven dentro del wrapper del paginador, no en cont.
+    if (document.getElementById(`pag2-pregs-${seccionId}`)) {
+      return; // paginador activo — no tocar el DOM del separador desde aquí
+    }
+
     if (!cont) cont = document.getElementById(`cuestionario-${seccionId}`);
     if (!cont) return;
 
