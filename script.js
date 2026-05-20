@@ -1,4 +1,4 @@
-//PRUEBA 22  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 23  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v22: LIMPIEZA automática en getDisplayOrder — 4 correcciones en un solo bloque:
 //   1. Elimina de answeredOrder entradas sin graded=true (corrupción por reordenamiento)
 //   2. Elimina duplicados en answeredOrder (mismo idx dos veces)
@@ -633,6 +633,156 @@
   const PREGUNTAS_CACHE_PREFIX = 'fb_q_cache_';
   const PREGUNTAS_CACHE_TTL    = 24 * 60 * 60 * 1000; // 24 horas
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // _idbCache — caché de preguntas sobre IndexedDB
+  // Reemplaza localStorage para el caché de preguntas (fb_q_cache_*).
+  // IndexedDB tiene ~50MB-1GB disponibles vs ~5-10MB de localStorage.
+  // Con 13k preguntas en ~50 secciones, localStorage se llena y se invalida
+  // constantemente → re-descargas innecesarias de Firestore.
+  // API: get(key) → Promise<{ts,preguntas}|null>
+  //      set(key, value) → Promise<void>
+  //      remove(key) → Promise<void>
+  //      listKeys() → Promise<string[]>   (solo claves con prefijo fb_q_cache_)
+  // Fallback transparente a localStorage si IndexedDB no está disponible.
+  // ══════════════════════════════════════════════════════════════════════════
+  const _idbCache = (() => {
+    const DB_NAME    = 'quiz_preguntas_cache';
+    const DB_VERSION = 1;
+    const STORE      = 'preguntas';
+    let _db = null;
+    let _initPromise = null;
+
+    function _open() {
+      if (_initPromise) return _initPromise;
+      _initPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error('IndexedDB no disponible')); return; }
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = e => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE)) {
+            db.createObjectStore(STORE, { keyPath: 'key' });
+          }
+        };
+        req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+        req.onerror   = e => reject(e.target.error);
+      });
+      return _initPromise;
+    }
+
+    async function get(key) {
+      try {
+        const db = await _open();
+        return new Promise((resolve, reject) => {
+          const tx  = db.transaction(STORE, 'readonly');
+          const req = tx.objectStore(STORE).get(key);
+          req.onsuccess = e => resolve(e.target.result ? e.target.result.value : null);
+          req.onerror   = e => reject(e.target.error);
+        });
+      } catch (_) {
+        // Fallback a localStorage
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : null;
+        } catch (_2) { return null; }
+      }
+    }
+
+    async function set(key, value) {
+      try {
+        const db = await _open();
+        return new Promise((resolve, reject) => {
+          const tx  = db.transaction(STORE, 'readwrite');
+          const req = tx.objectStore(STORE).put({ key, value });
+          req.onsuccess = () => resolve();
+          req.onerror   = e => reject(e.target.error);
+        });
+      } catch (_) {
+        // Fallback a localStorage (con manejo de QuotaExceededError)
+        try {
+          localStorage.setItem(key, JSON.stringify(value));
+        } catch (_quota) {
+          try {
+            const cacheKeys = Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
+            if (cacheKeys.length > 0) {
+              cacheKeys.sort((a, b) => {
+                try {
+                  const ta = JSON.parse(localStorage.getItem(a))?.ts || 0;
+                  const tb = JSON.parse(localStorage.getItem(b))?.ts || 0;
+                  return ta - tb;
+                } catch { return 0; }
+              });
+              localStorage.removeItem(cacheKeys[0]);
+            }
+            localStorage.setItem(key, JSON.stringify(value));
+          } catch (_2) { /* sin caché */ }
+        }
+      }
+    }
+
+    async function remove(key) {
+      // Borrar de ambos para asegurar consistencia en la migración
+      try {
+        const db = await _open();
+        await new Promise((resolve, reject) => {
+          const tx  = db.transaction(STORE, 'readwrite');
+          const req = tx.objectStore(STORE).delete(key);
+          req.onsuccess = () => resolve();
+          req.onerror   = e => reject(e.target.error);
+        });
+      } catch (_) {}
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+
+    async function listKeys() {
+      try {
+        const db = await _open();
+        return new Promise((resolve, reject) => {
+          const tx  = db.transaction(STORE, 'readonly');
+          const req = tx.objectStore(STORE).getAllKeys();
+          req.onsuccess = e => resolve(
+            (e.target.result || []).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
+          );
+          req.onerror = e => reject(e.target.error);
+        });
+      } catch (_) {
+        // Fallback a localStorage
+        try {
+          return Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
+        } catch (_2) { return []; }
+      }
+    }
+
+    // Migración única: mover entradas existentes de localStorage a IndexedDB
+    // Se ejecuta una sola vez al inicio (flag en localStorage para no repetir)
+    async function _migrarDesdeLocalStorage() {
+      const FLAG = 'quiz_idb_migrated_v1';
+      try { if (localStorage.getItem(FLAG)) return; } catch (_) { return; }
+      try {
+        const keys = Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
+        for (const k of keys) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (!raw) continue;
+            const val = JSON.parse(raw);
+            await set(k, val);
+            localStorage.removeItem(k);
+            console.log('[IDB-MIGRATE] Migrado a IndexedDB:', k);
+          } catch (_) {}
+        }
+        localStorage.setItem(FLAG, '1');
+        console.log('[IDB-MIGRATE] Migración localStorage→IndexedDB completada (' + keys.length + ' secciones)');
+      } catch (_) {}
+    }
+
+    // Iniciar migración en background sin bloquear
+    setTimeout(_migrarDesdeLocalStorage, 1000);
+
+    return { get, set, remove, listKeys };
+  })();
+
+  // Exponer para uso externo (editor-admin, reclasificador, etc.)
+  window._idbCache = _idbCache;
+
   function cargarSeccion(seccionId) {
     if (_seccionesYaCargadas.has(seccionId) ||
         (window.preguntasPorSeccion?.[seccionId]?.length > 0)) {
@@ -641,29 +791,28 @@
       return Promise.resolve();
     }
 
-    // ── Intentar desde caché localStorage primero ──────────────────
+    // ── Intentar desde caché IndexedDB primero (con fallback a localStorage) ──
     _debugLog('cargarSeccion("' + seccionId + '") iniciada');
-    try {
-      const cached = JSON.parse(localStorage.getItem(PREGUNTAS_CACHE_PREFIX + seccionId) || 'null');
+    return _idbCache.get(PREGUNTAS_CACHE_PREFIX + seccionId).then(cached => {
       _debugLog('caché encontrado: ' + (cached ? cached.preguntas?.length + ' pregs, ts=' + new Date(cached.ts).toLocaleTimeString() : 'null'));
       if (cached && cached.preguntas && cached.preguntas.length > 5 && cached.ts &&
           (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
-        // Filtrar clones extrapolados que pudieran haberse guardado en caché en sesiones
-        // anteriores. Los clones se identifican por tener _origenExamen definido.
         const preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
-
         window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
         _debugLog('✅ Caché OK: ' + seccionId + ' → ' + preguntasLimpias.length + ' pregs');
-        console.log('📦 Caché local:', seccionId, '→', preguntasLimpias.length, 'preguntas');
-        return Promise.resolve();
+        console.log('📦 Caché IDB:', seccionId, '→', preguntasLimpias.length, 'preguntas');
+        return;
       }
-    } catch (_) { /* caché corrupto → ignorar y cargar desde Firestore */ }
+      // Caché inválido o expirado → cargar desde Firestore
+      return _cargarSeccionDesdeFirestore(seccionId);
+    }).catch(() => _cargarSeccionDesdeFirestore(seccionId));
+  }
 
-    // ── Cargar desde Firestore ──────────────────────────────────────
+  function _cargarSeccionDesdeFirestore(seccionId) {
     _debugLog('⬇️ Bajando de Firestore: ' + seccionId);
-    _seccionesEnCarga.add(seccionId); // 🔒 marcar inicio de carga
+    _seccionesEnCarga.add(seccionId);
     return new Promise((resolve) => {
       function intentarCarga() {
         if (!window.__firebaseReady || !window.__firebase_firestore) {
@@ -689,8 +838,8 @@
             }
             let preguntas = snap.docs.map(d => {
               const { _idx, ...pregunta } = d.data();
-              pregunta._firestoreIdx  = _idx; // preservar para el buscador de duplicados
-              pregunta._firestoreDocId = d.id; // ID único del documento — ancla primaria para progreso
+              pregunta._firestoreIdx   = _idx;
+              pregunta._firestoreDocId = d.id;
               return pregunta;
             });
 
@@ -704,13 +853,12 @@
               try {
                 const ec = JSON.parse(localStorage.getItem(EDIT_CACHE_KEY) || 'null');
                 if (ec && ec.ts && (Date.now() - ec.ts) < 60 * 60 * 1000) {
-                  ediciones = ec.data; // usar caché de ediciones (< 1 hora)
+                  ediciones = ec.data;
                   console.log('📦 Ediciones admin desde caché:', seccionId);
                 }
               } catch (_) {}
 
               if (ediciones === null) {
-                // Leer ediciones desde Firestore y cachear
                 const { collection: col2, query: q2, where: w2, getDocs: gd2 } = window.__firebase_firestore;
                 const editQ = q2(col2(db, 'questions'), w2('seccionId', '==', seccionId));
                 const editSnap = await gd2(editQ);
@@ -723,18 +871,14 @@
                   console.log('✏️ Ediciones admin cargadas y cacheadas:', seccionId, '→', ediciones.length);
               }
 
-              // ed.qIndex es base 1 (Firestore) → convertir a base 0 para el array interno
               ediciones.forEach(ed => {
                 const idx = ed.qIndex - 1;
                 if (!preguntas[idx]) return;
                 if (ed.pregunta    !== undefined) preguntas[idx].pregunta    = ed.pregunta;
                 if (ed.opciones    !== undefined) {
-                  // FIX Bug 2: sanear el array de opciones — si algún elemento es un objeto
-                  // (p.ej. un Timestamp de Firestore guardado por error), convertirlo a string
-                  // vacío y filtrar, evitando que aparezca como "2026-12-18 00:00:00" en el UI.
                   preguntas[idx].opciones = ed.opciones.map(o =>
                     (o === null || o === undefined) ? '' :
-                    (typeof o === 'object')         ? (typeof o.toDate === 'function' ? o.toDate().toISOString() : '') :
+                    (typeof o === 'object') ? (typeof o.toDate === 'function' ? o.toDate().toISOString() : '') :
                     String(o)
                   ).filter(o => o !== '');
                 }
@@ -746,44 +890,26 @@
               console.warn('No se pudieron cargar ediciones de admin:', editErr.message);
             }
 
-            // ── Guardar preguntas en caché localStorage ───────────────
-            try {
-              localStorage.setItem(
-                PREGUNTAS_CACHE_PREFIX + seccionId,
-                JSON.stringify({ ts: Date.now(), preguntas })
-              );
-            } catch (_) {
-              // Quota exceeded: eliminar el caché más viejo para hacer espacio y reintentar
-              try {
-                const cacheKeys = Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
-                if (cacheKeys.length > 0) {
-                  cacheKeys.sort((a, b) => {
-                    try {
-                      const ta = JSON.parse(localStorage.getItem(a))?.ts || 0;
-                      const tb = JSON.parse(localStorage.getItem(b))?.ts || 0;
-                      return ta - tb;
-                    } catch { return 0; }
-                  });
-                  localStorage.removeItem(cacheKeys[0]);
-                  console.log('🧹 Caché lleno: se eliminó el más viejo (' + cacheKeys[0] + ') para hacer espacio');
-                }
-                localStorage.setItem(
-                  PREGUNTAS_CACHE_PREFIX + seccionId,
-                  JSON.stringify({ ts: Date.now(), preguntas })
-                );
-              } catch (_2) { /* si aun así falla, continuar sin caché */ }
-            }
+            // ── Guardar en caché IndexedDB (sin límite de quota) ─────
+            _idbCache.set(
+              PREGUNTAS_CACHE_PREFIX + seccionId,
+              { ts: Date.now(), preguntas }
+            ).then(() => {
+              console.log('💾 Caché IDB guardado:', seccionId, '→', preguntas.length, 'preguntas');
+            }).catch(e => {
+              console.warn('⚠️ No se pudo guardar en IDB:', e.message);
+            });
 
             _seccionesYaCargadas.add(seccionId);
-            _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar
+            _seccionesEnCarga.delete(seccionId);
             _debugLog('✅ Firestore OK: ' + seccionId + ' → ' + preguntas.length + ' pregs');
-            console.log('✅ Firestore→caché:', seccionId, '→', preguntas.length, 'preguntas');
+            console.log('✅ Firestore→IDB:', seccionId, '→', preguntas.length, 'preguntas');
             if (esCompilado(seccionId) && window._extrapolacionAplicada) {
-                aplicarExtrapolacion(seccionId);
-              }
+              aplicarExtrapolacion(seccionId);
+            }
             resolve();
           } catch (e) {
-            _seccionesEnCarga.delete(seccionId); // 🔓 desmarcar en error
+            _seccionesEnCarga.delete(seccionId);
             _debugLog('❌ ERROR Firestore: ' + seccionId + ' — ' + e.message);
             console.error('❌ Error cargando desde Firestore:', seccionId, e);
             resolve();
@@ -3937,7 +4063,7 @@
     indexBuilding = true;
     searchIndex = [];
 
-    // Secciones que todavía no están en memoria → cargar desde Firestore
+    // Secciones que todavía no están en memoria → cargar desde IDB/Firestore
     const porCargar = TODAS_SECCIONES_BUSCADOR.filter(s =>
       !_seccionesYaCargadas.has(s) &&
       !(window.preguntasPorSeccion && window.preguntasPorSeccion[s] &&
@@ -3945,6 +4071,13 @@
     );
     const totalCarga = porCargar.length;
     let cargadas = 0;
+
+    // Fix C: también esperar las secciones que ya están en proceso de carga
+    // (evita race condition donde indexarTodo() omite secciones en vuelo)
+    const enCarga = TODAS_SECCIONES_BUSCADOR.filter(s =>
+      _seccionesEnCarga && _seccionesEnCarga.has(s)
+    );
+    const enCargaPromises = enCarga.map(s => cargarSeccion(s).catch(() => {}));
 
     function indexarTodo() {
       // Indexar todas las secciones disponibles (las ya cargadas + las recién traídas)
@@ -3962,13 +4095,22 @@
           const seccionId = secciones[si];
           const preguntas = preguntasPorSeccion[seccionId] || [];
           const label = bGetLabel(seccionId);
+          // Calcular posición visual (displayOrder) para mostrar el número correcto
+          // Si getDisplayOrder está disponible, usarlo; si no, usar qIndex+1
+          let displayOrder = null;
+          try {
+            if (typeof window._getDisplayOrder === 'function' && preguntas.length > 0) {
+              displayOrder = window._getDisplayOrder(seccionId, preguntas.length);
+            }
+          } catch (_) {}
           preguntas.forEach((preg, qIndex) => {
+            const posVisual = displayOrder ? (displayOrder.indexOf(qIndex) + 1 || qIndex + 1) : qIndex + 1;
             searchIndex.push({ seccionId, label, qIndex, type: 'enunciado',
-              texto: preg.pregunta || '', enunciadoCorto: '' });
+              texto: preg.pregunta || '', enunciadoCorto: '', posVisual });
             (preg.opciones || []).forEach((opc, opcionIdx) => {
               searchIndex.push({ seccionId, label, qIndex, type: 'opcion',
                 opcionIdx, texto: opc || '',
-                enunciadoCorto: (preg.pregunta || '').substring(0, 90) });
+                enunciadoCorto: (preg.pregunta || '').substring(0, 90), posVisual });
             });
           });
           done++;
@@ -3988,14 +4130,15 @@
       // Cargar en paralelo desde Firestore, reportando progreso
       let completadas = 0;
       onProgress(0, totalCarga);
-      Promise.all(
-        porCargar.map(seccionId =>
+      Promise.all([
+        ...porCargar.map(seccionId =>
           cargarSeccion(seccionId).then(() => {
             completadas++;
             onProgress(completadas, totalCarga);
           }).catch(() => { completadas++; onProgress(completadas, totalCarga); })
-        )
-      ).then(() => indexarTodo());
+        ),
+        ...enCargaPromises  // Fix C: esperar también las cargas en vuelo
+      ]).then(() => indexarTodo());
     }
   }
 
@@ -4063,7 +4206,7 @@
      onclick="buscadorNavegar(this)">
   <div>
     ${badgeType}${badgeVisit}
-    <span class="buscador-card-meta">${bEscape(item.label)} · Pregunta Nº ${item.qIndex + 1}</span>
+    <span class="buscador-card-meta">${bEscape(item.label)} · Pregunta Nº ${item.posVisual || (item.qIndex + 1)}</span>
   </div>
   <div class="buscador-card-text">${textoHL}</div>
   ${enuncHL}
@@ -4236,27 +4379,42 @@
     history.pushState({ section: seccionId, fromBuscador: true }, seccionId, `#${seccionId}`);
     showSection(seccionId);
 
-    // Hacer scroll y resaltar la palabra buscada en la pregunta destino
+    // Hacer scroll y resaltar la palabra buscada en la pregunta destino.
+    // Si el paginador está activo (_pag2IrAQIndex), primero navegar a la página
+    // correcta y luego hacer scroll. Si no hay paginador (sección sin paginar),
+    // hacer scroll directo con reintentos.
     const bQuery = localStorage.getItem(BUSCADOR_QUERY_KEY) || '';
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
+
+    function _scrollYResaltar() {
+      // Retry con delays crecientes: el render del paginador es asíncrono
+      let intentos = 10;
+      function tryScroll() {
         const puntajeEl = document.getElementById(`puntaje-${seccionId}-${qIndex}`);
-        if (!puntajeEl) return;
-        const pregDiv = puntajeEl.closest('.pregunta');
-        if (!pregDiv) return;
-
-        // Resaltar la palabra buscada dentro del texto del div
-        if (bQuery.length >= 2) {
-          bResaltarEnDiv(pregDiv, bQuery);
+        if (puntajeEl) {
+          const pregDiv = puntajeEl.closest('.pregunta');
+          if (pregDiv) {
+            if (bQuery.length >= 2) bResaltarEnDiv(pregDiv, bQuery);
+            pregDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const prev = pregDiv.style.boxShadow;
+            pregDiv.style.transition = 'box-shadow 0.2s';
+            pregDiv.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.5), 0 4px 16px rgba(37,99,235,0.25)';
+            setTimeout(() => { pregDiv.style.boxShadow = prev; }, 2200);
+            return;
+          }
         }
+        if (--intentos > 0) setTimeout(tryScroll, 150);
+      }
+      tryScroll();
+    }
 
-        // Scroll suave + highlight de borde
-        pregDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        const prev = pregDiv.style.boxShadow;
-        pregDiv.style.transition = 'box-shadow 0.2s';
-        pregDiv.style.boxShadow = '0 0 0 3px rgba(37,99,235,0.5), 0 4px 16px rgba(37,99,235,0.25)';
-        setTimeout(() => { pregDiv.style.boxShadow = prev; }, 2200);
-      });
+    requestAnimationFrame(() => {
+      // Intentar navegar via paginador primero
+      if (typeof window._pag2IrAQIndex === 'function') {
+        const navegado = window._pag2IrAQIndex(seccionId, qIndex, _scrollYResaltar);
+        if (navegado) return;
+      }
+      // Fallback: scroll directo (secciones sin paginador)
+      _scrollYResaltar();
     });
   };
 
@@ -4331,6 +4489,21 @@
     bRestoreScrollAndHighlight();
     history.pushState({ buscador: true }, 'Buscador', '#buscador');
   };
+
+  // ── API pública para invalidar el índice del buscador ──────────
+  // Llamado desde editor-admin.js al eliminar o editar una pregunta,
+  // para que la próxima apertura del buscador reconstruya el índice.
+  window._buscadorInvalidarIndex = function() {
+    searchIndex   = [];
+    indexBuilt    = false;
+    indexBuilding = false;
+  };
+  // Exponer searchIndex para que editor-admin pueda parcharlo quirúrgicamente
+  Object.defineProperty(window, '_searchIndex', {
+    get: () => searchIndex,
+    set: (v) => { searchIndex = v; },
+    configurable: true
+  });
 
   // ── Inicializar el módulo al DOMContentLoaded ───────────────────
   document.addEventListener('DOMContentLoaded', () => {
@@ -5137,7 +5310,7 @@
         await _bumpContentVersion(seccionId, qIndex, null);
         // Invalidar caché local de ediciones y preguntas para esta sección
         try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
-        try { localStorage.removeItem('fb_q_cache_' + seccionId); } catch (_) {}
+        try { _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId); } catch (_) {}
         if (wrap) wrap.remove();
         // Actualizar el dataset del div y el texto del botón sin regenerar todo
         const expDiv = document.getElementById(`explicacion-${seccionId}-${qIndex}`);
@@ -7313,11 +7486,14 @@
       } else {
         // ── MODO GLOBAL: sin ediciones puntuales pendientes ──
         // Se usa cuando se quiere forzar recarga completa (ej: después de subir preguntas nuevas).
-        const seccionesEnCache = (seccionId ? [seccionId] :
-          Object.keys(localStorage)
-            .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
-            .map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''))
-        );
+        const seccionesEnCache = seccionId ? [seccionId] :
+          await _idbCache.listKeys().then(keys =>
+            keys.map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''))
+          ).catch(() =>
+            Object.keys(localStorage)
+              .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
+              .map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''))
+          );
 
         let actualizadas = 0;
         for (const s of seccionesEnCache) {
@@ -8056,7 +8232,7 @@ function fbSaveProgressToCloud() {
     // Si SÍ la está viendo: continuar y rerenderizar en tiempo real (ver paso 4 abajo).
     if (_seccionesYaCargadas.has(seccionId) && currentSection !== seccionId) {
       console.log('[CONTENT-SYNC] Sección cargada pero no visible → limpiando caché para próxima entrada:', seccionId);
-      try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
+      try { _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId); } catch (_) {}
       try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
       _seccionesYaCargadas.delete(seccionId);
       if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
@@ -8098,7 +8274,7 @@ function fbSaveProgressToCloud() {
     }
 
     // ── PASO 2: Limpiar caché e invalidar sección ─────────────────────────────
-    try { localStorage.removeItem('fb_q_cache_'    + seccionId); } catch (_) {}
+    try { _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId); } catch (_) {}
     try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
     _seccionesYaCargadas.delete(seccionId);
     if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
@@ -8217,9 +8393,13 @@ function fbSaveProgressToCloud() {
     // Obtener todas las secciones que el usuario tiene en caché local
     let seccionesEnCache = [];
     try {
-      seccionesEnCache = Object.keys(localStorage)
-        .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
-        .map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''));
+      seccionesEnCache = await _idbCache.listKeys().then(keys =>
+        keys.map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''))
+      ).catch(() =>
+        Object.keys(localStorage)
+          .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
+          .map(k => k.replace(PREGUNTAS_CACHE_PREFIX, ''))
+      );
     } catch (_) { return; }
 
     if (seccionesEnCache.length === 0) return;
@@ -8253,7 +8433,7 @@ function fbSaveProgressToCloud() {
         // La carga incremental causaba acumulación de preguntas repetidas en cada recarga.
         // Al invalidar, la próxima entrada a la sección baja todo limpio desde Firestore.
         try {
-          localStorage.removeItem(PREGUNTAS_CACHE_PREFIX + seccionId);
+          _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId);
           if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
           _seccionesYaCargadas.delete(seccionId);
         } catch (_) {}
@@ -8577,9 +8757,10 @@ function fbSaveProgressToCloud() {
     _contentVersionUnsubscribes = _contentVersionUnsubscribes || [];
     const seccionesEnCache = [];
     try {
-      Object.keys(localStorage)
-        .filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX))
-        .forEach(k => seccionesEnCache.push(k.replace(PREGUNTAS_CACHE_PREFIX, '')));
+      const idbKeys = await _idbCache.listKeys().catch(() => []);
+      const lsKeys  = Object.keys(localStorage).filter(k => k.startsWith(PREGUNTAS_CACHE_PREFIX));
+      const todasKeys = [...new Set([...idbKeys, ...lsKeys])];
+      todasKeys.forEach(k => seccionesEnCache.push(k.replace(PREGUNTAS_CACHE_PREFIX, '')));
     } catch (_) {}
 
     seccionesEnCache.forEach(seccionId => {
