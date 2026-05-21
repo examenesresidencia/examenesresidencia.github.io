@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// motivacion-progreso.js  — v1
+// motivacion-progreso.js  — v2
 // ────────────────────────────────────────────────────────────────
 // MÓDULO INDEPENDIENTE que mejora dos cosas sin tocar script.js:
 //
@@ -24,10 +24,13 @@
   'use strict';
 
   // ── Claves de localStorage ────────────────────────────────────
-  const ATTEMPT_LOG_KEY  = 'quiz_attempt_log_v1';
-  const STORAGE_KEY      = 'quiz_state_v3';
-  const MOT_SHOWN_KEY    = 'quiz_mot_paginas_v1';   // páginas ya celebradas (por intento)
+  const ATTEMPT_LOG_KEY   = 'quiz_attempt_log_v1';
+  const STORAGE_KEY       = 'quiz_state_v3';
+  const MOT_SHOWN_KEY     = 'quiz_mot_paginas_v1';    // páginas ya celebradas (por intento)
   const MOT_MILESTONE_KEY = 'quiz_mot_milestones_v1'; // milestones diarios ya disparados
+  // Tally diario: registra respuestas individuales (no solo al completar un cuestionario).
+  // Estructura: { "YYYY-MM-DD": { total, ok, err } }
+  const DAILY_TALLY_KEY   = 'quiz_daily_tally_v1';
 
   // ── Helpers ───────────────────────────────────────────────────
   function _loadJSON(key, def) {
@@ -57,12 +60,25 @@
   // 1. PANEL "📊 Ver mi progreso" — mejorado con pestañas + resumen diario
   // ════════════════════════════════════════════════════════════════
 
-  // ── Calcular datos diarios desde attemptLog ──────────────────
+  // ── Calcular datos diarios desde dailyTally + attemptLog ────
+  // dailyTally: registra cada respuesta individual (especialidades paginadas).
+  // attemptLog: registra al completar cuestionarios ≤50 / simulacro.
+  // Se fusionan; si un día tiene datos en tally, ese día se usa del tally.
   function _calcularDiarios() {
+    const tally = _loadJSON(DAILY_TALLY_KEY, {});
+    const porDia = {};
+    Object.keys(tally).forEach(dia => {
+      const t = tally[dia];
+      if (!porDia[dia]) porDia[dia] = { total: 0, ok: 0, err: 0 };
+      porDia[dia].total += t.total || 0;
+      porDia[dia].ok    += t.ok    || 0;
+      porDia[dia].err   += t.err   || 0;
+    });
+    // Agregar attemptLog solo para días sin datos en tally (evita doble conteo)
     const log = _loadJSON(ATTEMPT_LOG_KEY, []);
-    const porDia = {};         // { "2025-06-01": { total, ok, err } }
     log.forEach(item => {
       const dia = (item.iso || '').substring(0, 10) || _todayISO();
+      if (tally[dia]) return;
       if (!porDia[dia]) porDia[dia] = { total: 0, ok: 0, err: 0 };
       porDia[dia].total += item.total || 0;
       porDia[dia].ok    += item.score || 0;
@@ -434,6 +450,7 @@
     panel.querySelector('#mp-trash').addEventListener('click', () => {
       if (confirm('¿Borrar todo el historial? Esta acción no se puede deshacer.')) {
         localStorage.removeItem(ATTEMPT_LOG_KEY);
+        localStorage.removeItem(DAILY_TALLY_KEY);
         localStorage.removeItem(MOT_SHOWN_KEY);
         localStorage.removeItem(MOT_MILESTONE_KEY);
         _renderPanelMejorado();
@@ -789,6 +806,27 @@
     return seccionId + '_p' + pagNum;
   }
 
+  // ── Actualizar tally diario al responder cada pregunta ────────
+  // Recorre todos los puntajesPorSeccion y calcula el total global del día.
+  // Guarda el snapshot en DAILY_TALLY_KEY con la fecha de hoy.
+  function _actualizarDailyTally() {
+    const hoy = _todayISO();
+    const puntajes = window.puntajesPorSeccion || {};
+    let total = 0, ok = 0, err = 0;
+    Object.keys(puntajes).forEach(secId => {
+      const arr = puntajes[secId] || [];
+      arr.forEach(v => {
+        if (v === 1)      { total++; ok++; }
+        else if (v === 0) { total++; err++; }
+      });
+    });
+    // Sólo guardar si hay al menos una respuesta
+    if (total === 0) return;
+    const tally = _loadJSON(DAILY_TALLY_KEY, {});
+    tally[hoy] = { total, ok, err };
+    _saveJSON(DAILY_TALLY_KEY, tally);
+  }
+
   // ── Hook sobre _pag2UpdateStats (paginador) ──────────────────
   // Cada vez que el paginador actualiza las stats, verificamos si
   // la página quedó completa y si ya fue celebrada.
@@ -798,6 +836,7 @@
 
     window._pag2UpdateStats = function(seccionId) {
       orig.call(this, seccionId); // ejecutar original primero
+      _actualizarDailyTally();    // registrar respuesta en tally diario
       _onRespuesta(seccionId);    // luego verificar motivación
     };
     console.log('[MOTIVACION] Hook sobre _pag2UpdateStats instalado ✓');
@@ -872,17 +911,12 @@
     // usamos el hook sobre mostrarResultadoFinal en su lugar (ver abajo).
 
     // ── Verificar milestones diarios ──
+    // Ahora el dailyTally se actualiza antes de llamar a _onRespuesta,
+    // así que _calcularDiarios() ya incluye la respuesta actual.
     const porDia = _calcularDiarios();
     const hoy = _todayISO();
     const totalHoy = porDia[hoy]?.total || 0;
-    // Sumar la respuesta actual (puede que el attemptLog aún no se actualizó)
-    // El attemptLog solo se actualiza al terminar, así que contamos desde el state
-    const stateLocal = _loadJSON(STORAGE_KEY, {});
-    const respHoyState = Object.values(stateLocal).reduce((acc, s) => {
-      if (!s || !s.graded) return acc;
-      return acc + Object.values(s.graded).filter(Boolean).length;
-    }, 0);
-    _verificarMilestonesDiarios(Math.max(totalHoy, respHoyState));
+    _verificarMilestonesDiarios(totalHoy);
   }
 
   // ── Hook sobre mostrarResultadoFinal (cuestionarios ≤50) ────
