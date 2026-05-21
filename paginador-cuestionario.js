@@ -492,9 +492,6 @@
           (stReal.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${stReal.pend} restantes</span>`   : '') +
           (stReal.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`         : '');
       }
-      // También actualizar el footer (respEnPag puede haber sido calculado con st vacío)
-      const respLabelEl = wrapper.querySelector('.pag2-resp-label');
-      if (respLabelEl) respLabelEl.textContent = `${stReal.ok + stReal.err}/${stReal.total} respondidas`;
 
       const primeraSinRespPos = indicesPage.findIndex(i => {
         const v = puntajesActualizados[i]; return v === null || v === undefined;
@@ -532,7 +529,6 @@
       footerEl.innerHTML = `
         <button class="pag2-btn-reiniciar" id="pag2-reiniciar">↺ Reiniciar esta página</button>
         <div class="pag2-footer-der">
-          <span class="pag2-resp-label">${respEnPag}/${st.total} respondidas</span>
           ${pag < totalPages-1
             ? `<button class="pag2-btn-siguiente" id="pag2-sig">Siguiente página →</button>`
             : `<button class="pag2-btn-siguiente" id="pag2-sig" ${st.pend>0?'disabled':''}>Ver resultado de especialidad →</button>`
@@ -540,18 +536,37 @@
         </div>`;
       wrapper.appendChild(footerEl);
 
-      // ── Navbar bottom ──
+      // ── Navbar bottom — con fila de stats ──
       const navBot = document.createElement('div');
       navBot.className = 'pag2-navbar pag2-navbar-bottom';
+      navBot.style.cssText = 'flex-direction:column;gap:6px;';
       navBot.innerHTML = `
-        <div class="pag2-nav-left">
-          <button class="pag2-btn" id="pag2-prev-b" ${pag===0?'disabled':''}>← Anterior</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;">
+          <div class="pag2-nav-left">
+            <button class="pag2-btn" id="pag2-prev-b" ${pag===0?'disabled':''}>← Anterior</button>
+          </div>
+          <div class="pag2-nav-center">${_pillsHTML(totalPages,pag,estados)}</div>
+          <div class="pag2-nav-right">
+            <button class="pag2-btn" id="pag2-next-b" ${pag===totalPages-1?'disabled':''}>Siguiente →</button>
+          </div>
         </div>
-        <div class="pag2-nav-center">${_pillsHTML(totalPages,pag,estados)}</div>
-        <div class="pag2-nav-right">
-          <button class="pag2-btn" id="pag2-next-b" ${pag===totalPages-1?'disabled':''}>Siguiente →</button>
+        <div id="pag2-bot-stats-${seccionId}" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;color:#94a3b8;">
+          <span style="font-weight:600;color:#cbd5e1;">Página ${pag+1} · Preguntas ${inicio}–${fin}</span>
+          <span id="pag2-bot-badges-${seccionId}" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></span>
         </div>`;
       wrapper.appendChild(navBot);
+
+      // Poblar badges del navbar inferior con los stats reales (los mismos que el header)
+      // Se hace después del render como el headerEl, usando stReal
+      // (stReal ya fue calculado arriba luego de _renderIndicesToCont)
+      const botBadgesEl = document.getElementById(\`pag2-bot-badges-\${seccionId}\`);
+      if (botBadgesEl) {
+        botBadgesEl.innerHTML =
+          (stReal.ok   > 0 ? \`<span class="pag2-badge pag2-badge-ok">✓ \${stReal.ok} correctas</span>\`    : '') +
+          (stReal.err  > 0 ? \`<span class="pag2-badge pag2-badge-err">✗ \${stReal.err} incorrectas</span>\` : '') +
+          (stReal.pend > 0 ? \`<span class="pag2-badge pag2-badge-pend">\${stReal.pend} restantes</span>\`   : '') +
+          (stReal.pend === 0 ? \`<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>\`         : '');
+      }
 
       // ── Conectar eventos ──
       function irA(p) {
@@ -638,9 +653,15 @@
           (stAct.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`        : '');
       }
 
-      // Actualizar label del footer
-      const respLabel = document.querySelector(`#pag2-wrapper-${sid} .pag2-resp-label`);
-      if (respLabel) respLabel.textContent = `${stAct.ok + stAct.err}/${stAct.total} respondidas`;
+      // Actualizar badges del navbar inferior (espejo del header)
+      const botBadgesUpd = document.getElementById(`pag2-bot-badges-${sid}`);
+      if (botBadgesUpd) {
+        botBadgesUpd.innerHTML =
+          (stAct.ok   > 0 ? `<span class="pag2-badge pag2-badge-ok">✓ ${stAct.ok} correctas</span>`    : '') +
+          (stAct.err  > 0 ? `<span class="pag2-badge pag2-badge-err">✗ ${stAct.err} incorrectas</span>` : '') +
+          (stAct.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${stAct.pend} restantes</span>`   : '') +
+          (stAct.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`        : '');
+      }
 
       // ── FIX: reposicionar el separador "Continuá desde aquí" ──
       // Al responder una pregunta, la primera sin responder cambia de posición.
