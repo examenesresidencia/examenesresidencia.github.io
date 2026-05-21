@@ -358,6 +358,90 @@
         box-shadow:0 4px 14px rgba(230,126,34,.3);transition:opacity .15s;
       }
       #pag2-mr-confirmar:hover { opacity:.88; }
+
+      /* ════ WIDGET FLOTANTE por página ════ */
+      #pag2-float-widget {
+        position:fixed; bottom:56px; right:14px; z-index:9989;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        user-select:none;
+      }
+      #pag2-float-collapsed {
+        display:flex; align-items:center; gap:6px;
+        background:rgba(13,33,55,0.96);
+        border:1px solid rgba(56,189,248,0.28);
+        border-radius:100px; padding:7px 13px 7px 10px;
+        cursor:pointer;
+        box-shadow:0 4px 18px rgba(0,0,0,0.35);
+        backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+        transition:border-color .2s,box-shadow .2s,transform .1s;
+        white-space:nowrap;
+      }
+      #pag2-float-collapsed:active { transform:scale(0.95); }
+      #pag2-float-collapsed.pag2-fw-pulse {
+        border-color:rgba(56,189,248,0.75);
+        box-shadow:0 0 0 3px rgba(56,189,248,0.18),0 4px 18px rgba(0,0,0,0.35);
+      }
+      .pag2-fw-page-pill { font-size:11px;font-weight:700;color:#7dd3fc;letter-spacing:.02em; }
+      .pag2-fw-sep       { color:rgba(148,163,184,0.35);font-size:10px; }
+      .pag2-fw-ok-mini   { font-size:12px;font-weight:800;color:#34d399; }
+      .pag2-fw-err-mini  { font-size:12px;font-weight:800;color:#f87171; }
+
+      #pag2-float-expanded {
+        display:none; flex-direction:column;
+        background:rgba(10,22,40,0.97);
+        border:1px solid rgba(56,189,248,0.22);
+        border-radius:16px; min-width:176px;
+        box-shadow:0 12px 40px rgba(0,0,0,0.45);
+        backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+        overflow:hidden;
+        transform-origin:bottom right;
+        animation:pag2FwIn .22s cubic-bezier(.34,1.3,.64,1) both;
+      }
+      @keyframes pag2FwIn {
+        from{opacity:0;transform:scale(.82) translateY(8px);}
+        to  {opacity:1;transform:scale(1)   translateY(0);}
+      }
+      #pag2-float-expanded.pag2-fw-out {
+        animation:pag2FwOut .16s ease-in forwards;
+      }
+      @keyframes pag2FwOut {
+        from{opacity:1;transform:scale(1)   translateY(0);}
+        to  {opacity:0;transform:scale(.86) translateY(6px);}
+      }
+      .pag2-fw-header {
+        display:flex; align-items:center; justify-content:space-between;
+        padding:10px 12px 8px;
+        border-bottom:1px solid rgba(255,255,255,0.06); cursor:pointer;
+      }
+      .pag2-fw-titulo  { font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#475569; }
+      .pag2-fw-pagina  { font-size:14px;font-weight:800;color:#7dd3fc;line-height:1.1; }
+      .pag2-fw-xbtn {
+        background:rgba(255,255,255,0.06); border:none; border-radius:6px;
+        color:#64748b; font-size:13px; line-height:1; padding:3px 6px;
+        cursor:pointer; transition:background .15s,color .15s; font-family:inherit;
+      }
+      .pag2-fw-xbtn:hover { background:rgba(255,255,255,0.12);color:#94a3b8; }
+      .pag2-fw-body { padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; }
+      .pag2-fw-stats-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; }
+      .pag2-fw-stat {
+        background:rgba(255,255,255,0.04); border-radius:8px; padding:6px 4px;
+        text-align:center; border:1px solid rgba(255,255,255,0.06);
+      }
+      .pag2-fw-num       { font-size:1.1rem;font-weight:800;line-height:1; }
+      .pag2-fw-num.total { color:#7dd3fc; }
+      .pag2-fw-num.ok    { color:#34d399; }
+      .pag2-fw-num.err   { color:#f87171; }
+      .pag2-fw-lbl { font-size:9px;font-weight:600;color:#475569;text-transform:uppercase;letter-spacing:.05em;margin-top:2px; }
+      .pag2-fw-barra-wrap { height:5px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden; }
+      .pag2-fw-barra-fill {
+        height:100%; border-radius:99px;
+        background:linear-gradient(90deg,#0891b2,#38bdf8);
+        transition:width .4s ease;
+      }
+      .pag2-fw-barra-fill.done { background:linear-gradient(90deg,#059669,#34d399); }
+      .pag2-fw-fraccion { font-size:10px;color:#475569;text-align:center;font-weight:600;margin-top:-2px; }
+      .pag2-fw-fraccion b { color:#94a3b8; }
+
     `;
     document.head.appendChild(st);
   }
@@ -492,6 +576,13 @@
           (stReal.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${stReal.pend} restantes</span>`   : '') +
           (stReal.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`         : '');
       }
+      // ── Inicializar widget flotante con esta página ──
+      if (typeof window._fwSetContext === 'function') {
+        window._fwSetContext(seccionId, pag, totalPages, pages);
+      }
+      if (typeof window._fwActualizarStats === 'function') {
+        window._fwActualizarStats(seccionId);
+      }
 
       const primeraSinRespPos = indicesPage.findIndex(i => {
         const v = puntajesActualizados[i]; return v === null || v === undefined;
@@ -529,6 +620,7 @@
       footerEl.innerHTML = `
         <button class="pag2-btn-reiniciar" id="pag2-reiniciar">↺ Reiniciar esta página</button>
         <div class="pag2-footer-der">
+          <span class="pag2-resp-label">${respEnPag}/${st.total} respondidas</span>
           ${pag < totalPages-1
             ? `<button class="pag2-btn-siguiente" id="pag2-sig">Siguiente página →</button>`
             : `<button class="pag2-btn-siguiente" id="pag2-sig" ${st.pend>0?'disabled':''}>Ver resultado de especialidad →</button>`
@@ -536,37 +628,18 @@
         </div>`;
       wrapper.appendChild(footerEl);
 
-      // ── Navbar bottom — con fila de stats ──
+      // ── Navbar bottom ──
       const navBot = document.createElement('div');
       navBot.className = 'pag2-navbar pag2-navbar-bottom';
-      navBot.style.cssText = 'flex-direction:column;gap:6px;';
       navBot.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px;">
-          <div class="pag2-nav-left">
-            <button class="pag2-btn" id="pag2-prev-b" ${pag===0?'disabled':''}>← Anterior</button>
-          </div>
-          <div class="pag2-nav-center">${_pillsHTML(totalPages,pag,estados)}</div>
-          <div class="pag2-nav-right">
-            <button class="pag2-btn" id="pag2-next-b" ${pag===totalPages-1?'disabled':''}>Siguiente →</button>
-          </div>
+        <div class="pag2-nav-left">
+          <button class="pag2-btn" id="pag2-prev-b" ${pag===0?'disabled':''}>← Anterior</button>
         </div>
-        <div id="pag2-bot-stats-${seccionId}" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;color:#94a3b8;">
-          <span style="font-weight:600;color:#cbd5e1;">Página ${pag+1} · Preguntas ${inicio}–${fin}</span>
-          <span id="pag2-bot-badges-${seccionId}" style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;"></span>
+        <div class="pag2-nav-center">${_pillsHTML(totalPages,pag,estados)}</div>
+        <div class="pag2-nav-right">
+          <button class="pag2-btn" id="pag2-next-b" ${pag===totalPages-1?'disabled':''}>Siguiente →</button>
         </div>`;
       wrapper.appendChild(navBot);
-
-      // Poblar badges del navbar inferior con los stats reales (los mismos que el header)
-      // Se hace después del render como el headerEl, usando stReal
-      // (stReal ya fue calculado arriba luego de _renderIndicesToCont)
-      const botBadgesEl = document.getElementById(\`pag2-bot-badges-\${seccionId}\`);
-      if (botBadgesEl) {
-        botBadgesEl.innerHTML =
-          (stReal.ok   > 0 ? \`<span class="pag2-badge pag2-badge-ok">✓ \${stReal.ok} correctas</span>\`    : '') +
-          (stReal.err  > 0 ? \`<span class="pag2-badge pag2-badge-err">✗ \${stReal.err} incorrectas</span>\` : '') +
-          (stReal.pend > 0 ? \`<span class="pag2-badge pag2-badge-pend">\${stReal.pend} restantes</span>\`   : '') +
-          (stReal.pend === 0 ? \`<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>\`         : '');
-      }
 
       // ── Conectar eventos ──
       function irA(p) {
@@ -653,15 +726,9 @@
           (stAct.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`        : '');
       }
 
-      // Actualizar badges del navbar inferior (espejo del header)
-      const botBadgesUpd = document.getElementById(`pag2-bot-badges-${sid}`);
-      if (botBadgesUpd) {
-        botBadgesUpd.innerHTML =
-          (stAct.ok   > 0 ? `<span class="pag2-badge pag2-badge-ok">✓ ${stAct.ok} correctas</span>`    : '') +
-          (stAct.err  > 0 ? `<span class="pag2-badge pag2-badge-err">✗ ${stAct.err} incorrectas</span>` : '') +
-          (stAct.pend > 0 ? `<span class="pag2-badge pag2-badge-pend">${stAct.pend} restantes</span>`   : '') +
-          (stAct.pend === 0 ? `<span class="pag2-badge pag2-badge-ok">✓ Página completada</span>`        : '');
-      }
+      // Actualizar label del footer
+      const respLabel = document.querySelector(`#pag2-wrapper-${sid} .pag2-resp-label`);
+      if (respLabel) respLabel.textContent = `${stAct.ok + stAct.err}/${stAct.total} respondidas`;
 
       // ── FIX: reposicionar el separador "Continuá desde aquí" ──
       // Al responder una pregunta, la primera sin responder cambia de posición.
@@ -722,6 +789,11 @@
         const stGlobal = _stats(sid, displayOrder);
         window._ubActualizarLabelProgreso(stGlobal.ok + stGlobal.err, stGlobal.total);
       }
+
+      // ── Actualizar widget flotante ──
+      if (typeof window._fwActualizarStats === 'function') {
+        window._fwActualizarStats(sid);
+      }
     };
 
     // ── _pag2IrAQIndex: API pública para navegar a una pregunta por qIndex ────
@@ -766,6 +838,192 @@
     return true;
   }
 
+
+  // ════════════════════════════════════════════════════════════════
+  // WIDGET FLOTANTE — mini contador por página
+  // Muestra página actual + correctas/incorrectas/respondidas.
+  // Colapsado por defecto; se expande al tocar; se auto-colapsa.
+  // Se actualiza en tiempo real desde _pag2UpdateStats.
+  // ════════════════════════════════════════════════════════════════
+  (function () {
+    let _fw_timer   = null;  // auto-colapso
+    let _fw_seccion = null;  // sección activa
+    let _fw_pag     = 0;
+    let _fw_total   = 0;
+    let _fw_pages   = null;
+
+    // ── Crear DOM del widget (una sola vez) ───────────────────
+    function _fwInit() {
+      if (document.getElementById('pag2-float-widget')) return;
+      const w = document.createElement('div');
+      w.id = 'pag2-float-widget';
+      w.innerHTML = `
+        <div id="pag2-float-collapsed" title="Ver stats de esta página">
+          <span class="pag2-fw-page-pill" id="pag2-fw-col-pag">Pág 1</span>
+          <span class="pag2-fw-sep">|</span>
+          <span class="pag2-fw-ok-mini"  id="pag2-fw-col-ok">0✓</span>
+          <span class="pag2-fw-err-mini" id="pag2-fw-col-err">0✗</span>
+        </div>
+        <div id="pag2-float-expanded">
+          <div class="pag2-fw-header" id="pag2-fw-hdr">
+            <div>
+              <div class="pag2-fw-titulo">Esta página</div>
+              <div class="pag2-fw-pagina" id="pag2-fw-pagina">Pág 1 / 1</div>
+            </div>
+            <button class="pag2-fw-xbtn" id="pag2-fw-close">✕</button>
+          </div>
+          <div class="pag2-fw-body">
+            <div class="pag2-fw-stats-row">
+              <div class="pag2-fw-stat">
+                <div class="pag2-fw-num total" id="pag2-fw-resp">0</div>
+                <div class="pag2-fw-lbl">Resp.</div>
+              </div>
+              <div class="pag2-fw-stat">
+                <div class="pag2-fw-num ok"  id="pag2-fw-ok">0</div>
+                <div class="pag2-fw-lbl">Correctas</div>
+              </div>
+              <div class="pag2-fw-stat">
+                <div class="pag2-fw-num err" id="pag2-fw-err">0</div>
+                <div class="pag2-fw-lbl">Incorrectas</div>
+              </div>
+            </div>
+            <div class="pag2-fw-barra-wrap">
+              <div class="pag2-fw-barra-fill" id="pag2-fw-barra" style="width:0%"></div>
+            </div>
+            <div class="pag2-fw-fraccion" id="pag2-fw-fraccion">0 / 50</div>
+          </div>
+        </div>`;
+      document.body.appendChild(w);
+
+      // Toggle al tocar el colapsado
+      document.getElementById('pag2-float-collapsed').addEventListener('click', _fwToggle);
+      // Cerrar desde el header expandido
+      document.getElementById('pag2-fw-hdr').addEventListener('click', _fwColapsar);
+      document.getElementById('pag2-fw-close').addEventListener('click', e => {
+        e.stopPropagation();
+        _fwColapsar();
+      });
+    }
+
+    // ── Expandir ────────────────────────────────────────────────
+    function _fwExpandir() {
+      const col = document.getElementById('pag2-float-collapsed');
+      const exp = document.getElementById('pag2-float-expanded');
+      if (!col || !exp) return;
+      col.style.display = 'none';
+      exp.style.display = 'flex';
+      exp.classList.remove('pag2-fw-out');
+      // Auto-colapso a los 5 segundos
+      clearTimeout(_fw_timer);
+      _fw_timer = setTimeout(_fwColapsar, 5000);
+    }
+
+    // ── Colapsar ────────────────────────────────────────────────
+    function _fwColapsar() {
+      clearTimeout(_fw_timer);
+      const exp = document.getElementById('pag2-float-expanded');
+      const col = document.getElementById('pag2-float-collapsed');
+      if (!exp || !col) return;
+      exp.classList.add('pag2-fw-out');
+      setTimeout(() => {
+        exp.style.display = 'none';
+        exp.classList.remove('pag2-fw-out');
+        col.style.display = 'flex';
+      }, 160);
+    }
+
+    // ── Toggle ──────────────────────────────────────────────────
+    function _fwToggle() {
+      const exp = document.getElementById('pag2-float-expanded');
+      if (!exp) return;
+      if (exp.style.display === 'flex') _fwColapsar();
+      else _fwExpandir();
+    }
+
+    // ── Actualizar datos ────────────────────────────────────────
+    function _fwActualizar(ok, err, total, pagNum, totalPags) {
+      const resp = ok + err;
+      const pct  = total > 0 ? Math.round((resp / total) * 100) : 0;
+
+      // Colapsado
+      const colPag = document.getElementById('pag2-fw-col-pag');
+      const colOk  = document.getElementById('pag2-fw-col-ok');
+      const colErr = document.getElementById('pag2-fw-col-err');
+      if (colPag) colPag.textContent = `Pág ${pagNum}/${totalPags}`;
+      if (colOk)  colOk.textContent  = `${ok}✓`;
+      if (colErr) colErr.textContent = `${err}✗`;
+
+      // Expandido
+      const elPag  = document.getElementById('pag2-fw-pagina');
+      const elResp = document.getElementById('pag2-fw-resp');
+      const elOk   = document.getElementById('pag2-fw-ok');
+      const elErr  = document.getElementById('pag2-fw-err');
+      const elBar  = document.getElementById('pag2-fw-barra');
+      const elFrac = document.getElementById('pag2-fw-fraccion');
+      if (elPag)  elPag.textContent  = `Pág ${pagNum} / ${totalPags}`;
+      if (elResp) elResp.textContent = resp;
+      if (elOk)   elOk.textContent   = ok;
+      if (elErr)  elErr.textContent  = err;
+      if (elBar)  {
+        elBar.style.width = pct + '%';
+        elBar.classList.toggle('done', resp === total && total > 0);
+      }
+      if (elFrac) elFrac.innerHTML = `<b>${resp}</b> / ${total} respondidas`;
+
+      // Pulso en el colapsado para indicar cambio
+      const col = document.getElementById('pag2-float-collapsed');
+      if (col) {
+        col.classList.add('pag2-fw-pulse');
+        setTimeout(() => col.classList.remove('pag2-fw-pulse'), 600);
+      }
+
+      // Si está expandido, reiniciar el auto-colapso
+      const exp = document.getElementById('pag2-float-expanded');
+      if (exp && exp.style.display === 'flex') {
+        clearTimeout(_fw_timer);
+        _fw_timer = setTimeout(_fwColapsar, 5000);
+      } else {
+        // Expandir brevemente para mostrar el cambio, luego colapsar
+        _fwExpandir();
+      }
+    }
+
+    // ── Mostrar/ocultar el widget ────────────────────────────────
+    function _fwMostrar() {
+      _fwInit();
+      const w = document.getElementById('pag2-float-widget');
+      if (w) w.style.display = 'block';
+    }
+    function _fwOcultar() {
+      clearTimeout(_fw_timer);
+      const w = document.getElementById('pag2-float-widget');
+      if (w) { w.style.display = 'none'; }
+    }
+
+    // ── API pública (usada desde _pag2UpdateStats y renderPagina) ─
+    window._fwSetContext = function(seccionId, pagNum, totalPags, pagesArr) {
+      _fw_seccion = seccionId;
+      _fw_pag     = pagNum;
+      _fw_total   = totalPags;
+      _fw_pages   = pagesArr;
+      _fwMostrar();
+    };
+
+    window._fwActualizarStats = function(seccionId) {
+      if (seccionId !== _fw_seccion || !_fw_pages) return;
+      const indicesActuales = _fw_pages[_fw_pag] || [];
+      const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
+      let ok = 0, err = 0;
+      indicesActuales.forEach(i => {
+        const v = puntajes[i];
+        if (v === 1) ok++; else if (v === 0) err++;
+      });
+      _fwActualizar(ok, err, indicesActuales.length, _fw_pag + 1, _fw_total);
+    };
+
+    window._fwOcultar = _fwOcultar;
+  })();
+
   // ════════════════════════════════════════════════════════════════
   // HOOK sobre generarCuestionario
   // ════════════════════════════════════════════════════════════════
@@ -780,6 +1038,8 @@
     const _orig = window.generarCuestionario;
 
     window.generarCuestionario = function(seccionId) {
+      // Ocultar widget flotante al cambiar de sección
+      if (typeof window._fwOcultar === 'function') window._fwOcultar();
       const esAdmin = typeof window.fbIsAdmin === 'function' && window.fbIsAdmin();
       if (esAdmin)                return _orig.call(this, seccionId);
       if (!_debePaginar(seccionId)) return _orig.call(this, seccionId);
