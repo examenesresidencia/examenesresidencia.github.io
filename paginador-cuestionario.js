@@ -1,14 +1,14 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V25
+// paginador-cuestionario.js  — V24
 // ────────────────────────────────────────────────────────────────
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
-//     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
+//     Al navegar entre páginas (fonlechas, pills, botón Siguiente) hace scroll automático
 //     al separador "> Continuá desde aquí" de la nueva página. Si la página está completa
 //     o sin comenzar (sin separador), el scroll va al navbar top.
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
 //
 // ARQUITECTURA V2:
-//   Requiere que script.js exponga (agregado en script.js v17+):
+//   Requiere que script.js expga (agregado en script.js v17+):
 //     window._getDisplayOrder(seccionId, total)      → array de índices
 //     window._renderIndicesToCont(seccionId, indices) → renderiza esos índices
 //   El paginador intercepta generarCuestionario(), calcula el displayOrder,
@@ -367,16 +367,24 @@
       }
       #pag2-float-collapsed {
         display:flex; align-items:center; gap:6px;
-        background:rgba(13,33,55,0.96);
-        border:1px solid rgba(56,189,248,0.28);
+        background:rgba(13,33,55,0.45);
+        border:1px solid rgba(56,189,248,0.15);
         border-radius:100px; padding:7px 13px 7px 10px;
         cursor:pointer;
-        box-shadow:0 4px 18px rgba(0,0,0,0.35);
-        backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
-        transition:border-color .2s,box-shadow .2s,transform .1s;
+        box-shadow:0 4px 18px rgba(0,0,0,0.18);
+        backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+        transition:background .2s,border-color .2s,box-shadow .2s,transform .1s,opacity .2s;
         white-space:nowrap;
+        opacity:0.55;
       }
-      #pag2-float-collapsed:active { transform:scale(0.95); }
+      #pag2-float-collapsed:hover,
+      #pag2-float-collapsed:focus {
+        background:rgba(13,33,55,0.96);
+        border-color:rgba(56,189,248,0.55);
+        box-shadow:0 4px 18px rgba(0,0,0,0.35);
+        opacity:1;
+      }
+      #pag2-float-collapsed:active { transform:scale(0.95); opacity:1; }
       #pag2-float-collapsed.pag2-fw-pulse {
         border-color:rgba(56,189,248,0.75);
         box-shadow:0 0 0 3px rgba(56,189,248,0.18),0 4px 18px rgba(0,0,0,0.35);
@@ -977,14 +985,11 @@
         setTimeout(() => col.classList.remove('pag2-fw-pulse'), 600);
       }
 
-      // Si está expandido, reiniciar el auto-colapso
+      // Si ya está expandido, reiniciar el auto-colapso; si no, NO expandir
       const exp = document.getElementById('pag2-float-expanded');
       if (exp && exp.style.display === 'flex') {
         clearTimeout(_fw_timer);
         _fw_timer = setTimeout(_fwColapsar, 5000);
-      } else {
-        // Expandir brevemente para mostrar el cambio, luego colapsar
-        _fwExpandir();
       }
     }
 
