@@ -1,5 +1,18 @@
-//PRUEBA 24  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix v24: TRES mejoras profesionales en un solo bloque:
+//PRUEBA 27  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix v27: CUATRO mejoras críticas en un solo bloque:
+//   1. CSS GLOBAL de viñetas (ul/li) en explicaciones inyectado para TODOS los usuarios.
+//      Las listas WYSIWYG guardadas en Firestore ahora se renderizan correctamente
+//      sin necesitar que el admin abra el modal. Función: _inyectarEstilosListasGlobal().
+//   2. PERSISTENCIA DE EDICIONES en IDB del usuario.
+//      _aplicarEdicionPuntual ahora también parchea el IDB del usuario (no solo memoria).
+//      Al recargar la página, el usuario ve la versión editada y no la vieja.
+//      Costo: 0 lecturas de Firestore (1 get + 1 set al IDB local).
+//   3. TOAST CON ESPECIALIDAD: el toast de edición admin ahora especifica el nombre
+//      legible de la especialidad en todos los casos (el usuario esté o no en esa sección).
+//   4. BADGE "ACTUALIZADO": al recibir una edición en tiempo real, aparece un badge
+//      temporal "✏️ ACTUALIZADO" en el h3 de la pregunta editada durante 6 segundos.
+//   5. MIGRACIÓN AL PAGINADOR: al responder fuera de secuencia, navega automáticamente
+//      a la página de destino con _pag2IrAQIndex + scroll al separador + toast informativo.
 //   1. mostrarExplicacion() siempre sincroniza contenido desde preguntasPorSeccion
 //      antes de mostrar, garantizando que el usuario ve la explicación actualizada
 //      incluso si el admin editó mientras el panel estaba cerrado.
@@ -2468,6 +2481,9 @@
     const preguntas = preguntasPorSeccion[seccionId];
     if (!preguntas) return;
 
+    // V27: inyectar estilos de viñetas/listas desde el primer render (antes de cualquier pregunta)
+    if (typeof _inyectarEstilosListasGlobal === 'function') _inyectarEstilosListasGlobal();
+
     ensureSectionState(seccionId, preguntas.length);
 
     const cont = document.getElementById(`cuestionario-${seccionId}`);
@@ -2615,6 +2631,63 @@
       }
     `;
     document.head.appendChild(style);
+  }
+
+  // ── V27: Inyectar estilos GLOBALES para listas en explicaciones ──────────────
+  // Las viñetas (ul/li) guardadas con el editor WYSIWYG no se muestran en el
+  // usuario porque el CSS de listas solo existe dentro del modal del admin.
+  // Esta función inyecta los estilos una sola vez para TODOS los usuarios.
+  function _inyectarEstilosListasGlobal() {
+    if (document.getElementById('v27-listas-explicacion-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'v27-listas-explicacion-styles';
+    st.textContent = `
+      /* ── V27: Viñetas y listas dentro de explicaciones (usuarios y admin) ── */
+      .explicacion-contenedor ul,
+      [id^="explicacion-"] ul {
+        list-style: disc !important;
+        padding-left: 1.6em !important;
+        margin: 5px 0 !important;
+      }
+      .explicacion-contenedor ol,
+      [id^="explicacion-"] ol {
+        list-style: decimal !important;
+        padding-left: 1.6em !important;
+        margin: 5px 0 !important;
+      }
+      .explicacion-contenedor li,
+      [id^="explicacion-"] li {
+        margin: 3px 0 !important;
+        line-height: 1.65 !important;
+      }
+      .explicacion-contenedor ul ul,
+      [id^="explicacion-"] ul ul {
+        list-style: circle !important;
+      }
+      .explicacion-contenedor ul ul ul,
+      [id^="explicacion-"] ul ul ul {
+        list-style: square !important;
+      }
+      /* ── V27: Badge "ACTUALIZADO" al recibir edición en tiempo real ── */
+      [data-edit-badge] {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 3px !important;
+        background: linear-gradient(135deg, #0891b2, #38bdf8) !important;
+        color: #fff !important;
+        font-size: 0.68rem !important;
+        font-weight: 700 !important;
+        padding: 2px 8px !important;
+        border-radius: 100px !important;
+        margin-left: 8px !important;
+        vertical-align: middle !important;
+        letter-spacing: 0.03em !important;
+        pointer-events: none !important;
+        white-space: nowrap !important;
+        font-style: normal !important;
+      }
+    `;
+    document.head.appendChild(st);
   }
 
   // ── Inyectar estilos del separador "Continuá desde aquí" ────────
@@ -2916,10 +2989,7 @@
 
           if (_paginaDeEsta > _paginaSeq && _posEnDisplay !== -1) {
             // La pregunta quedó fuera de secuencia: moverla al final del bloque secuencial.
-            // Eliminamos su entrada de donde esté y la reinsertamos justo después de la
-            // última respondida secuencialmente (= al inicio del bloque no-secuencial).
-            const _posSecAbsoluta = _paginaSeq * _PAGE_SIZE; // primera pos de la página secuencial
-            // Contar cuántas respondidas hay antes de esa posición en el displayOrder actual
+            const _posSecAbsoluta = _paginaSeq * _PAGE_SIZE;
             const _respondAntesDeSeq = _displayOrd.slice(0, _posSecAbsoluta).filter(i => _graded2[i]).length;
 
             // Reordenar answeredOrder: poner qIndex en la posición _respondAntesDeSeq
@@ -2927,7 +2997,6 @@
             const _entryIdx = _aO.findIndex(e => (typeof e === 'number' ? e : e.idx) === qIndex);
             if (_entryIdx !== -1) {
               const [_entry] = _aO.splice(_entryIdx, 1);
-              // Insertar en la posición secuencial correcta
               const _insertPos = Math.min(_respondAntesDeSeq, _aO.length);
               _aO.splice(_insertPos, 0, _entry);
               if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
@@ -2938,26 +3007,54 @@
             // Obtener nombre legible de la sección para el toast
             const _nomSecMig = (() => {
               const _elSec = document.getElementById(seccionId);
-              if (_elSec) { const _hSec = _elSec.querySelector('h1, h2, .titulo-seccion'); if (_hSec && _hSec.textContent.trim()) return _hSec.textContent.trim(); }
+              if (_elSec) {
+                const _hSec = _elSec.querySelector('h1, h2, .titulo-seccion');
+                if (_hSec && _hSec.textContent.trim()) return _hSec.textContent.trim();
+              }
               return seccionId;
             })();
 
-            // Número de posición en el bloque (1-based)
-            const _numEnBloque = _respondAntesDeSeq + 1;
-            const _msg = `📌 Pregunta migrada → página ${_paginaSeq + 1} (posición ${_numEnBloque}) · Especialidad: ${_nomSecMig}`;
-            if (typeof window.fbToast === 'function') window.fbToast(_msg, 'info');
-            else if (typeof fbToast === 'function') fbToast(_msg, 'info');
+            const _paginaDestino1b = _paginaSeq + 1; // 1-based para el usuario
 
             // ── Navegar automáticamente al paginador a la página de destino ──────────
-            // Re-renderizar la página destino para que el usuario vea la pregunta
-            // en su nueva posición secuencial. El render se hace después de un frame
-            // para que el estado ya haya sido persistido.
-            window._migracionPendiente = true; // suprimir el DOM move físico (innecesario)
+            // 1. Suprimir el DOM move físico (innecesario, el paginador re-renderiza)
+            window._migracionPendiente = true;
+
             if (typeof window.generarCuestionario === 'function') {
               setTimeout(() => {
                 window._migracionPendiente = false;
-                // Regenerar el cuestionario (el paginador irá a la página lógica correcta)
+
+                // 2. Re-renderizar el cuestionario (paginador irá a la página lógica)
                 window.generarCuestionario(seccionId);
+
+                // 3. DESPUÉS del render, navegar explícitamente a la página de destino
+                //    usando _pag2IrAQIndex (expuesto por el paginador)
+                setTimeout(() => {
+                  let _navegado = false;
+                  if (typeof window._pag2IrAQIndex === 'function') {
+                    _navegado = window._pag2IrAQIndex(seccionId, qIndex, () => {
+                      // Callback: scroll al separador "Continuá desde aquí"
+                      setTimeout(() => {
+                        const _sep = document.getElementById(`pag2-sep-${seccionId}`);
+                        if (_sep) {
+                          _sep.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }
+                      }, 150);
+
+                      // Toast DESPUÉS de la navegación (más informativo con la pág real)
+                      const _toastMsg = `📌 Pregunta migrada a pág. ${_paginaDestino1b} de "${_nomSecMig}" — continuá desde el separador amarillo`;
+                      if (typeof window.fbToast === 'function') window.fbToast(_toastMsg, 'info', 5500);
+                      else if (typeof fbToast === 'function') fbToast(_toastMsg, 'info', 5500);
+                    });
+                  }
+
+                  // Si _pag2IrAQIndex no estuvo disponible, mostrar toast genérico
+                  if (!_navegado) {
+                    const _toastMsg = `📌 Pregunta migrada a pág. ${_paginaDestino1b} · Especialidad: ${_nomSecMig}`;
+                    if (typeof window.fbToast === 'function') window.fbToast(_toastMsg, 'info');
+                    else if (typeof fbToast === 'function') fbToast(_toastMsg, 'info');
+                  }
+                }, 300); // tiempo para que el paginador termine de renderizar
               }, 80);
             }
           }
@@ -8644,7 +8741,26 @@ function fbSaveProgressToCloud() {
       pregDiv.style.boxShadow   = '';
       pregDiv.style.borderColor = '';
     }, 1800);
-  }
+
+    // 5. Badge "✏️ ACTUALIZADO" temporal sobre el h3 para identificar el cambio
+    const _h3Badge = pregDiv.querySelector('h3');
+    if (_h3Badge && !_h3Badge.querySelector('[data-edit-badge]')) {
+      const _badge = document.createElement('span');
+      _badge.setAttribute('data-edit-badge', '1');
+      _badge.style.cssText = [
+        'display:inline-flex', 'align-items:center', 'gap:4px',
+        'background:linear-gradient(135deg,#0891b2,#38bdf8)',
+        'color:#fff', 'font-size:0.68rem', 'font-weight:700',
+        'padding:2px 8px', 'border-radius:100px',
+        'margin-left:8px', 'vertical-align:middle',
+        'animation:none', 'letter-spacing:0.03em',
+        'pointer-events:none', 'white-space:nowrap'
+      ].join(';');
+      _badge.textContent = '✏️ ACTUALIZADO';
+      _h3Badge.appendChild(_badge);
+      // Remover el badge automáticamente después de 6 segundos
+      setTimeout(() => { try { _badge.remove(); } catch (_) {} }, 6000);
+    }
 
   async function _aplicarEdicionPuntual(seccionId, qIndexes, nuevasCorrectas, datosEmbebidos = null) {
     if (!_fbDb) return;
@@ -8695,7 +8811,39 @@ function fbSaveProgressToCloud() {
         }
       });
 
-      // ── Parchar en caché localStorage (ed.qIndex base 1 → array base 0) ──
+      // ── Parchar en caché IDB del usuario (CRÍTICO para persistencia al recargar) ──
+      // Sin este parche, el IDB tiene los datos viejos y al recargar la página
+      // el usuario ve la versión anterior de la pregunta aunque el admin la editó.
+      // Costo: 1 lectura + 1 escritura a IDB local (sin red), 0 lecturas de Firestore.
+      try {
+        const _idbCacheKey = PREGUNTAS_CACHE_PREFIX + seccionId;
+        const _idbCached   = await _idbCache.get(_idbCacheKey);
+        if (_idbCached?.preguntas) {
+          let _idbModificado = false;
+          edicionesDescargadas.forEach(ed => {
+            const idx = ed.qIndex - 1;
+            if (!_idbCached.preguntas[idx]) return;
+            if (ed.pregunta    !== undefined) { _idbCached.preguntas[idx].pregunta    = ed.pregunta;    _idbModificado = true; }
+            if (ed.opciones    !== undefined) { _idbCached.preguntas[idx].opciones    = ed.opciones;    _idbModificado = true; }
+            if (ed.correcta    !== undefined) { _idbCached.preguntas[idx].correcta    = ed.correcta;    _idbModificado = true; }
+            if (ed.explicacion !== undefined) { _idbCached.preguntas[idx].explicacion = ed.explicacion; _idbModificado = true; }
+            if (ed.imagen      !== undefined) { _idbCached.preguntas[idx].imagen      = ed.imagen;      _idbModificado = true; }
+          });
+          if (_idbModificado) {
+            _idbCached.ts = Date.now(); // renovar vigencia 24h
+            await _idbCache.set(_idbCacheKey, _idbCached);
+            console.log('[EDIT-PATCH] ✅ IDB usuario parcheado →', seccionId, '| ediciones:', edicionesDescargadas.length);
+          }
+        }
+        // También invalidar fb_edits_cache_ para que la próxima carga aplique ediciones frescas
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+      } catch (_idbErr) {
+        // Si falla el parche de IDB, invalidar para forzar recarga fresca
+        try { await _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId); } catch (_) {}
+        console.warn('[EDIT-PATCH] IDB parche falló, caché invalidado:', _idbErr.message);
+      }
+
+      // ── Parchar en caché localStorage (fallback — solo si el IDB no estaba disponible) ──
       try {
         const cacheKey = PREGUNTAS_CACHE_PREFIX + seccionId;
         const raw = localStorage.getItem(cacheKey);
@@ -8715,7 +8863,6 @@ function fbSaveProgressToCloud() {
             localStorage.setItem(cacheKey, JSON.stringify(cached));
           }
         }
-        localStorage.removeItem('fb_edits_cache_' + seccionId);
       } catch (_) {}
 
       // ── Recalificar si cambió la respuesta correcta ──
@@ -8725,16 +8872,19 @@ function fbSaveProgressToCloud() {
         });
       }
 
-      // ── Actualizar el DOM ──
-      // Helper: obtener nombre legible de la sección
+      // ── Helper: obtener nombre legible de la sección ──
       const _getNombreSeccion = (sid) => {
         const el = document.getElementById(sid);
         if (el) {
           const h = el.querySelector('h1, h2, .titulo-seccion');
           if (h && h.textContent.trim()) return h.textContent.trim();
         }
-        return sid;
+        // Fallback: capitalizar primer carácter
+        return sid.charAt(0).toUpperCase() + sid.slice(1);
       };
+
+      // ── Actualizar el DOM + toasts con nombre de especialidad ──
+      const _nombreSecToast = _getNombreSeccion(seccionId);
 
       if (currentSection === seccionId) {
         if (datosEmbebidos && indices.length === 1) {
@@ -8748,18 +8898,18 @@ function fbSaveProgressToCloud() {
           if (_ed0.opciones    !== undefined) _cambios.push('opciones');
           if (_ed0.explicacion !== undefined) _cambios.push('explicación');
           const _cambioStr = _cambios.length > 0 ? ` (${_cambios.join(', ')})` : '';
-          if (typeof fbToast === 'function') fbToast(`✏️ Pregunta actualizada por el admin${_cambioStr}`, 'info');
+          // Toast con nombre de especialidad
+          if (typeof fbToast === 'function') fbToast(`✏️ Pregunta actualizada en "${_nombreSecToast}"${_cambioStr}`, 'info');
         } else {
           // Lote: re-renderizar una sola vez
           if (typeof window.generarCuestionario === 'function') {
             window.generarCuestionario(seccionId);
           }
-          if (typeof fbToast === 'function') fbToast(`✏️ Se actualizaron ${indices.length} pregunta(s) en esta sección`, 'info');
+          if (typeof fbToast === 'function') fbToast(`✏️ Se actualizaron ${indices.length} pregunta(s) en "${_nombreSecToast}"`, 'info');
         }
       } else {
         // El usuario NO está viendo esta sección — avisarle con el nombre de la especialidad
-        const _nombreSec = _getNombreSeccion(seccionId);
-        if (typeof fbToast === 'function') fbToast(`✏️ El admin actualizó una pregunta en "${_nombreSec}"`, 'info');
+        if (typeof fbToast === 'function') fbToast(`✏️ El admin actualizó una pregunta en "${_nombreSecToast}"`, 'info');
       }
 
       const via = datosEmbebidos
@@ -9993,6 +10143,8 @@ function fbSaveProgressToCloud() {
     });
 
     inyectarEstilosEtiquetas();
+    // V27: inyectar estilos de viñetas/listas globales (una sola vez por sesión)
+    if (typeof _inyectarEstilosListasGlobal === 'function') _inyectarEstilosListasGlobal();
     var etq = preg.etiquetas || {};
     var esSimulacroCtx = (seccionId === 'simulador');
     var esUnicoCtx = esExamenUnico(seccionId);
