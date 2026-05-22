@@ -1,4 +1,14 @@
-//PRUEBA 23  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 24  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix v24: TRES mejoras profesionales en un solo bloque:
+//   1. mostrarExplicacion() siempre sincroniza contenido desde preguntasPorSeccion
+//      antes de mostrar, garantizando que el usuario ve la explicación actualizada
+//      incluso si el admin editó mientras el panel estaba cerrado.
+//   2. Toast de edición admin ahora especifica el nombre de la especialidad editada
+//      (antes decía solo "Se actualizó una pregunta de {id}").
+//   3. Migración de preguntas fuera de secuencia: toast incluye nombre de especialidad
+//      + la pregunta migrada navega automáticamente a la página de destino (el paginador
+//      re-renderiza la página secuencial correcta). No afecta respuestas ya respondidas,
+//      contadores ni orden de otras preguntas.
 // Fix v22: LIMPIEZA automática en getDisplayOrder — 4 correcciones en un solo bloque:
 //   1. Elimina de answeredOrder entradas sin graded=true (corrupción por reordenamiento)
 //   2. Elimina duplicados en answeredOrder (mismo idx dos veces)
@@ -1311,7 +1321,52 @@
     const explicacionDiv = document.getElementById(`explicacion-${seccionId}-${qIndex}`);
     const btnExplicacion = document.getElementById(`btn-explicacion-${seccionId}-${qIndex}`);
     if (!explicacionDiv) return;
-    
+
+    // ── ACTUALIZACIÓN EN TIEMPO REAL ────────────────────────────────────────────
+    // Siempre sincronizar el contenido del div con la fuente en memoria
+    // (preguntasPorSeccion), que puede haber sido actualizada por el admin
+    // sin que el div haya sido re-renderizado (si la explicación estaba cerrada).
+    const _pregFresca = (window.preguntasPorSeccion?.[seccionId] || [])[qIndex];
+    if (_pregFresca) {
+      const _expFresca = _pregFresca.explicacion || '';
+      const _tieneContenidoFresco = !!(_expFresca && _expFresca.trim());
+
+      // Actualizar dataset
+      explicacionDiv.dataset.tieneContenido = _tieneContenidoFresco ? '1' : '0';
+
+      // Actualizar el texto del div interno (segundo hijo: el div de texto)
+      const _textoDiv = explicacionDiv.querySelector('div');
+      if (_textoDiv) {
+        if (_tieneContenidoFresco) {
+          const _htmlDetectado = /<(p|b|i|u|br|img|strong|em)[^>]*>/i.test(_expFresca);
+          if (_htmlDetectado) {
+            _textoDiv.innerHTML = _expFresca.replace(/<p>\s*<\/p>/g,'').replace(/\n/g,'<br>').trim();
+            _textoDiv.querySelectorAll('img').forEach(img => {
+              img.style.maxWidth  = '100%';
+              img.style.width     = 'auto';
+              img.style.height    = 'auto';
+              img.style.display   = 'block';
+              img.style.boxSizing = 'border-box';
+            });
+          } else {
+            _textoDiv.textContent = _expFresca;
+          }
+        } else {
+          _textoDiv.textContent = '';
+        }
+      }
+
+      // Actualizar el botón según contenido fresco
+      if (btnExplicacion) {
+        const _estaVisible = explicacionDiv.style.display !== 'none' && explicacionDiv.style.display !== '';
+        if (!_estaVisible) {
+          btnExplicacion.textContent = _tieneContenidoFresco ? 'Ver explicación' : '➕ Agregar explicación';
+          btnExplicacion.className = 'btn-explicacion' + (_tieneContenidoFresco ? '' : ' btn-explicacion--vacia');
+        }
+      }
+    }
+    // ── FIN ACTUALIZACIÓN EN TIEMPO REAL ─────────────────────────────────────
+
     const _tieneContenido = explicacionDiv.dataset.tieneContenido === '1';
     
     if (explicacionDiv.style.display === "none" || explicacionDiv.style.display === "") {
@@ -2880,11 +2935,31 @@
                 '(pág.', _paginaSeq + 1, ')');
             }
 
-            // Toast informativo
-            const _numEnBloque = _respondAntesDeSeq + 1; // 1-based
-            const _msg = `📌 Pregunta respondida → reubicada como nº ${_numEnBloque} (pág. ${_paginaSeq + 1})`;
+            // Obtener nombre legible de la sección para el toast
+            const _nomSecMig = (() => {
+              const _elSec = document.getElementById(seccionId);
+              if (_elSec) { const _hSec = _elSec.querySelector('h1, h2, .titulo-seccion'); if (_hSec && _hSec.textContent.trim()) return _hSec.textContent.trim(); }
+              return seccionId;
+            })();
+
+            // Número de posición en el bloque (1-based)
+            const _numEnBloque = _respondAntesDeSeq + 1;
+            const _msg = `📌 Pregunta migrada → página ${_paginaSeq + 1} (posición ${_numEnBloque}) · Especialidad: ${_nomSecMig}`;
             if (typeof window.fbToast === 'function') window.fbToast(_msg, 'info');
             else if (typeof fbToast === 'function') fbToast(_msg, 'info');
+
+            // ── Navegar automáticamente al paginador a la página de destino ──────────
+            // Re-renderizar la página destino para que el usuario vea la pregunta
+            // en su nueva posición secuencial. El render se hace después de un frame
+            // para que el estado ya haya sido persistido.
+            window._migracionPendiente = true; // suprimir el DOM move físico (innecesario)
+            if (typeof window.generarCuestionario === 'function') {
+              setTimeout(() => {
+                window._migracionPendiente = false;
+                // Regenerar el cuestionario (el paginador irá a la página lógica correcta)
+                window.generarCuestionario(seccionId);
+              }, 80);
+            }
           }
         }
       } catch (_e) { console.warn('[MIGRACIÓN] Error no crítico:', _e.message); }
@@ -2892,7 +2967,9 @@
     
     // ── Mover físicamente el div de la pregunta al área de respondidas ──────────
     // Solo en cuestionarios con orden dinámico (no simulacro, no exámenes fijos)
-    if (!esSimulacro && !esExamenUnico(seccionId) && !esExamenUBA(seccionId) && !esCompilado(seccionId)) {
+    // No se hace si hubo migración (generarCuestionario re-renderiza todo en 80ms)
+    if (!esSimulacro && !esExamenUnico(seccionId) && !esExamenUBA(seccionId) && !esCompilado(seccionId)
+        && !window._migracionPendiente) {
       const cont = document.getElementById(`cuestionario-${seccionId}`);
       if (cont) {
         // Primero actualizar/crear el separador en su posición correcta
@@ -2907,6 +2984,8 @@
         }
       }
     }
+    // Limpiar flag de migración (se usó en el bloque anterior)
+    window._migracionPendiente = false;
 
     // Actualizar la posición del separador "Continuá desde aquí"
     // Para secciones dinámicas (especialidades) ya se actualizó y movió el div arriba.
@@ -8372,7 +8451,13 @@ function fbSaveProgressToCloud() {
         window.scrollTo({ top: scrollAntes, behavior: 'instant' });
       });
 
-      fbToast('📥 Contenido actualizado por el admin', 'info');
+      // Obtener nombre legible para el toast
+      const _nomSecRecargar = (() => {
+        const _el = document.getElementById(seccionId);
+        if (_el) { const _h = _el.querySelector('h1, h2, .titulo-seccion'); if (_h && _h.textContent.trim()) return _h.textContent.trim(); }
+        return seccionId;
+      })();
+      fbToast(`📥 "${_nomSecRecargar}" fue actualizado por el admin`, 'info');
     }
 
     console.log('[CONTENT-SYNC] Sección recargada:', seccionId);
@@ -8641,20 +8726,40 @@ function fbSaveProgressToCloud() {
       }
 
       // ── Actualizar el DOM ──
+      // Helper: obtener nombre legible de la sección
+      const _getNombreSeccion = (sid) => {
+        const el = document.getElementById(sid);
+        if (el) {
+          const h = el.querySelector('h1, h2, .titulo-seccion');
+          if (h && h.textContent.trim()) return h.textContent.trim();
+        }
+        return sid;
+      };
+
       if (currentSection === seccionId) {
         if (datosEmbebidos && indices.length === 1) {
           // Update quirúrgico: solo los nodos de esa pregunta.
           // El usuario no pierde scroll ni selecciones en curso.
           _updatePreguntaEnDOM(seccionId, indices[0], edicionesDescargadas[0]);
-          if (typeof fbToast === 'function') fbToast('✏️ Pregunta actualizada por el admin', 'info');
+          // Determinar qué cambió para el toast
+          const _ed0 = edicionesDescargadas[0];
+          const _cambios = [];
+          if (_ed0.pregunta    !== undefined) _cambios.push('enunciado');
+          if (_ed0.opciones    !== undefined) _cambios.push('opciones');
+          if (_ed0.explicacion !== undefined) _cambios.push('explicación');
+          const _cambioStr = _cambios.length > 0 ? ` (${_cambios.join(', ')})` : '';
+          if (typeof fbToast === 'function') fbToast(`✏️ Pregunta actualizada por el admin${_cambioStr}`, 'info');
         } else {
           // Lote: re-renderizar una sola vez
           if (typeof window.generarCuestionario === 'function') {
             window.generarCuestionario(seccionId);
           }
+          if (typeof fbToast === 'function') fbToast(`✏️ Se actualizaron ${indices.length} pregunta(s) en esta sección`, 'info');
         }
       } else {
-        if (typeof fbToast === 'function') fbToast(`✏️ Se actualizó una pregunta de ${seccionId}`, 'info');
+        // El usuario NO está viendo esta sección — avisarle con el nombre de la especialidad
+        const _nombreSec = _getNombreSeccion(seccionId);
+        if (typeof fbToast === 'function') fbToast(`✏️ El admin actualizó una pregunta en "${_nombreSec}"`, 'info');
       }
 
       const via = datosEmbebidos
