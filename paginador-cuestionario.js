@@ -364,6 +364,12 @@
         position:fixed; bottom:56px; right:14px; z-index:9989;
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
         user-select:none;
+        resize:none;
+        touch-action:none;
+      }
+      #pag2-float-widget * {
+        resize:none;
+        box-sizing:border-box;
       }
       #pag2-float-collapsed {
         display:flex; align-items:center; gap:6px;
@@ -390,10 +396,11 @@
         display:none; flex-direction:column;
         background:rgba(10,22,40,0.97);
         border:1px solid rgba(56,189,248,0.22);
-        border-radius:16px; min-width:176px;
+        border-radius:16px; width:176px; min-width:176px; max-width:176px;
         box-shadow:0 12px 40px rgba(0,0,0,0.45);
         backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
         overflow:hidden;
+        resize:none;
         transform-origin:bottom right;
         animation:pag2FwIn .22s cubic-bezier(.34,1.3,.64,1) both;
       }
