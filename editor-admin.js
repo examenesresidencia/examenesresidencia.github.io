@@ -1,6 +1,17 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V23
+// editor-admin.js  — V24
 // ────────────────────────────────────────────────────────────────
+// V24: Corregido el update quirúrgico del DOM al guardar una edición.
+//      Los selectores anteriores (.pregunta-texto, .opcion-label, etc.)
+//      no coincidían con el HTML real generado por script.js.
+//      Ahora se usan los selectores correctos:
+//        - enunciado → h3 (preservando el prefijo numérico "N. ")
+//        - opciones  → label.opcion → nodo de texto suelto tras el input
+//                      respetando el shuffleMap (data-original-index)
+//        - explicación → div interno del contenedor, sin tocar el <strong>
+//                        ni el dataset.tieneContenido ni el botón
+//      Resultado: el admin ve la pregunta actualizada al instante, sin
+//      necesidad de recargar la página. También se agrega destello verde.
 // V18: se agrega _eaCanDelete() para que soloquimicayaruqui@gmail.com
 //      también pueda ver el botón 🗑 y eliminar preguntas repetidas,
 //      igual que admin. El botón ✏️ Editar sigue siendo solo admin.
@@ -1327,23 +1338,72 @@
         // En vez de re-renderizar toda la página (cargarSeccion + generarCuestionario),
         // actualizamos directamente los elementos del DOM de esa pregunta.
         // 0 lecturas de Firestore, sin re-shuffle, sin perder el scroll.
+        // IMPORTANTE: los selectores deben coincidir con cómo script.js renderiza cada campo:
+        //   - enunciado → <h3> (primer h3 dentro de .pregunta)
+        //   - opciones  → <label class="opcion"> con nodo de texto suelto tras el <input>
+        //   - explicación → contenedor con id="explicacion-{sec}-{idx}" → segundo hijo <div> de texto
         const _pregEl = document.getElementById(`puntaje-${seccionId}-${qIndex}`)?.closest('.pregunta');
         if (_pregEl) {
-          // Actualizar enunciado
-          const _enunciadoEl = _pregEl.querySelector('.pregunta-texto, .enunciado, p.pregunta, .pregunta-enunciado');
-          if (_enunciadoEl) _enunciadoEl.innerHTML = nuevaPreg;
-
-          // Actualizar opciones
-          const _opcionesEls = _pregEl.querySelectorAll('.opcion-label, label.opcion, .opcion-texto');
-          if (_opcionesEls.length === nuevasOpciones.length) {
-            _opcionesEls.forEach((el, i) => { el.textContent = nuevasOpciones[i]; });
+          // 1. Actualizar enunciado (h3 — puede tener "N. " como prefijo numérico)
+          const _h3El = _pregEl.querySelector('h3');
+          if (_h3El) {
+            const _textoActual = _h3El.textContent || '';
+            const _match = _textoActual.match(/^(\d+\.\s*)/);
+            const _prefijo = _match ? _match[1] : '';
+            _h3El.textContent = _prefijo + nuevaPreg;
           }
 
-          // Actualizar explicación si está visible
+          // 2. Actualizar opciones — label.opcion tiene un <input> + nodo de texto suelto
+          const _labels = _pregEl.querySelectorAll('label.opcion');
+          _labels.forEach((label, mixedIdx) => {
+            // Obtener el índice original desde el data-attribute del input
+            const _inp = label.querySelector('input');
+            const _origIdx = _inp ? parseInt(_inp.getAttribute('data-original-index') ?? mixedIdx, 10) : mixedIdx;
+            // El texto de la opción es el nodo de texto suelto dentro del label (después del input)
+            const _nodoTexto = Array.from(label.childNodes)
+              .find(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim());
+            if (_nodoTexto && nuevasOpciones[_origIdx] !== undefined) {
+              _nodoTexto.textContent = ' ' + nuevasOpciones[_origIdx];
+            }
+          });
+
+          // 3. Actualizar explicación de forma quirúrgica
           const _explEl = document.getElementById(`explicacion-${seccionId}-${qIndex}`);
-          if (_explEl && _explEl.style.display !== 'none') {
-            _explEl.innerHTML = nuevaExpl || '';
+          if (_explEl) {
+            // Actualizar dataset
+            _explEl.dataset.tieneContenido = (nuevaExpl && nuevaExpl.trim()) ? '1' : '0';
+            // Actualizar SOLO el div de texto (segundo hijo, después del <strong>)
+            const _textoDiv = _explEl.querySelector('div');
+            if (_textoDiv) {
+              if (nuevaExpl && nuevaExpl.trim()) {
+                const _htmlDetectado = /<(p|b|i|u|br|img|strong|em)[^>]*>/i.test(nuevaExpl);
+                if (_htmlDetectado) {
+                  _textoDiv.innerHTML = nuevaExpl.replace(/<p>\s*<\/p>/g,'').replace(/\n/g,'<br>').trim();
+                  _textoDiv.querySelectorAll('img').forEach(img => {
+                    img.style.maxWidth = '100%'; img.style.width = 'auto';
+                    img.style.height = 'auto'; img.style.display = 'block';
+                    img.style.boxSizing = 'border-box';
+                  });
+                } else {
+                  _textoDiv.textContent = nuevaExpl;
+                }
+              } else {
+                _textoDiv.textContent = '';
+              }
+            }
+            // Actualizar botón de explicación (si existe y la explicación está cerrada)
+            const _btnExpl = document.getElementById(`btn-explicacion-${seccionId}-${qIndex}`);
+            if (_btnExpl && _explEl.style.display === 'none') {
+              const _tieneContenido = !!(nuevaExpl && nuevaExpl.trim());
+              _btnExpl.textContent = _tieneContenido ? 'Ver explicación' : '➕ Agregar explicación';
+              _btnExpl.className = 'btn-explicacion' + (_tieneContenido ? '' : ' btn-explicacion--vacia');
+            }
           }
+
+          // 4. Destello de confirmación en el div de la pregunta
+          _pregEl.style.transition = 'box-shadow 0.4s ease, border-color 0.4s ease';
+          _pregEl.style.boxShadow   = '0 0 0 3px rgba(16,185,129,0.6)';
+          setTimeout(() => { _pregEl.style.boxShadow = ''; }, 1800);
 
           console.log('[EDITOR] DOM actualizado quirúrgicamente para qIndex:', qIndex);
 
