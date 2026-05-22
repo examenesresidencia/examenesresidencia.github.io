@@ -1,14 +1,14 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V24
+// paginador-cuestionario.js  — V25
 // ────────────────────────────────────────────────────────────────
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
-//     Al navegar entre páginas (fonlechas, pills, botón Siguiente) hace scroll automático
+//     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
 //     al separador "> Continuá desde aquí" de la nueva página. Si la página está completa
 //     o sin comenzar (sin separador), el scroll va al navbar top.
 // para usuarios no-admin. Admin sigue viendo todo en una sola hoja.
 //
 // ARQUITECTURA V2:
-//   Requiere que script.js expga (agregado en script.js v17+):
+//   Requiere que script.js exponga (agregado en script.js v17+):
 //     window._getDisplayOrder(seccionId, total)      → array de índices
 //     window._renderIndicesToCont(seccionId, indices) → renderiza esos índices
 //   El paginador intercepta generarCuestionario(), calcula el displayOrder,
@@ -367,24 +367,16 @@
       }
       #pag2-float-collapsed {
         display:flex; align-items:center; gap:6px;
-        background:rgba(13,33,55,0.45);
-        border:1px solid rgba(56,189,248,0.15);
+        background:rgba(13,33,55,0.96);
+        border:1px solid rgba(56,189,248,0.28);
         border-radius:100px; padding:7px 13px 7px 10px;
         cursor:pointer;
-        box-shadow:0 4px 18px rgba(0,0,0,0.18);
-        backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
-        transition:background .2s,border-color .2s,box-shadow .2s,transform .1s,opacity .2s;
-        white-space:nowrap;
-        opacity:0.55;
-      }
-      #pag2-float-collapsed:hover,
-      #pag2-float-collapsed:focus {
-        background:rgba(13,33,55,0.96);
-        border-color:rgba(56,189,248,0.55);
         box-shadow:0 4px 18px rgba(0,0,0,0.35);
-        opacity:1;
+        backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+        transition:border-color .2s,box-shadow .2s,transform .1s;
+        white-space:nowrap;
       }
-      #pag2-float-collapsed:active { transform:scale(0.95); opacity:1; }
+      #pag2-float-collapsed:active { transform:scale(0.95); }
       #pag2-float-collapsed.pag2-fw-pulse {
         border-color:rgba(56,189,248,0.75);
         box-shadow:0 0 0 3px rgba(56,189,248,0.18),0 4px 18px rgba(0,0,0,0.35);
@@ -429,6 +421,37 @@
         cursor:pointer; transition:background .15s,color .15s; font-family:inherit;
       }
       .pag2-fw-xbtn:hover { background:rgba(255,255,255,0.12);color:#94a3b8; }
+      /* ── Drag handle & pin button ── */
+      #pag2-float-widget.pag2-fw-dragging { opacity:.9; cursor:grabbing !important; }
+      #pag2-float-widget.pag2-fw-dragging * { cursor:grabbing !important; pointer-events:none; }
+      .pag2-fw-drag-handle {
+        display:flex; align-items:center; justify-content:center;
+        padding:4px 0 6px;
+        cursor:grab;
+        color:rgba(100,116,139,0.5);
+        font-size:12px;
+        letter-spacing:2px;
+        user-select:none;
+        transition:color .15s;
+      }
+      .pag2-fw-drag-handle:active { cursor:grabbing; }
+      .pag2-fw-drag-handle:hover { color:rgba(100,116,139,0.85); }
+      .pag2-fw-pin-row {
+        display:flex; align-items:center; justify-content:center;
+        padding:0 12px 10px;
+      }
+      .pag2-fw-pin-btn {
+        background:none; border:1px solid rgba(255,255,255,0.08);
+        border-radius:8px; padding:5px 14px;
+        font-size:15px; cursor:pointer;
+        transition:background .15s, border-color .15s, transform .1s;
+        line-height:1;
+      }
+      .pag2-fw-pin-btn:hover  { background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.18); }
+      .pag2-fw-pin-btn:active { transform:scale(0.93); }
+      .pag2-fw-pin-btn.pinned  { border-color:rgba(239,68,68,0.5);  background:rgba(239,68,68,0.1);  }
+      .pag2-fw-pin-btn.unpinned{ border-color:rgba(52,211,153,0.5); background:rgba(52,211,153,0.1); }
+
       .pag2-fw-body { padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; }
       .pag2-fw-stats-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; }
       .pag2-fw-stat {
@@ -873,6 +896,7 @@
           <span class="pag2-fw-err-mini" id="pag2-fw-col-err">0✗</span>
         </div>
         <div id="pag2-float-expanded">
+          <div class="pag2-fw-drag-handle" id="pag2-fw-drag">⠿ ⠿ ⠿</div>
           <div class="pag2-fw-header" id="pag2-fw-hdr">
             <div>
               <div class="pag2-fw-titulo">Esta página</div>
@@ -900,6 +924,9 @@
             </div>
             <div class="pag2-fw-fraccion" id="pag2-fw-fraccion">0 / 50</div>
           </div>
+          <div class="pag2-fw-pin-row">
+            <button class="pag2-fw-pin-btn unpinned" id="pag2-fw-pin" title="Fijar posición">📌</button>
+          </div>
         </div>`;
       document.body.appendChild(w);
 
@@ -911,6 +938,120 @@
         e.stopPropagation();
         _fwColapsar();
       });
+
+      // ── Pin button ──
+      document.getElementById('pag2-fw-pin').addEventListener('click', e => {
+        e.stopPropagation();
+        _fwTogglePin();
+      });
+
+      // ── Drag via handle ──
+      _fwInitDrag(document.getElementById('pag2-fw-drag'), w);
+    }
+
+    // ── Pin: fijar/soltar posición ────────────────────────────
+    let _fw_pinned = false;
+    const _FW_POS_KEY = 'pag2_fw_pos';
+
+    function _fwTogglePin() {
+      _fw_pinned = !_fw_pinned;
+      const btn = document.getElementById('pag2-fw-pin');
+      if (btn) {
+        btn.classList.toggle('pinned',   _fw_pinned);
+        btn.classList.toggle('unpinned', !_fw_pinned);
+        btn.title = _fw_pinned ? 'Posición fijada — tocar para liberar' : 'Fijar posición';
+      }
+      if (_fw_pinned) {
+        // Guardar posición actual
+        const w = document.getElementById('pag2-float-widget');
+        if (w) {
+          const pos = { left: w.style.left, top: w.style.top,
+                        right: w.style.right, bottom: w.style.bottom };
+          try { localStorage.setItem(_FW_POS_KEY, JSON.stringify(pos)); } catch(e){}
+        }
+      } else {
+        try { localStorage.removeItem(_FW_POS_KEY); } catch(e) {}
+      }
+    }
+
+    function _fwRestorePin() {
+      try {
+        const raw = localStorage.getItem(_FW_POS_KEY);
+        if (!raw) return;
+        const pos = JSON.parse(raw);
+        const w = document.getElementById('pag2-float-widget');
+        if (!w) return;
+        _fw_pinned = true;
+        w.style.right  = ''; w.style.bottom = '';
+        w.style.left   = pos.left   || '';
+        w.style.top    = pos.top    || '';
+        if (pos.right  && !pos.left)   w.style.right  = pos.right;
+        if (pos.bottom && !pos.top)    w.style.bottom = pos.bottom;
+        const btn = document.getElementById('pag2-fw-pin');
+        if (btn) { btn.classList.add('pinned'); btn.classList.remove('unpinned');
+                   btn.title = 'Posición fijada — tocar para liberar'; }
+      } catch(e) {}
+    }
+
+    // ── Drag logic (touch + mouse) ───────────────────────────
+    function _fwInitDrag(handle, widget) {
+      if (!handle || !widget) return;
+      let startX, startY, origX, origY, dragging = false, moved = false;
+
+      function getPos() {
+        const r = widget.getBoundingClientRect();
+        return { x: r.left, y: r.top };
+      }
+
+      function onStart(cx, cy) {
+        if (_fw_pinned) return;          // no arrastrar si está fijado
+        dragging = true; moved = false;
+        const pos = getPos();
+        origX = pos.x; origY = pos.y;
+        startX = cx;   startY = cy;
+        widget.style.right  = '';
+        widget.style.bottom = '';
+        widget.style.left   = origX + 'px';
+        widget.style.top    = origY + 'px';
+        widget.classList.add('pag2-fw-dragging');
+      }
+
+      function onMove(cx, cy) {
+        if (!dragging) return;
+        const dx = cx - startX, dy = cy - startY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+        // Clamp dentro de la ventana
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const wr = widget.getBoundingClientRect();
+        const newX = Math.max(0, Math.min(vw - wr.width,  origX + dx));
+        const newY = Math.max(0, Math.min(vh - wr.height, origY + dy));
+        widget.style.left = newX + 'px';
+        widget.style.top  = newY + 'px';
+      }
+
+      function onEnd() {
+        if (!dragging) return;
+        dragging = false;
+        widget.classList.remove('pag2-fw-dragging');
+      }
+
+      // Touch
+      handle.addEventListener('touchstart', e => {
+        e.preventDefault();
+        onStart(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: false });
+      document.addEventListener('touchmove', e => {
+        if (dragging) { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); }
+      }, { passive: false });
+      document.addEventListener('touchend', onEnd);
+
+      // Mouse
+      handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        onStart(e.clientX, e.clientY);
+      });
+      document.addEventListener('mousemove', e => { if (dragging) onMove(e.clientX, e.clientY); });
+      document.addEventListener('mouseup', onEnd);
     }
 
     // ── Expandir ────────────────────────────────────────────────
@@ -997,7 +1138,7 @@
     function _fwMostrar() {
       _fwInit();
       const w = document.getElementById('pag2-float-widget');
-      if (w) w.style.display = 'block';
+      if (w) { w.style.display = 'block'; _fwRestorePin(); }
     }
     function _fwOcultar() {
       clearTimeout(_fw_timer);
