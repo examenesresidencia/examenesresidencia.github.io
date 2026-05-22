@@ -1,6 +1,15 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V25
+// paginador-cuestionario.js  — V26
 // ────────────────────────────────────────────────────────────────
+// V26: Corregido bug crítico: el contador 📊 y los colores de las pills
+//      de páginas no visitadas se calculaban sobre puntajesPorSeccion,
+//      que solo se popula al RENDERIZAR cada página. Las páginas no
+//      visitadas aparecían como "pendiente" (azul) aunque estuvieran
+//      completas, y el total global solo sumaba la página activa.
+//      Fix: _prePoblarPuntajes() lee graded del state (localStorage)
+//      y pre-rellena puntajesPorSeccion para TODOS los índices antes
+//      de cualquier cálculo de stats. Costo: 0 lecturas de Firestore,
+//      solo acceso a localStorage.
 // V8: Al entrar al cuestionario siempre abre la primera página con preguntas pendientes.
 //     Al navegar entre páginas (flechas, pills, botón Siguiente) hace scroll automático
 //     al separador "> Continuá desde aquí" de la nueva página. Si la página está completa
@@ -465,6 +474,60 @@
   }
 
   // ════════════════════════════════════════════════════════════════
+  // _prePoblarPuntajes
+  // Lee el estado graded desde localStorage y pre-rellena
+  // puntajesPorSeccion para todos los índices de la sección.
+  // Esto permite calcular stats y colores de pills correctamente
+  // para páginas que aún no fueron renderizadas (no visitadas).
+  // Costo: 0 lecturas de Firestore. Solo usa localStorage.
+  // ════════════════════════════════════════════════════════════════
+  function _prePoblarPuntajes(seccionId, totalPreguntas) {
+    const SK = window.STORAGE_KEY || 'quiz_state_v3';
+    let graded = {}, answers = {}, shuffleMap = {};
+    try {
+      const s = JSON.parse(localStorage.getItem(SK) || '{}');
+      const sec = s[seccionId] || {};
+      graded    = sec.graded    || {};
+      answers   = sec.answers   || {};
+      shuffleMap = sec.shuffleMap || {};
+    } catch (_) { return; }
+
+    if (!window.puntajesPorSeccion) window.puntajesPorSeccion = {};
+    if (!window.puntajesPorSeccion[seccionId]) {
+      window.puntajesPorSeccion[seccionId] = Array(totalPreguntas).fill(null);
+    }
+
+    const preguntas = (window.preguntasPorSeccion || {})[seccionId] || [];
+    const puntajes  = window.puntajesPorSeccion[seccionId];
+
+    for (let idx = 0; idx < totalPreguntas; idx++) {
+      // Si ya tiene valor (fue renderizada y restaurada), no sobreescribir
+      if (puntajes[idx] !== null && puntajes[idx] !== undefined) continue;
+      // Si no está en graded, sigue pendiente
+      if (!graded[idx]) continue;
+
+      // Determinar si fue correcta o incorrecta
+      const preg = preguntas[idx];
+      if (!preg) continue;
+
+      const respGuardadas = answers[idx] || [];   // índices mezclados elegidos
+      const mInv = shuffleMap[idx];               // mapa mixed→original
+
+      let seleccionOriginal;
+      if (mInv) {
+        seleccionOriginal = respGuardadas.map(i => mInv[i] ?? i).sort((a, b) => a - b);
+      } else {
+        // Sin shuffleMap → examen único/UBA o identidad
+        seleccionOriginal = respGuardadas.slice().sort((a, b) => a - b);
+      }
+
+      const correctaOriginal = (preg.correcta || []).slice().sort((a, b) => a - b);
+      const isCorrect = JSON.stringify(seleccionOriginal) === JSON.stringify(correctaOriginal);
+      puntajes[idx] = isCorrect ? 1 : 0;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
   // FUNCIÓN PRINCIPAL: paginar una sección
   // ════════════════════════════════════════════════════════════════
   function _paginar(seccionId) {
@@ -473,6 +536,11 @@
     const preguntas = (window.preguntasPorSeccion || {})[seccionId] || [];
     const cont = document.getElementById(`cuestionario-${seccionId}`);
     if (!cont || preguntas.length === 0) return false;
+
+    // ── Pre-poblar puntajesPorSeccion desde graded del state ────────────────
+    // Esto garantiza que los colores de pills y el contador 📊 sean correctos
+    // ANTES de renderizar, incluso para páginas que el usuario no visitó aún.
+    _prePoblarPuntajes(seccionId, preguntas.length);
 
     // Obtener displayOrder desde script.js (respondidas primero + aleatorias)
     const displayOrder = window._getDisplayOrder(seccionId, preguntas.length);
