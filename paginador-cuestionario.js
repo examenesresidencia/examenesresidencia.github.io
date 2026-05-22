@@ -428,36 +428,16 @@
         cursor:pointer; transition:background .15s,color .15s; font-family:inherit;
       }
       .pag2-fw-xbtn:hover { background:rgba(255,255,255,0.12);color:#94a3b8; }
-      /* ── Drag handle & pin button ── */
-      #pag2-float-widget.pag2-fw-dragging { opacity:.9; cursor:grabbing !important; }
-      #pag2-float-widget.pag2-fw-dragging * { cursor:grabbing !important; pointer-events:none; }
-      .pag2-fw-drag-handle {
-        display:flex; align-items:center; justify-content:center;
-        padding:4px 0 6px;
-        cursor:grab;
-        color:rgba(100,116,139,0.5);
-        font-size:12px;
-        letter-spacing:2px;
-        user-select:none;
-        transition:color .15s;
+      /* ── Scroll-based visibility ── */
+      #pag2-float-widget {
+        transition: opacity .25s ease, transform .25s ease, visibility .25s;
       }
-      .pag2-fw-drag-handle:active { cursor:grabbing; }
-      .pag2-fw-drag-handle:hover { color:rgba(100,116,139,0.85); }
-      .pag2-fw-pin-row {
-        display:flex; align-items:center; justify-content:center;
-        padding:0 12px 10px;
+      #pag2-float-widget.pag2-fw-hidden {
+        opacity: 0;
+        transform: translateY(12px);
+        pointer-events: none;
+        visibility: hidden;
       }
-      .pag2-fw-pin-btn {
-        background:none; border:1px solid rgba(255,255,255,0.08);
-        border-radius:8px; padding:5px 14px;
-        font-size:15px; cursor:pointer;
-        transition:background .15s, border-color .15s, transform .1s;
-        line-height:1;
-      }
-      .pag2-fw-pin-btn:hover  { background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.18); }
-      .pag2-fw-pin-btn:active { transform:scale(0.93); }
-      .pag2-fw-pin-btn.pinned  { border-color:rgba(239,68,68,0.5);  background:rgba(239,68,68,0.1);  }
-      .pag2-fw-pin-btn.unpinned{ border-color:rgba(52,211,153,0.5); background:rgba(52,211,153,0.1); }
 
       .pag2-fw-body { padding:10px 12px 12px; display:flex; flex-direction:column; gap:8px; }
       .pag2-fw-stats-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px; }
@@ -903,7 +883,6 @@
           <span class="pag2-fw-err-mini" id="pag2-fw-col-err">0✗</span>
         </div>
         <div id="pag2-float-expanded">
-          <div class="pag2-fw-drag-handle" id="pag2-fw-drag">⠿ ⠿ ⠿</div>
           <div class="pag2-fw-header" id="pag2-fw-hdr">
             <div>
               <div class="pag2-fw-titulo">Esta página</div>
@@ -931,9 +910,6 @@
             </div>
             <div class="pag2-fw-fraccion" id="pag2-fw-fraccion">0 / 50</div>
           </div>
-          <div class="pag2-fw-pin-row">
-            <button class="pag2-fw-pin-btn unpinned" id="pag2-fw-pin" title="Fijar posición">📌</button>
-          </div>
         </div>`;
       document.body.appendChild(w);
 
@@ -945,120 +921,28 @@
         e.stopPropagation();
         _fwColapsar();
       });
-
-      // ── Pin button ──
-      document.getElementById('pag2-fw-pin').addEventListener('click', e => {
-        e.stopPropagation();
-        _fwTogglePin();
-      });
-
-      // ── Drag via handle ──
-      _fwInitDrag(document.getElementById('pag2-fw-drag'), w);
     }
 
-    // ── Pin: fijar/soltar posición ────────────────────────────
-    let _fw_pinned = false;
-    const _FW_POS_KEY = 'pag2_fw_pos';
+    // ── Scroll: mostrar al bajar, ocultar al subir ───────────────
+    let _fw_lastScrollY = window.scrollY;
+    let _fw_scrollBound = false;
 
-    function _fwTogglePin() {
-      _fw_pinned = !_fw_pinned;
-      const btn = document.getElementById('pag2-fw-pin');
-      if (btn) {
-        btn.classList.toggle('pinned',   _fw_pinned);
-        btn.classList.toggle('unpinned', !_fw_pinned);
-        btn.title = _fw_pinned ? 'Posición fijada — tocar para liberar' : 'Fijar posición';
-      }
-      if (_fw_pinned) {
-        // Guardar posición actual
+    function _fwInitScroll() {
+      if (_fw_scrollBound) return;
+      _fw_scrollBound = true;
+      window.addEventListener('scroll', () => {
         const w = document.getElementById('pag2-float-widget');
-        if (w) {
-          const pos = { left: w.style.left, top: w.style.top,
-                        right: w.style.right, bottom: w.style.bottom };
-          try { localStorage.setItem(_FW_POS_KEY, JSON.stringify(pos)); } catch(e){}
+        if (!w || w.style.display === 'none') return;
+        const currentY = window.scrollY;
+        if (currentY > _fw_lastScrollY) {
+          // Bajando → mostrar
+          w.classList.remove('pag2-fw-hidden');
+        } else {
+          // Subiendo → ocultar
+          w.classList.add('pag2-fw-hidden');
         }
-      } else {
-        try { localStorage.removeItem(_FW_POS_KEY); } catch(e) {}
-      }
-    }
-
-    function _fwRestorePin() {
-      try {
-        const raw = localStorage.getItem(_FW_POS_KEY);
-        if (!raw) return;
-        const pos = JSON.parse(raw);
-        const w = document.getElementById('pag2-float-widget');
-        if (!w) return;
-        _fw_pinned = true;
-        w.style.right  = ''; w.style.bottom = '';
-        w.style.left   = pos.left   || '';
-        w.style.top    = pos.top    || '';
-        if (pos.right  && !pos.left)   w.style.right  = pos.right;
-        if (pos.bottom && !pos.top)    w.style.bottom = pos.bottom;
-        const btn = document.getElementById('pag2-fw-pin');
-        if (btn) { btn.classList.add('pinned'); btn.classList.remove('unpinned');
-                   btn.title = 'Posición fijada — tocar para liberar'; }
-      } catch(e) {}
-    }
-
-    // ── Drag logic (touch + mouse) ───────────────────────────
-    function _fwInitDrag(handle, widget) {
-      if (!handle || !widget) return;
-      let startX, startY, origX, origY, dragging = false, moved = false;
-
-      function getPos() {
-        const r = widget.getBoundingClientRect();
-        return { x: r.left, y: r.top };
-      }
-
-      function onStart(cx, cy) {
-        if (_fw_pinned) return;          // no arrastrar si está fijado
-        dragging = true; moved = false;
-        const pos = getPos();
-        origX = pos.x; origY = pos.y;
-        startX = cx;   startY = cy;
-        widget.style.right  = '';
-        widget.style.bottom = '';
-        widget.style.left   = origX + 'px';
-        widget.style.top    = origY + 'px';
-        widget.classList.add('pag2-fw-dragging');
-      }
-
-      function onMove(cx, cy) {
-        if (!dragging) return;
-        const dx = cx - startX, dy = cy - startY;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-        // Clamp dentro de la ventana
-        const vw = window.innerWidth, vh = window.innerHeight;
-        const wr = widget.getBoundingClientRect();
-        const newX = Math.max(0, Math.min(vw - wr.width,  origX + dx));
-        const newY = Math.max(0, Math.min(vh - wr.height, origY + dy));
-        widget.style.left = newX + 'px';
-        widget.style.top  = newY + 'px';
-      }
-
-      function onEnd() {
-        if (!dragging) return;
-        dragging = false;
-        widget.classList.remove('pag2-fw-dragging');
-      }
-
-      // Touch
-      handle.addEventListener('touchstart', e => {
-        e.preventDefault();
-        onStart(e.touches[0].clientX, e.touches[0].clientY);
-      }, { passive: false });
-      document.addEventListener('touchmove', e => {
-        if (dragging) { e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); }
-      }, { passive: false });
-      document.addEventListener('touchend', onEnd);
-
-      // Mouse
-      handle.addEventListener('mousedown', e => {
-        e.preventDefault();
-        onStart(e.clientX, e.clientY);
-      });
-      document.addEventListener('mousemove', e => { if (dragging) onMove(e.clientX, e.clientY); });
-      document.addEventListener('mouseup', onEnd);
+        _fw_lastScrollY = currentY;
+      }, { passive: true });
     }
 
     // ── Expandir ────────────────────────────────────────────────
@@ -1145,7 +1029,17 @@
     function _fwMostrar() {
       _fwInit();
       const w = document.getElementById('pag2-float-widget');
-      if (w) { w.style.display = 'block'; _fwRestorePin(); }
+      if (w) {
+        w.style.display = 'block';
+        // Sincronizar estado inicial: oculto si el usuario está al tope de la página
+        _fw_lastScrollY = window.scrollY;
+        if (window.scrollY <= 10) {
+          w.classList.add('pag2-fw-hidden');
+        } else {
+          w.classList.remove('pag2-fw-hidden');
+        }
+        _fwInitScroll();
+      }
     }
     function _fwOcultar() {
       clearTimeout(_fw_timer);
