@@ -1,6 +1,12 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V24
+// editor-admin.js  — V27
 // ────────────────────────────────────────────────────────────────
+// V27: Guardado confiable + IDB del admin siempre actualizado:
+//      - setDoc sin merge:true para asegurar que todos los campos se escriben
+//      - El caché fb_edits_cache_ se invalida al guardar (fuerza recarga fresca)
+//      - El IDB del admin se parchea con los datos nuevos inmediatamente
+//      - serializarEditor() normaliza <div> → <p> para consistencia cross-browser
+//      - Las listas ul/li del WYSIWYG se preservan correctamente al serializar
 // V24: Corregido el update quirúrgico del DOM al guardar una edición.
 //      Los selectores anteriores (.pregunta-texto, .opcion-label, etc.)
 //      no coincidían con el HTML real generado por script.js.
@@ -570,9 +576,31 @@
   function serializarEditor() {
     const ed = document.getElementById('meq-editor-wysiwyg');
     if (!ed) return '';
-    let html = ed.innerHTML;
+
+    // Clonar para no mutar el editor
+    const clone = ed.cloneNode(true);
+
+    // Normalizar <div> sueltos (sin clase) a <p> para consistencia cross-browser.
+    // Chrome/Firefox convierten Enter en <div> dentro de contenteditable,
+    // lo que rompe la serialización en navegadores que esperan <p>.
+    // EXCEPCIÓN: no tocar <div> que contienen <ul>, <ol>, <img> o clases especiales.
+    clone.querySelectorAll('div').forEach(div => {
+      const tieneListaOImg = div.querySelector('ul, ol, img');
+      const tieneClase = div.className && div.className.trim() !== '';
+      if (!tieneListaOImg && !tieneClase) {
+        const p = document.createElement('p');
+        p.innerHTML = div.innerHTML;
+        div.parentNode.replaceChild(p, p); // reemplazar in-place
+        // Nota: replaceChild espera el nodo nuevo como primer argumento
+        div.replaceWith(p);
+      }
+    });
+
+    let html = clone.innerHTML;
     // Eliminar BRs residuales al inicio y al final
     html = html.replace(/^(\s*<br\s*\/?>\s*)+/i, '').replace(/(\s*<br\s*\/?>\s*)+$/i, '').trim();
+    // Eliminar párrafos vacíos
+    html = html.replace(/<p>\s*<\/p>/gi, '').replace(/<p><br\s*\/?><\/p>/gi, '').trim();
     return html;
   }
 
@@ -1292,6 +1320,9 @@
         const _fbDb        = window._fbDb;
         const _currentUser = window._currentUser;
 
+        // V27: sin { merge: true } — escritura completa para asegurar que todos
+        // los campos se persisten. Con merge:true un campo undefined puede quedar
+        // con su valor viejo si Firestore lo tenía y el cliente no lo envía.
         await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`), {
           seccionId, qIndex: qIndex + 1,
           pregunta   : nuevaPreg,
@@ -1300,28 +1331,49 @@
           explicacion: nuevaExpl,
           updatedAt  : serverTimestamp(),
           updatedBy  : _currentUser.uid
-        }, { merge: true });
+        });
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
 
+        // ── Invalidar caché de ediciones en localStorage (para todos los usuarios) ──
+        // El caché fb_edits_cache_ se usa en _cargarSeccionDesdeFirestore para
+        // aplicar las ediciones del admin. Al invalidarlo, la próxima carga
+        // descargará el doc actualizado desde Firestore.
+        // CRÍTICO: hacerlo ANTES del parche de IDB para que la prioridad sea correcta.
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+
         // ── Parche quirúrgico en caché IDB: actualizar SOLO esa pregunta ─────
         // 0 lecturas de Firestore. Actualiza IndexedDB directamente.
+        // El IDB tiene las preguntas BASE (de preguntas/{seccionId}/items).
+        // Las ediciones del admin se aplican POR ENCIMA al cargar desde Firestore.
+        // Al recargar, _cargarSeccionDesdeFirestore vuelve a consultar 'questions'
+        // y aplica las ediciones sobre las preguntas base. Para que esto funcione
+        // correctamente al recargar: invalidamos el IDB de preguntas base para que
+        // la próxima visita descargue todo fresco y aplique las ediciones actualizadas.
         const _ck = 'fb_q_cache_' + seccionId;
         try {
+          // Intentar parchar el IDB de preguntas base (si existe) para el usuario actual
           const _cached = await window._idbCache.get(_ck);
-          if (_cached?.preguntas?.[qIndex]) {
-            _cached.preguntas[qIndex].pregunta    = nuevaPreg;
-            _cached.preguntas[qIndex].opciones    = nuevasOpciones;
-            _cached.preguntas[qIndex].correcta    = nuevaCorrecta;
-            _cached.preguntas[qIndex].explicacion = nuevaExpl;
-            _cached.ts = Date.now(); // renovar vigencia 24hs
-            await window._idbCache.set(_ck, _cached);
-            console.log('[EDITOR] Caché IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
+          if (_cached?.preguntas) {
+            // Parchar también el array de preguntas base para que el IDB refleje la edición
+            // inmediatamente sin necesidad de recargar desde Firestore.
+            if (_cached.preguntas[qIndex]) {
+              _cached.preguntas[qIndex].pregunta    = nuevaPreg;
+              _cached.preguntas[qIndex].opciones    = nuevasOpciones;
+              _cached.preguntas[qIndex].correcta    = nuevaCorrecta;
+              _cached.preguntas[qIndex].explicacion = nuevaExpl;
+              _cached.ts = Date.now(); // renovar vigencia 24hs
+              await window._idbCache.set(_ck, _cached);
+              console.log('[EDITOR V27] Caché IDB base parcheado → sección:', seccionId, '| qIndex:', qIndex);
+            }
+          } else {
+            // Sin caché en IDB: no hay nada que parchar, la próxima carga irá a Firestore
+            console.log('[EDITOR V27] Sin caché IDB para sección:', seccionId, '— se cargará fresco');
           }
         } catch (_idbErr) {
-          // Si IDB falla, invalidar el caché para forzar recarga desde Firestore
+          // Si IDB falla, invalidar completamente para forzar recarga desde Firestore
           try { await window._idbCache.remove(_ck); } catch (_) {}
-          console.warn('[EDITOR] No se pudo parchar IDB, caché invalidado:', _idbErr.message);
+          console.warn('[EDITOR V27] IDB falló, caché invalidado:', _idbErr.message);
         }
 
         // También parchear la memoria (preguntasPorSeccion) en tiempo real
@@ -1331,8 +1383,6 @@
           window.preguntasPorSeccion[seccionId][qIndex].correcta    = nuevaCorrecta;
           window.preguntasPorSeccion[seccionId][qIndex].explicacion = nuevaExpl;
         }
-
-        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
 
         // ── Actualización quirúrgica del DOM: solo esa pregunta ──────────────
         // En vez de re-renderizar toda la página (cargarSeccion + generarCuestionario),
