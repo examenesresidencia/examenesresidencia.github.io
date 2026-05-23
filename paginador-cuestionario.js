@@ -667,6 +667,23 @@
     // ANTES de renderizar, incluso para páginas que el usuario no visitó aún.
     _prePoblarPuntajes(seccionId, preguntas.length);
 
+    // ── Actualizar el label de progreso de la barra inferior YA ──
+    // _prePoblarPuntajes acaba de leer TODOS los graded del localStorage,
+    // así que puntajesPorSeccion ya tiene los datos correctos de TODO el cuestionario.
+    // Llamamos aquí para que el botón muestre "N/Total" desde el primer instante,
+    // sin necesidad de navegar a ninguna página ni responder nada.
+    (function _labelInicial() {
+      const puntajesInicial = (window.puntajesPorSeccion || {})[seccionId] || [];
+      let respInicial = 0;
+      for (let i = 0; i < preguntas.length; i++) {
+        const v = puntajesInicial[i];
+        if (v === 1 || v === 0) respInicial++;
+      }
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        window._ubActualizarLabelProgreso(respInicial, preguntas.length);
+      }
+    })();
+
     // Obtener displayOrder desde script.js (respondidas primero + aleatorias)
     const displayOrder = window._getDisplayOrder(seccionId, preguntas.length);
     if (!displayOrder || displayOrder.length === 0) return false;
@@ -1635,16 +1652,40 @@
     };
   }
 
-  // Hook sobre responderPregunta para iniciar el timer al responder primera pregunta
+  // Hook sobre _pag2UpdateStats para iniciar el timer al responder la primera pregunta.
+  // _pag2UpdateStats es llamado por script.js después de CADA respuesta y sí está en window.
+  // No usamos window.responderPregunta porque esa función vive en el closure de script.js
+  // y nunca se expone globalmente — hookearla no funciona.
   function _instalarHookTimer() {
-    const _origResp = window.responderPregunta;
-    if (typeof _origResp !== 'function') { setTimeout(_instalarHookTimer, 50); return; }
-    window.responderPregunta = function(seccionId, idx) {
-      _origResp.call(this, seccionId, idx);
+    // Esperar a que _pag2UpdateStats esté disponible (lo instala el paginador más abajo)
+    if (typeof window._pag2UpdateStats !== 'function') {
+      setTimeout(_instalarHookTimer, 50);
+      return;
+    }
+    // Solo wrappear una vez
+    if (window._pag2UpdateStats._timerHooked) return;
+    const _origUpdate = window._pag2UpdateStats;
+    window._pag2UpdateStats = function(seccionId) {
+      _origUpdate.call(this, seccionId);
       _timerIniciarSiCorresponde(seccionId);
     };
+    window._pag2UpdateStats._timerHooked = true;
   }
-  _instalarHookTimer();
+
+  // Re-instalar si _pag2UpdateStats se redefine después (p.ej. al cargar el paginador)
+  // Usamos un intervalo corto que se auto-cancela cuando el hook está puesto.
+  (function _watchHookTimer() {
+    const iv = setInterval(() => {
+      if (typeof window._pag2UpdateStats === 'function' && !window._pag2UpdateStats._timerHooked) {
+        _instalarHookTimer();
+      }
+      if (window._pag2UpdateStats && window._pag2UpdateStats._timerHooked) {
+        clearInterval(iv);
+      }
+    }, 100);
+    // Límite de 10s para no correr indefinidamente
+    setTimeout(() => clearInterval(iv), 10000);
+  })();
 
   // Al cambiar de sección / recargar, restaurar el timer si estaba activo
   window._timerRestaurarSiActivo = function(seccionId) {
@@ -1803,7 +1844,23 @@
       _timerWidgetOcultar();
       const esAdmin = typeof window.fbIsAdmin === 'function' && window.fbIsAdmin();
       if (esAdmin)                return _orig.call(this, seccionId);
-      if (!_debePaginar(seccionId)) return _orig.call(this, seccionId);
+      if (!_debePaginar(seccionId)) {
+        // Sección no paginada (simulacro, únicos, UBA): actualizar label después del render
+        const ret = _orig.call(this, seccionId);
+        // Dar tiempo a que script.js renderice y popule puntajesPorSeccion
+        setTimeout(() => {
+          const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
+          if (!total) return;
+          // Pre-poblar desde localStorage por si no fue renderizado aún
+          _prePoblarPuntajes(seccionId, total);
+          const pts = (window.puntajesPorSeccion || {})[seccionId] || [];
+          let resp = 0;
+          for (let i = 0; i < total; i++) { const v = pts[i]; if (v === 1 || v === 0) resp++; }
+          if (typeof window._ubActualizarLabelProgreso === 'function')
+            window._ubActualizarLabelProgreso(resp, total);
+        }, 150);
+        return ret;
+      }
       const n = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
       if (n <= PAGE_SIZE)         return _orig.call(this, seccionId);
       if (!_paginar(seccionId))   _orig.call(this, seccionId);
@@ -1823,6 +1880,66 @@
     }
 
     console.log('[PAGINADOR V2] ✓ Hook instalado');
+
+    // ── Ocultar timer al volver al menú ──────────────────────────
+    // Hookear volverAlMenu y volverAlSubmenu para ocultar el timer
+    // cuando el usuario sale del cuestionario.
+    function _hookearSalidaTimer(nombre) {
+      const _origFn = window[nombre];
+      if (typeof _origFn !== 'function') return;
+      if (window[nombre]._timerExitHooked) return;
+      window[nombre] = function(...args) {
+        if (window._timerInterval) { clearInterval(window._timerInterval); window._timerInterval = null; }
+        _timerWidgetOcultar();
+        return _origFn.apply(this, args);
+      };
+      window[nombre]._timerExitHooked = true;
+    }
+    // Intentar hookear ahora y también en 500ms por si se definen tarde
+    ['volverAlMenu', 'volverAlSubmenu'].forEach(_hookearSalidaTimer);
+    setTimeout(() => ['volverAlMenu', 'volverAlSubmenu'].forEach(_hookearSalidaTimer), 500);
+
+    // ── Actualizar label al entrar/volver a cualquier cuestionario ──
+    // Hook sobre window.mostrarCuestionario (llamado desde el menú al tocar una especialidad)
+    // para que el contador N/Total se vea desde el primer momento, incluso la primera vez.
+    function _hookearEntradaLabel() {
+      const _origMC = window.mostrarCuestionario;
+      if (typeof _origMC !== 'function') { setTimeout(_hookearEntradaLabel, 100); return; }
+      if (window.mostrarCuestionario._labelHooked) return;
+      window.mostrarCuestionario = function(seccionId, ...args) {
+        const ret = _origMC.call(this, seccionId, ...args);
+        // Dar tiempo al render y a _prePoblarPuntajes del paginador
+        setTimeout(() => {
+          const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
+          if (!total) return;
+          _prePoblarPuntajes(seccionId, total);
+          const pts = (window.puntajesPorSeccion || {})[seccionId] || [];
+          let resp = 0;
+          for (let i = 0; i < total; i++) { const v = pts[i]; if (v === 1 || v === 0) resp++; }
+          if (typeof window._ubActualizarLabelProgreso === 'function')
+            window._ubActualizarLabelProgreso(resp, total);
+        }, 200);
+        return ret;
+      };
+      window.mostrarCuestionario._labelHooked = true;
+    }
+    _hookearEntradaLabel();
+    setTimeout(_hookearEntradaLabel, 600);
+    // Si el menú reaparece por cualquier vía (botón volver, popstate, etc.)
+    // el timer se oculta automáticamente.
+    (function _watchMenu() {
+      const menuEl = document.getElementById('menu-principal');
+      if (!menuEl) { setTimeout(_watchMenu, 200); return; }
+      const obs = new MutationObserver(() => {
+        const visible = !menuEl.classList.contains('oculto') &&
+                        menuEl.style.display !== 'none';
+        if (visible) {
+          if (window._timerInterval) { clearInterval(window._timerInterval); window._timerInterval = null; }
+          _timerWidgetOcultar();
+        }
+      });
+      obs.observe(menuEl, { attributes: true, attributeFilter: ['class', 'style'] });
+    })();
   }
 
   if (document.readyState === 'loading')
