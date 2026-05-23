@@ -485,36 +485,37 @@
 
       /* ── Ventana flotante del temporizador ── */
       #pag2-timer-widget {
-        position:fixed;top:10px;right:10px;z-index:9500;
-        width:148px;
-        background:linear-gradient(160deg,#0d2137ee,#0a1628f0);
-        border:1px solid rgba(56,189,248,0.2);
-        border-radius:12px;
-        box-shadow:0 4px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(56,189,248,0.06);
+        position:fixed;top:8px;right:8px;z-index:9500;
+        width:auto;
+        background:rgba(10,22,40,0.88);
+        border:1px solid rgba(56,189,248,0.18);
+        border-radius:10px;
+        box-shadow:0 2px 12px rgba(0,0,0,0.45);
         font-family:inherit;
         overflow:hidden;
-        transition:opacity .25s, transform .25s, visibility .25s;
+        transition:opacity .22s, transform .22s, visibility .22s;
         user-select:none;
-        backdrop-filter:blur(6px);
-        -webkit-backdrop-filter:blur(6px);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
       }
       #pag2-timer-widget.timer-oculto {
-        opacity:0;transform:translateY(-8px) scale(0.95);pointer-events:none;visibility:hidden;
+        opacity:0;transform:translateY(-6px) scale(0.94);pointer-events:none;visibility:hidden;
       }
       .ptw-header {
-        display:flex;align-items:center;justify-content:space-between;
-        padding:5px 9px 4px;
+        display:flex;align-items:center;justify-content:space-between;gap:8px;
+        padding:4px 8px 3px;
         border-bottom:1px solid rgba(255,255,255,0.05);
         cursor:move;
       }
-      .ptw-titulo { font-size:9px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.08em; }
-      .ptw-drag-hint { font-size:8px;color:#1e3a4a;letter-spacing:.02em; }
-      .ptw-body { padding:5px 10px 8px;text-align:center; }
+      .ptw-titulo { font-size:8px;font-weight:700;color:#3d5a6e;text-transform:uppercase;letter-spacing:.08em; }
+      .ptw-drag-hint { font-size:7px;color:#1a3040;letter-spacing:.02em; }
+      .ptw-body { padding:3px 10px 6px;text-align:center; }
       .ptw-display {
-        font-size:1.45rem;font-weight:800;letter-spacing:.03em;line-height:1;
+        font-size:1.05rem;font-weight:800;letter-spacing:.04em;line-height:1;
         font-variant-numeric:tabular-nums;
         transition:color .4s;
         color:#38bdf8;
+        white-space:nowrap;
       }
       .ptw-display.timer-verde   { color:#34d399; }
       .ptw-display.timer-naranja { color:#fb923c; }
@@ -523,9 +524,9 @@
         color:#ef4444;
         animation:timerParpadeo .6s step-end infinite;
       }
-      @keyframes timerParpadeo { 0%,100%{opacity:1} 50%{opacity:.3} }
-      .ptw-label { font-size:8px;color:#334155;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-top:2px; }
-      .ptw-barra-wrap { height:3px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;margin-top:6px; }
+      @keyframes timerParpadeo { 0%,100%{opacity:1} 50%{opacity:.35} }
+      .ptw-label { font-size:7px;color:#2d4455;font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-top:1px; }
+      .ptw-barra-wrap { height:2px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;margin-top:5px; }
       .ptw-barra-fill {
         height:100%;border-radius:99px;
         background:linear-gradient(90deg,#0891b2,#38bdf8);
@@ -534,9 +535,9 @@
       .ptw-barra-fill.verde   { background:linear-gradient(90deg,#059669,#34d399); }
       .ptw-barra-fill.naranja { background:linear-gradient(90deg,#b45309,#fb923c); }
       .ptw-barra-fill.rojo    { background:linear-gradient(90deg,#b91c1c,#f87171); }
-      .ptw-pagina { font-size:8px;color:#2d4a5e;text-align:center;margin-top:4px;font-weight:600; }
+      .ptw-pagina { font-size:7px;color:#1e3345;text-align:center;margin-top:3px;font-weight:600; }
       .ptw-lock-msg {
-        font-size:8px;color:#fbbf24;text-align:center;margin-top:3px;
+        font-size:7px;color:#fbbf24;text-align:center;margin-top:2px;
         display:none;
         animation:ptwLockPulse 2s ease-in-out infinite;
       }
@@ -1796,6 +1797,10 @@
     window.generarCuestionario = function(seccionId) {
       // Ocultar widget flotante al cambiar de sección
       if (typeof window._fwOcultar === 'function') window._fwOcultar();
+      // Ocultar timer si la nueva sección no lo tiene activo
+      // y detener el tick del timer anterior
+      if (window._timerInterval) { clearInterval(window._timerInterval); window._timerInterval = null; }
+      _timerWidgetOcultar();
       const esAdmin = typeof window.fbIsAdmin === 'function' && window.fbIsAdmin();
       if (esAdmin)                return _orig.call(this, seccionId);
       if (!_debePaginar(seccionId)) return _orig.call(this, seccionId);
