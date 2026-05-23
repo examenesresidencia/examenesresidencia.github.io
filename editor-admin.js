@@ -870,6 +870,19 @@
     editor.addEventListener('keyup',   actualizarEstadoBotones);
     editor.addEventListener('mouseup', actualizarEstadoBotones);
 
+    // ── Ctrl+E en textareas del modal (enunciado y opciones) ────────
+    // Selecciona todo el texto de la textarea que tiene el foco.
+    // El editor WYSIWYG tiene su propio listener (keydown en editor).
+    function _onCtrlETextarea(e) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'e') return;
+      const ta = e.target;
+      if (ta && (ta.tagName === 'TEXTAREA' || ta.tagName === 'INPUT') && overlay.contains(ta)) {
+        e.preventDefault();
+        ta.select();
+      }
+    }
+    document.addEventListener('keydown', _onCtrlETextarea);
+
     // ── Detectar Ctrl presionado / suelto ─────────────────────────
     // keydown global para detectar Ctrl incluso si el foco está en toolbar
     function _onKeydownCtrl(e) {
@@ -953,6 +966,19 @@
         return;
       }
 
+      // Ctrl+E: seleccionar TODO el contenido del editor WYSIWYG
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        const r = document.createRange();
+        r.selectNodeContents(editor);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        _savedRange = r.cloneRange();
+        savedRangeRef.current = _savedRange;
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         let command = null;
         switch (e.key.toLowerCase()) {
@@ -1024,27 +1050,15 @@
       _fmtToggleRange(rangeToUse, _FMT_TAG[command], ed);
 
       // Restaurar la selección visual tras el formato:
-      // buscar el nodo wrapper que _fmtToggleRange insertó (o el ancestro si se quitó)
-      // para que el texto quede visualmente marcado y se puedan aplicar más formatos.
+      // Reutilizamos el rango original (clonado antes de _fmtToggleRange) para que
+      // quede seleccionado EXACTAMENTE el texto que eligió el usuario, sin expansión.
+      // _fmtToggleRange puede haber reemplazado nodos de texto, por eso usamos
+      // try/catch: si el rango ya no es válido, dejamos la selección como está.
       try {
-        // Encontrar el nodo más cercano que contiene el texto formateado
-        let nodoResultante = ancAntes;
-        if (nodoResultante.nodeType === 3) nodoResultante = nodoResultante.parentNode;
-        // Si el nodo es el editor mismo, buscar un hijo más específico
-        if (nodoResultante === ed) {
-          const sel2 = window.getSelection();
-          if (sel2 && sel2.rangeCount > 0) {
-            nodoResultante = sel2.getRangeAt(0).commonAncestorContainer;
-            if (nodoResultante.nodeType === 3) nodoResultante = nodoResultante.parentNode;
-          }
-        }
-        const rangePost = document.createRange();
-        rangePost.selectNodeContents(nodoResultante);
         const selAfter = window.getSelection();
         selAfter.removeAllRanges();
-        selAfter.addRange(rangePost);
-        // Actualizar savedRange para la siguiente operación
-        _savedRange = rangePost.cloneRange();
+        selAfter.addRange(rangeToUse);
+        _savedRange = rangeToUse.cloneRange();
         if (rangeRef) rangeRef.current = _savedRange;
       } catch (_) {}
 
@@ -1084,6 +1098,7 @@
     // ── Limpiar listeners globales al cerrar el modal ─────────────
     const _cerrarModalOriginal = cerrarModal;
     cerrarModal = function() {
+      document.removeEventListener('keydown', _onCtrlETextarea);
       document.removeEventListener('keydown', _onKeydownCtrl);
       document.removeEventListener('keyup',   _onKeyupCtrl);
       document.removeEventListener('selectionchange', guardarSeleccion);
