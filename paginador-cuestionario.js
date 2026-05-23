@@ -1,5 +1,18 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V27
+// paginador-cuestionario.js  — V28
+// ────────────────────────────────────────────────────────────────
+// V28: Fix bug crítico: el temporizador no arrancaba al responder
+//      la primera pregunta en blanco de la página. Causa: el hook
+//      externo (_watchHookTimer) tenía una condición de carrera —
+//      _pag2UpdateStats se redefine dentro de renderPagina en cada
+//      navegación de página, y el watcher (100ms) podía no re-hookear
+//      a tiempo antes de que el usuario respondiera.
+//      Fix: _timerIniciarSiCorresponde ahora se llama DIRECTAMENTE
+//      dentro de _pag2UpdateStats (en renderPagina), marcando la
+//      función con _timerHooked=true para evitar doble-wrapping.
+//      El mecanismo externo queda solo como respaldo para secciones
+//      sin paginación (simulacro, únicos, UBA).
+// V27: ...
 // ────────────────────────────────────────────────────────────────
 // V26: Corregido bug crítico: el contador 📊 y los colores de las pills
 //      de páginas no visitadas se calculaban sobre puntajesPorSeccion,
@@ -1087,7 +1100,16 @@
       if (typeof window._fwActualizarStats === 'function') {
         window._fwActualizarStats(sid);
       }
+
+      // ── Iniciar timer si corresponde ──
+      // Se llama directamente aquí (no via hook externo) para evitar condiciones
+      // de carrera: _pag2UpdateStats se redefine en cada renderPagina y el
+      // mecanismo de watching externo puede no re-hookear a tiempo si el usuario
+      // responde una pregunta dentro de los primeros 100ms tras cargar la página.
+      _timerIniciarSiCorresponde(sid);
     };
+    // Marcar como hooked para que _watchHookTimer no agregue un wrapper redundante
+    window._pag2UpdateStats._timerHooked = true;
 
     // ── _pag2IrAQIndex: API pública para navegar a una pregunta por qIndex ────
     // Usado por el buscador global (buscadorNavegar) para ir a la página correcta
@@ -1652,17 +1674,15 @@
     };
   }
 
-  // Hook sobre _pag2UpdateStats para iniciar el timer al responder la primera pregunta.
-  // _pag2UpdateStats es llamado por script.js después de CADA respuesta y sí está en window.
-  // No usamos window.responderPregunta porque esa función vive en el closure de script.js
-  // y nunca se expone globalmente — hookearla no funciona.
+  // _timerIniciarSiCorresponde ya se llama directamente dentro de _pag2UpdateStats
+  // (ver renderPagina). El siguiente mecanismo es solo un respaldo para secciones
+  // sin paginación (simulacro, únicos, UBA) donde _pag2UpdateStats es definido
+  // externamente sin pasar por renderPagina, y por lo tanto no incluye la llamada directa.
   function _instalarHookTimer() {
-    // Esperar a que _pag2UpdateStats esté disponible (lo instala el paginador más abajo)
     if (typeof window._pag2UpdateStats !== 'function') {
       setTimeout(_instalarHookTimer, 50);
       return;
     }
-    // Solo wrappear una vez
     if (window._pag2UpdateStats._timerHooked) return;
     const _origUpdate = window._pag2UpdateStats;
     window._pag2UpdateStats = function(seccionId) {
@@ -1672,8 +1692,6 @@
     window._pag2UpdateStats._timerHooked = true;
   }
 
-  // Re-instalar si _pag2UpdateStats se redefine después (p.ej. al cargar el paginador)
-  // Usamos un intervalo corto que se auto-cancela cuando el hook está puesto.
   (function _watchHookTimer() {
     const iv = setInterval(() => {
       if (typeof window._pag2UpdateStats === 'function' && !window._pag2UpdateStats._timerHooked) {
@@ -1683,7 +1701,6 @@
         clearInterval(iv);
       }
     }, 100);
-    // Límite de 10s para no correr indefinidamente
     setTimeout(() => clearInterval(iv), 10000);
   })();
 
