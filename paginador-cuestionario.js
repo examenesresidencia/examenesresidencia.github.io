@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// paginador-cuestionario.js  — V26
+// paginador-cuestionario.js  — V27
 // ────────────────────────────────────────────────────────────────
 // V26: Corregido bug crítico: el contador 📊 y los colores de las pills
 //      de páginas no visitadas se calculaban sobre puntajesPorSeccion,
@@ -469,6 +469,128 @@
       .pag2-fw-fraccion { font-size:10px;color:#475569;text-align:center;font-weight:600;margin-top:-2px; }
       .pag2-fw-fraccion b { color:#94a3b8; }
 
+      /* ── Botón Tempo ── */
+      .pag2-btn-tempo {
+        display:inline-flex;align-items:center;gap:4px;padding:2px 9px;
+        border-radius:5px;border:1px solid rgba(239,68,68,0.5);
+        background:rgba(239,68,68,0.1);color:#ef4444;font-size:11px;font-weight:600;
+        cursor:pointer;font-family:inherit;letter-spacing:.01em;
+        transition:background .15s,border-color .15s,color .15s;white-space:nowrap;
+      }
+      .pag2-btn-tempo:hover { background:rgba(239,68,68,0.2);border-color:rgba(239,68,68,.75); }
+      .pag2-btn-tempo.tempo-activo {
+        border-color:rgba(34,197,94,0.6);background:rgba(34,197,94,0.12);color:#22c55e;
+      }
+      .pag2-btn-tempo.tempo-activo:hover { background:rgba(34,197,94,0.22);border-color:rgba(34,197,94,.85); }
+
+      /* ── Ventana flotante del temporizador ── */
+      #pag2-timer-widget {
+        position:fixed;bottom:80px;right:18px;z-index:9500;
+        width:180px;
+        background:linear-gradient(160deg,#0d2137,#0a1628);
+        border:1.5px solid rgba(56,189,248,0.22);
+        border-radius:16px;
+        box-shadow:0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(56,189,248,0.08);
+        font-family:inherit;
+        overflow:hidden;
+        transition:opacity .25s, transform .25s, visibility .25s;
+        user-select:none;
+      }
+      #pag2-timer-widget.timer-oculto {
+        opacity:0;transform:translateY(10px) scale(0.96);pointer-events:none;visibility:hidden;
+      }
+      .ptw-header {
+        display:flex;align-items:center;justify-content:space-between;
+        padding:9px 12px 7px;
+        border-bottom:1px solid rgba(255,255,255,0.06);
+        cursor:move;
+      }
+      .ptw-titulo { font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.07em; }
+      .ptw-drag-hint { font-size:9px;color:#334155;letter-spacing:.03em; }
+      .ptw-body { padding:10px 14px 14px;text-align:center; }
+      .ptw-display {
+        font-size:2.2rem;font-weight:800;letter-spacing:.04em;line-height:1;
+        font-variant-numeric:tabular-nums;
+        transition:color .4s;
+        color:#38bdf8;
+      }
+      .ptw-display.timer-verde   { color:#34d399; }
+      .ptw-display.timer-naranja { color:#fb923c; }
+      .ptw-display.timer-rojo    { color:#f87171; }
+      .ptw-display.timer-critico {
+        color:#ef4444;
+        animation:timerParpadeo .6s step-end infinite;
+      }
+      @keyframes timerParpadeo { 0%,100%{opacity:1} 50%{opacity:.3} }
+      .ptw-label { font-size:9px;color:#475569;font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-top:3px; }
+      .ptw-barra-wrap { height:4px;background:rgba(255,255,255,0.07);border-radius:99px;overflow:hidden;margin-top:10px; }
+      .ptw-barra-fill {
+        height:100%;border-radius:99px;
+        background:linear-gradient(90deg,#0891b2,#38bdf8);
+        transition:width .9s linear, background .5s;
+      }
+      .ptw-barra-fill.verde   { background:linear-gradient(90deg,#059669,#34d399); }
+      .ptw-barra-fill.naranja { background:linear-gradient(90deg,#b45309,#fb923c); }
+      .ptw-barra-fill.rojo    { background:linear-gradient(90deg,#b91c1c,#f87171); }
+      .ptw-pagina { font-size:9px;color:#334155;text-align:center;margin-top:6px;font-weight:600; }
+      .ptw-lock-msg {
+        font-size:9px;color:#fbbf24;text-align:center;margin-top:4px;
+        display:none;
+        animation:ptwLockPulse 2s ease-in-out infinite;
+      }
+      @keyframes ptwLockPulse { 0%,100%{opacity:.7} 50%{opacity:1} }
+
+      /* ── Modal tiempo agotado ── */
+      #pag2-timer-modal {
+        position:fixed;inset:0;z-index:26000;display:flex;align-items:center;justify-content:center;
+        background:rgba(5,10,20,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+        animation:pag2FI .2s ease both;
+      }
+      #pag2-timer-modal-box {
+        background:linear-gradient(160deg,#0d2137,#0a1628);
+        border:1.5px solid rgba(239,68,68,0.35);
+        border-radius:20px;padding:32px 28px 26px;max-width:420px;width:92%;box-sizing:border-box;
+        box-shadow:0 30px 80px rgba(0,0,0,.7), 0 0 40px rgba(239,68,68,0.15);
+        animation:pag2BI .26s cubic-bezier(.34,1.2,.64,1) both;font-family:inherit;
+        text-align:center;
+      }
+      .ptm-icono { font-size:2.8rem;margin-bottom:14px; }
+      .ptm-titulo { font-size:1.1rem;font-weight:800;color:#f1f5f9;margin-bottom:8px; }
+      .ptm-sub { font-size:.84rem;color:#94a3b8;line-height:1.6;margin-bottom:22px; }
+      .ptm-btns { display:flex;flex-direction:column;gap:10px; }
+      .ptm-btn-continuar {
+        padding:12px 20px;border-radius:11px;border:1.5px solid rgba(251,191,36,0.35);
+        background:rgba(251,191,36,0.08);color:#fbbf24;
+        font-size:.88rem;font-weight:700;cursor:pointer;font-family:inherit;
+        transition:background .15s,border-color .15s;
+      }
+      .ptm-btn-continuar:hover { background:rgba(251,191,36,0.18);border-color:rgba(251,191,36,.65); }
+      .ptm-btn-reiniciar {
+        padding:12px 20px;border-radius:11px;border:1.5px solid rgba(239,68,68,0.35);
+        background:rgba(239,68,68,0.08);color:#f87171;
+        font-size:.88rem;font-weight:700;cursor:pointer;font-family:inherit;
+        transition:background .15s,border-color .15s;
+      }
+      .ptm-btn-reiniciar:hover { background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,.65); }
+
+      /* ── Toast de advertencia del timer ── */
+      .pag2-timer-toast {
+        position:fixed;top:18px;left:50%;transform:translateX(-50%) translateY(-80px);
+        z-index:27000;
+        padding:12px 22px;border-radius:12px;
+        font-family:inherit;font-size:.9rem;font-weight:700;
+        box-shadow:0 8px 32px rgba(0,0,0,.5);
+        transition:transform .35s cubic-bezier(.34,1.2,.64,1), opacity .35s;
+        opacity:0;pointer-events:none;white-space:nowrap;
+        border:1.5px solid transparent;
+      }
+      .pag2-timer-toast.visible {
+        transform:translateX(-50%) translateY(0);opacity:1;
+      }
+      .pag2-timer-toast.t-verde   { background:#064e3b;color:#34d399;border-color:rgba(52,211,153,.3); }
+      .pag2-timer-toast.t-naranja { background:#431407;color:#fb923c;border-color:rgba(251,146,60,.3); }
+      .pag2-timer-toast.t-rojo    { background:#450a0a;color:#f87171;border-color:rgba(248,113,113,.3); }
+
     `;
     document.head.appendChild(st);
   }
@@ -613,6 +735,11 @@
                    transition:background .15s,border-color .15s;white-space:nowrap;">
             🔧 Reordenar
           </button>
+          <button id="pag2-tempo-btn-${seccionId}"
+            class="pag2-btn-tempo${_timerEsActivo(seccionId) ? ' tempo-activo' : ''}"
+            title="${_timerEsActivo(seccionId) ? 'Temporizador activo — clic para desactivar' : 'Activar temporizador de 60 min'}">
+            ⏱️ Tempo
+          </button>
         </div>
         <div class="pag2-total-info">${displayOrder.length} preguntas · ${totalPages} páginas</div>`;
       wrapper.appendChild(infoEl);
@@ -668,6 +795,24 @@
       }
       if (typeof window._fwActualizarStats === 'function') {
         window._fwActualizarStats(seccionId);
+      }
+
+      // ── Restaurar timer si estaba activo ──
+      if (_timerEsActivo(seccionId)) {
+        _timerWidgetMostrar(seccionId);
+        const d = _timerLoad();
+        const k = _timerKey(seccionId, pag);
+        if (d[k] && !d[k + '__agotado']) {
+          const seg = _timerSegundosRestantes(seccionId, pag);
+          _timerWidgetActualizar(seccionId, pag, seg);
+          if (!window._timerInterval && seg > 0) _timerIniciarTick(seccionId, pag);
+          else if (seg === 0) _timerModalAgotado(seccionId, pag);
+        } else if (!d[k]) {
+          // Página nueva: resetear display
+          _timerWidgetActualizar(seccionId, pag, TIMER_DURACION);
+        }
+      } else {
+        _timerWidgetOcultar();
       }
 
       const primeraSinRespPos = indicesPage.findIndex(i => {
@@ -750,17 +895,54 @@
       wrapper.querySelectorAll('.pag2-pill[data-pag]').forEach(pill =>
         pill.addEventListener('click', () => irA(parseInt(pill.dataset.pag, 10)))
       );
-      wrapper.querySelector('#pag2-prev-t')?.addEventListener('click', () => irA(pag-1));
-      wrapper.querySelector('#pag2-next-t')?.addEventListener('click', () => irA(pag+1));
-      wrapper.querySelector('#pag2-prev-b')?.addEventListener('click', () => irA(pag-1));
-      wrapper.querySelector('#pag2-next-b')?.addEventListener('click', () => irA(pag+1));
+      wrapper.querySelector('#pag2-prev-t')?.addEventListener('click', () => _irAConLock(pag-1));
+      wrapper.querySelector('#pag2-next-t')?.addEventListener('click', () => _irAConLock(pag+1));
+      wrapper.querySelector('#pag2-prev-b')?.addEventListener('click', () => _irAConLock(pag-1));
+      wrapper.querySelector('#pag2-next-b')?.addEventListener('click', () => _irAConLock(pag+1));
       wrapper.querySelector('#pag2-sig')?.addEventListener('click', () => {
-        if (pag < totalPages-1) irA(pag+1);
-        else if (typeof window.mostrarPuntuacionTotal === 'function')
+        if (pag < totalPages-1) {
+          _irAConLock(pag+1);
+        } else if (typeof window.mostrarPuntuacionTotal === 'function')
           window.mostrarPuntuacionTotal(seccionId);
       });
       wrapper.querySelector('#pag2-reiniciar')?.addEventListener('click', () =>
         _modalReinicio(seccionId, pag, indicesPage, () => renderPagina(pag))
+      );
+
+      // ── Conectar botón "Tempo⏱️" ──
+      const btnTempo = wrapper.querySelector(`#pag2-tempo-btn-${seccionId}`);
+      if (btnTempo) {
+        btnTempo.addEventListener('click', () => {
+          if (_timerEsActivo(seccionId)) {
+            _timerDesactivar(seccionId);
+          } else {
+            _timerActivar(seccionId);
+          }
+          // Re-render solo el botón sin recargar página
+          const activo = _timerEsActivo(seccionId);
+          btnTempo.className = 'pag2-btn-tempo' + (activo ? ' tempo-activo' : '');
+          btnTempo.title = activo ? 'Temporizador activo — clic para desactivar' : 'Activar temporizador de 60 min';
+          // Sincronizar todos los botones Tempo de la página (top e info)
+          document.querySelectorAll(`[id^="pag2-tempo-btn-"]`).forEach(b => {
+            b.className = 'pag2-btn-tempo' + (activo ? ' tempo-activo' : '');
+          });
+        });
+      }
+
+      // ── Bloquear navegación entre páginas si el timer está corriendo ──
+      function _irAConLock(p) {
+        if (_timerEstaCorriendo(seccionId)) {
+          if (typeof window.fbToast === 'function')
+            window.fbToast('⏱️ El temporizador está activo — no podés navegar a otra página hasta que termine', 'error');
+          return;
+        }
+        irA(p);
+      }
+      wrapper.querySelectorAll('.pag2-pill[data-pag]').forEach(pill =>
+        pill.addEventListener('click', (e) => {
+          e.stopImmediatePropagation();
+          _irAConLock(parseInt(pill.dataset.pag, 10));
+        }, true)
       );
 
       // ── Conectar botón "🔧 Reordenar" de la leyenda ──
@@ -863,6 +1045,11 @@
           pill.addEventListener('click', () => {
             const p = parseInt(pill.dataset.pag, 10);
             if (p < 0 || p >= totalPages) return;
+            if (_timerEstaCorriendo(sid)) {
+              if (typeof window.fbToast === 'function')
+                window.fbToast('⏱️ El temporizador está activo — no podés navegar a otra página hasta que termine', 'error');
+              return;
+            }
             renderPagina(p);
             setTimeout(() => _scrollAlSeparador(8), 80);
           })
@@ -1140,7 +1327,458 @@
   })();
 
   // ════════════════════════════════════════════════════════════════
-  // HOOK sobre generarCuestionario
+  // MOTOR DE TEMPORIZADOR — 60 min por página, por sección
+  // ════════════════════════════════════════════════════════════════
+  const TIMER_KEY = 'quiz_timer_v1';
+  const TIMER_DURACION = 60 * 60; // segundos
+
+  function _timerLoad() {
+    try { return JSON.parse(localStorage.getItem(TIMER_KEY) || '{}'); }
+    catch (_) { return {}; }
+  }
+  function _timerSave(obj) {
+    try { localStorage.setItem(TIMER_KEY, JSON.stringify(obj)); } catch (_) {}
+  }
+
+  // Estado del timer para una sección + página
+  function _timerKey(seccionId, pag) { return `${seccionId}__${pag}`; }
+
+  // ¿Está el timer habilitado (botón verde) para esta sección?
+  function _timerEsActivo(seccionId) {
+    const d = _timerLoad();
+    return !!(d['habilitado__' + seccionId]);
+  }
+
+  // ¿Está corriendo (inicio registrado) para seccion+pag?
+  function _timerEstaCorriendo(seccionId) {
+    const d = _timerLoad();
+    const pagActual = _getPagina(seccionId);
+    const k = _timerKey(seccionId, pagActual);
+    return !!d[k] && !d[k + '__agotado'];
+  }
+
+  function _timerActivar(seccionId) {
+    const d = _timerLoad();
+    d['habilitado__' + seccionId] = true;
+    _timerSave(d);
+    _timerWidgetMostrar(seccionId);
+  }
+
+  function _timerDesactivar(seccionId) {
+    const d = _timerLoad();
+    delete d['habilitado__' + seccionId];
+    // Detener tick activo
+    if (window._timerInterval) { clearInterval(window._timerInterval); window._timerInterval = null; }
+    _timerSave(d);
+    _timerWidgetOcultar();
+  }
+
+  // Iniciar conteo para página actual (llamado al responder primera pregunta)
+  function _timerIniciarSiCorresponde(seccionId) {
+    if (!_timerEsActivo(seccionId)) return;
+    const pagActual = _getPagina(seccionId);
+    const k = _timerKey(seccionId, pagActual);
+    const d = _timerLoad();
+    if (d[k]) return; // ya iniciado
+    d[k] = Date.now();
+    _timerSave(d);
+    _timerWidgetMostrar(seccionId);
+    _timerIniciarTick(seccionId, pagActual);
+  }
+
+  // Segundos restantes para la página actual
+  function _timerSegundosRestantes(seccionId, pag) {
+    const d = _timerLoad();
+    const k = _timerKey(seccionId, pag);
+    if (!d[k]) return TIMER_DURACION;
+    const elapsed = Math.floor((Date.now() - d[k]) / 1000);
+    return Math.max(0, TIMER_DURACION - elapsed);
+  }
+
+  function _timerFmt(seg) {
+    const m = Math.floor(seg / 60);
+    const s = seg % 60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+
+  // Advertencias ya mostradas (para no repetir)
+  const _timerAdvMostradas = {};
+
+  function _timerToast(msg, cls) {
+    let t = document.getElementById('pag2-timer-toast-el');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'pag2-timer-toast-el';
+      t.className = 'pag2-timer-toast';
+      document.body.appendChild(t);
+    }
+    t.className = `pag2-timer-toast ${cls}`;
+    t.textContent = msg;
+    // Forzar reflow
+    void t.offsetWidth;
+    t.classList.add('visible');
+    clearTimeout(t._tt);
+    t._tt = setTimeout(() => t.classList.remove('visible'), 4500);
+  }
+
+  function _timerIniciarTick(seccionId, pag) {
+    if (window._timerInterval) clearInterval(window._timerInterval);
+    const advKey = seccionId + '__' + pag;
+    if (!_timerAdvMostradas[advKey]) _timerAdvMostradas[advKey] = {};
+
+    window._timerInterval = setInterval(() => {
+      const seg = _timerSegundosRestantes(seccionId, pag);
+      _timerWidgetActualizar(seccionId, pag, seg);
+
+      // Advertencias
+      if (seg <= 30*60 && seg > 30*60-5 && !_timerAdvMostradas[advKey][30]) {
+        _timerAdvMostradas[advKey][30] = true;
+        _timerToast('⏱️ Quedan 30 minutos', 't-verde');
+      }
+      if (seg <= 15*60 && seg > 15*60-5 && !_timerAdvMostradas[advKey][15]) {
+        _timerAdvMostradas[advKey][15] = true;
+        _timerToast('⚠️ Quedan 15 minutos', 't-naranja');
+      }
+      if (seg <= 5*60 && seg > 5*60-5 && !_timerAdvMostradas[advKey][5]) {
+        _timerAdvMostradas[advKey][5] = true;
+        _timerToast('🔴 ¡Solo quedan 5 minutos!', 't-rojo');
+      }
+
+      if (seg === 0) {
+        clearInterval(window._timerInterval);
+        window._timerInterval = null;
+        // Marcar como agotado
+        const d = _timerLoad();
+        d[_timerKey(seccionId, pag) + '__agotado'] = true;
+        _timerSave(d);
+        _timerWidgetActualizar(seccionId, pag, 0);
+        _timerModalAgotado(seccionId, pag);
+      }
+    }, 1000);
+  }
+
+  // Crear / mostrar el widget flotante del timer
+  function _timerWidgetMostrar(seccionId) {
+    let w = document.getElementById('pag2-timer-widget');
+    if (!w) {
+      w = document.createElement('div');
+      w.id = 'pag2-timer-widget';
+      w.innerHTML = `
+        <div class="ptw-header" id="ptw-header">
+          <span class="ptw-titulo">⏱️ Tiempo</span>
+          <span class="ptw-drag-hint">⠿ mover</span>
+        </div>
+        <div class="ptw-body">
+          <div class="ptw-display" id="ptw-display">60:00</div>
+          <div class="ptw-label">minutos restantes</div>
+          <div class="ptw-barra-wrap"><div class="ptw-barra-fill" id="ptw-barra" style="width:100%"></div></div>
+          <div class="ptw-pagina" id="ptw-pagina">Página —</div>
+          <div class="ptw-lock-msg" id="ptw-lock">🔒 Navegación bloqueada</div>
+        </div>`;
+      document.body.appendChild(w);
+      _timerWidgetDrag(w);
+    }
+    w.classList.remove('timer-oculto');
+
+    // Si ya hay un tick activo para esta sección/pag, reiniciarlo
+    const pagActual = _getPagina(seccionId);
+    const d = _timerLoad();
+    const k = _timerKey(seccionId, pagActual);
+    if (d[k] && !d[k + '__agotado']) {
+      const seg = _timerSegundosRestantes(seccionId, pagActual);
+      _timerWidgetActualizar(seccionId, pagActual, seg);
+      if (!window._timerInterval) _timerIniciarTick(seccionId, pagActual);
+    } else {
+      _timerWidgetActualizar(seccionId, pagActual, TIMER_DURACION);
+    }
+  }
+
+  function _timerWidgetOcultar() {
+    const w = document.getElementById('pag2-timer-widget');
+    if (w) w.classList.add('timer-oculto');
+  }
+
+  function _timerWidgetActualizar(seccionId, pag, seg) {
+    const disp = document.getElementById('ptw-display');
+    const barra = document.getElementById('ptw-barra');
+    const pagEl = document.getElementById('ptw-pagina');
+    const lockEl = document.getElementById('ptw-lock');
+    if (!disp) return;
+
+    disp.textContent = _timerFmt(seg);
+    const pct = (seg / TIMER_DURACION) * 100;
+    if (barra) { barra.style.width = pct + '%'; }
+
+    // Color del display y barra
+    disp.className = 'ptw-display';
+    if (barra) barra.className = 'ptw-barra-fill';
+    if (seg > 30*60) {
+      disp.classList.add('timer-verde');
+      if (barra) barra.classList.add('verde');
+    } else if (seg > 15*60) {
+      disp.classList.add('timer-verde');
+      if (barra) barra.classList.add('verde');
+    } else if (seg > 5*60) {
+      disp.classList.add('timer-naranja');
+      if (barra) barra.classList.add('naranja');
+    } else if (seg > 0) {
+      disp.classList.add('timer-critico');
+      if (barra) barra.classList.add('rojo');
+    } else {
+      disp.classList.add('timer-rojo');
+      if (barra) barra.classList.add('rojo');
+    }
+
+    if (pagEl) pagEl.textContent = `Página ${pag + 1}`;
+    if (lockEl) {
+      lockEl.style.display = _timerEstaCorriendo(seccionId) ? 'block' : 'none';
+    }
+  }
+
+  // Drag para mover el widget
+  function _timerWidgetDrag(w) {
+    const header = w.querySelector('#ptw-header');
+    if (!header) return;
+    let ox = 0, oy = 0, sx = 0, sy = 0;
+    header.addEventListener('mousedown', e => {
+      sx = e.clientX; sy = e.clientY;
+      const rect = w.getBoundingClientRect();
+      ox = rect.left; oy = rect.top;
+      w.style.right = 'auto';
+      w.style.bottom = 'auto';
+      w.style.left = ox + 'px';
+      w.style.top  = oy + 'px';
+      const onMove = ev => {
+        const dx = ev.clientX - sx, dy = ev.clientY - sy;
+        w.style.left = (ox + dx) + 'px';
+        w.style.top  = (oy + dy) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    // Touch support
+    header.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY;
+      const rect = w.getBoundingClientRect();
+      ox = rect.left; oy = rect.top;
+      w.style.right = 'auto'; w.style.bottom = 'auto';
+      w.style.left = ox + 'px'; w.style.top = oy + 'px';
+    }, { passive: true });
+    header.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      w.style.left = (ox + dx) + 'px';
+      w.style.top  = (oy + dy) + 'px';
+    }, { passive: true });
+  }
+
+  // Modal de tiempo agotado
+  function _timerModalAgotado(seccionId, pag) {
+    document.getElementById('pag2-timer-modal')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'pag2-timer-modal';
+    ov.innerHTML = `
+      <div id="pag2-timer-modal-box">
+        <div class="ptm-icono">⏰</div>
+        <div class="ptm-titulo">¡Se acabó el tiempo!</div>
+        <div class="ptm-sub">
+          Los 60 minutos para la <strong style="color:#f1f5f9">página ${pag + 1}</strong> terminaron.<br>
+          Las preguntas que respondas a partir de ahora quedarán <em style="color:#fbbf24">fuera del tiempo del simulacro</em>.<br><br>
+          ¿Qué querés hacer?
+        </div>
+        <div class="ptm-btns">
+          <button class="ptm-btn-continuar" id="ptm-continuar">
+            ✏️ Terminar de responder las preguntas restantes<br>
+            <span style="font-size:.78rem;font-weight:400;opacity:.75">(fuera de tiempo — la página queda completa)</span>
+          </button>
+          <button class="ptm-btn-reiniciar" id="ptm-reiniciar">
+            ↺ Reiniciar esta página<br>
+            <span style="font-size:.78rem;font-weight:400;opacity:.75">(borra respuestas y vuelve a empezar)</span>
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    document.getElementById('ptm-continuar').onclick = () => {
+      ov.remove();
+      // Permitir seguir respondiendo — el timer queda en 00:00
+      _timerWidgetActualizar(seccionId, pag, 0);
+    };
+
+    document.getElementById('ptm-reiniciar').onclick = () => {
+      ov.remove();
+      // Limpiar el estado del timer para esta página
+      const d = _timerLoad();
+      const k = _timerKey(seccionId, pag);
+      delete d[k];
+      delete d[k + '__agotado'];
+      _timerSave(d);
+      // Reiniciar respuestas de la página usando la función del paginador
+      // Necesitamos la lista de índices — la obtenemos re-paginando
+      const preguntas = (window.preguntasPorSeccion || {})[seccionId] || [];
+      const displayOrder = window._getDisplayOrder ? window._getDisplayOrder(seccionId, preguntas.length) : [];
+      const indices = displayOrder.slice(pag * PAGE_SIZE, (pag + 1) * PAGE_SIZE);
+      _reiniciarPagina(seccionId, indices);
+      // Resetear el timer del widget
+      _timerWidgetActualizar(seccionId, pag, TIMER_DURACION);
+      // Recargar la página del cuestionario
+      if (typeof window.generarCuestionario === 'function') window.generarCuestionario(seccionId);
+    };
+  }
+
+  // Hook sobre responderPregunta para iniciar el timer al responder primera pregunta
+  function _instalarHookTimer() {
+    const _origResp = window.responderPregunta;
+    if (typeof _origResp !== 'function') { setTimeout(_instalarHookTimer, 50); return; }
+    window.responderPregunta = function(seccionId, idx) {
+      _origResp.call(this, seccionId, idx);
+      _timerIniciarSiCorresponde(seccionId);
+    };
+  }
+  _instalarHookTimer();
+
+  // Al cambiar de sección / recargar, restaurar el timer si estaba activo
+  window._timerRestaurarSiActivo = function(seccionId) {
+    if (!_timerEsActivo(seccionId)) { _timerWidgetOcultar(); return; }
+    _timerWidgetMostrar(seccionId);
+    const pagActual = _getPagina(seccionId);
+    const d = _timerLoad();
+    const k = _timerKey(seccionId, pagActual);
+    if (d[k] && !d[k + '__agotado']) {
+      const seg = _timerSegundosRestantes(seccionId, pagActual);
+      if (seg > 0) _timerIniciarTick(seccionId, pagActual);
+      else _timerModalAgotado(seccionId, pagActual);
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════════
+  // CIERRE AUTOMÁTICO DE EXPLICACIONES AL HACER SCROLL
+  // Se aplica globalmente a todos los cuestionarios.
+  // ════════════════════════════════════════════════════════════════
+  (function() {
+    let _explScroll = false;
+
+    function _cerrarExplicacionesOcultas() {
+      const explicaciones = document.querySelectorAll('.explicacion-contenedor[style*="block"]');
+      if (!explicaciones.length) return;
+
+      const vpTop    = window.scrollY;
+      const vpBottom = vpTop + window.innerHeight;
+
+      explicaciones.forEach(div => {
+        const rect = div.getBoundingClientRect();
+        const absTop    = rect.top + window.scrollY;
+        const absBottom = absTop + rect.height;
+
+        // ¿Está completamente fuera de la pantalla (por arriba)?
+        if (absBottom < vpTop - 80) {
+          div.style.display = 'none';
+          // Actualizar el botón correspondiente
+          const btnId = div.id.replace('explicacion-', 'btn-explicacion-');
+          const btn = document.getElementById(btnId);
+          if (btn && btn.textContent.includes('Ocultar')) {
+            btn.textContent = 'Ver explicación';
+          }
+        }
+      });
+    }
+
+    function _initExplScroll() {
+      if (_explScroll) return;
+      _explScroll = true;
+      let ticking = false;
+      window.addEventListener('scroll', () => {
+        if (!ticking) {
+          requestAnimationFrame(() => {
+            _cerrarExplicacionesOcultas();
+            ticking = false;
+          });
+          ticking = true;
+        }
+      }, { passive: true });
+    }
+
+    // Instalar cuando el DOM esté listo
+    if (document.readyState === 'loading')
+      document.addEventListener('DOMContentLoaded', _initExplScroll);
+    else
+      _initExplScroll();
+  })();
+
+  // ════════════════════════════════════════════════════════════════
+  // FIX: "Continuá desde aquí" en Simulacro de Exámenes de Residencia
+  // El simulador no pasa por _paginar(), su separador debe inyectarse
+  // desde script.js. Parcheamos _pag2UpdateStats para cubrir también
+  // las secciones sin paginación (simulador, unicos, uba).
+  // ════════════════════════════════════════════════════════════════
+  (function() {
+    function _inyectarSepSimulacro(seccionId) {
+      const cont = document.getElementById('cuestionario-' + seccionId);
+      if (!cont) return;
+
+      const preguntas = (window.preguntasPorSeccion || {})[seccionId] || [];
+      if (!preguntas.length) return;
+
+      const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
+      const displayOrder = window._getDisplayOrder ? window._getDisplayOrder(seccionId, preguntas.length) : [];
+      if (!displayOrder.length) return;
+
+      // Quitar separador existente
+      const sepViejo = document.getElementById('sim-sep-' + seccionId);
+      if (sepViejo) sepViejo.remove();
+
+      // Encontrar primera pregunta sin responder
+      const primeraSinRespIdx = displayOrder.findIndex(i => {
+        const v = puntajes[i]; return v === null || v === undefined;
+      });
+
+      if (primeraSinRespIdx <= 0) return; // nada respondido aún, o todo completo
+
+      // Encontrar el div de esa pregunta en el DOM
+      const divDestino = cont.querySelector(`[id$="-${seccionId}-${displayOrder[primeraSinRespIdx]}"]`)
+                      || cont.querySelector(`[data-idx="${displayOrder[primeraSinRespIdx]}"]`);
+      if (!divDestino) return;
+
+      const sep = document.createElement('div');
+      sep.className = 'pag2-separador';
+      sep.id = 'sim-sep-' + seccionId;
+      sep.innerHTML = `
+        <div class="pag2-sep-etiqueta">
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+          Continuá desde aquí
+        </div>`;
+      cont.insertBefore(sep, divDestino.closest('.pregunta-bloque') || divDestino);
+    }
+
+    // Parchear _pag2UpdateStats para secciones sin paginación
+    const _orig2 = window._pag2UpdateStats;
+    // Intentar parchear una vez que _pag2UpdateStats esté disponible
+    function _parcharUpdateStats() {
+      if (typeof window._pag2UpdateStats !== 'function') {
+        setTimeout(_parcharUpdateStats, 50); return;
+      }
+      const _origU = window._pag2UpdateStats;
+      window._pag2UpdateStats = function(seccionId) {
+        _origU.call(this, seccionId);
+        // Si la sección NO usa paginador, inyectar separador manualmente
+        if (!_debePaginar(seccionId)) {
+          _inyectarSepSimulacro(seccionId);
+        }
+      };
+    }
+    _parcharUpdateStats();
+  })();
+
+  // ════════════════════════════════════════════════════════════════
   // ════════════════════════════════════════════════════════════════
   function _instalarHook() {
     if (typeof window.generarCuestionario   !== 'function' ||
