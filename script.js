@@ -1,4 +1,4 @@
-//PRUEBA 27  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 28  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v24: TRES mejoras profesionales en un solo bloque:
 //   1. mostrarExplicacion() siempre sincroniza contenido desde preguntasPorSeccion
 //      antes de mostrar, garantizando que el usuario ve la explicación actualizada
@@ -1004,6 +1004,21 @@
           iniciarTemporizador();
         }
       }
+
+      // Inicializar widget flotante simple para Simulacro / Único / UBA
+      if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+        // Pequeño delay para que generarCuestionario termine de renderizar
+        setTimeout(() => {
+          if (typeof window._simpleWidgetInit === 'function') {
+            window._simpleWidgetInit(seccionId);
+          }
+        }, 400);
+      } else {
+        // Ocultar widget simple si se va a otra sección
+        if (typeof window._simpleWidgetOcultar === 'function') {
+          window._simpleWidgetOcultar();
+        }
+      }
     });
   }
 
@@ -1045,6 +1060,10 @@
     // Restablecer el label del botón de progreso al volver al menú
     if (typeof window._ubActualizarLabelProgreso === 'function') {
       window._ubActualizarLabelProgreso(null);
+    }
+    // Ocultar widget flotante simple al volver al menú
+    if (typeof window._simpleWidgetOcultar === 'function') {
+      window._simpleWidgetOcultar();
     }
   }
 
@@ -1471,6 +1490,281 @@
     });
   }
 
+  // ======== WIDGET FLOTANTE SIMPLE — Simulacro / Examen Único / UBA ========
+  // Equivalente al widget del paginador pero para cuestionarios de 1 sola página
+  // (100 preguntas en simulacro/único/UBA sin paginar).
+  (function () {
+    const WIDGET_ID = 'simple-fw-widget';
+    let _sfwSeccion = null;
+
+    function _sfwInjectStyles() {
+      if (document.getElementById('simple-fw-styles')) return;
+      const style = document.createElement('style');
+      style.id = 'simple-fw-styles';
+      style.textContent = `
+        #${WIDGET_ID} {
+          position: fixed;
+          bottom: 72px;
+          right: 16px;
+          z-index: 9990;
+          display: none;
+          font-family: inherit;
+        }
+        #sfw-collapsed {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          background: rgba(8,145,178,0.96);
+          color: #fff;
+          border-radius: 20px;
+          padding: 6px 13px;
+          font-size: 0.82rem;
+          font-weight: 600;
+          cursor: pointer;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+          border: 1px solid rgba(255,255,255,0.15);
+          backdrop-filter: blur(8px);
+          user-select: none;
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        #sfw-collapsed:active { transform: scale(0.96); }
+        .sfw-ok-mini  { color: #86efac; font-weight: 700; }
+        .sfw-err-mini { color: #fca5a5; font-weight: 700; }
+        .sfw-sep      { opacity: 0.5; margin: 0 1px; }
+
+        #sfw-expanded {
+          display: none;
+          flex-direction: column;
+          background: #fff;
+          border-radius: 14px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.16);
+          border: 1px solid rgba(0,0,0,0.08);
+          padding: 14px 16px 12px;
+          min-width: 190px;
+          animation: sfwFadeIn 0.16s ease;
+        }
+        @keyframes sfwFadeIn {
+          from { opacity: 0; transform: translateY(6px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .sfw-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 10px;
+          cursor: pointer;
+        }
+        .sfw-titulo { font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
+        .sfw-pagina { font-size: 0.85rem; font-weight: 600; color: #0891b2; }
+        .sfw-xbtn {
+          background: none; border: none; cursor: pointer;
+          color: #94a3b8; font-size: 1rem; padding: 0 2px; line-height: 1;
+        }
+        .sfw-stats-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+        .sfw-stat { text-align: center; }
+        .sfw-num { font-size: 1.35rem; font-weight: 700; line-height: 1.1; }
+        .sfw-num.total { color: #0891b2; }
+        .sfw-num.ok    { color: #16a34a; }
+        .sfw-num.err   { color: #dc2626; }
+        .sfw-lbl { font-size: 0.67rem; color: #94a3b8; font-weight: 500; margin-top: 1px; }
+        .sfw-barra-wrap {
+          height: 4px; background: #e2e8f0; border-radius: 99px; overflow: hidden; margin-bottom: 6px;
+        }
+        .sfw-barra-fill {
+          height: 100%; border-radius: 99px;
+          background: linear-gradient(90deg, #0891b2, #22d3ee);
+          transition: width 0.4s ease;
+        }
+        .sfw-barra-fill.done { background: linear-gradient(90deg, #16a34a, #4ade80); }
+        .sfw-fraccion { font-size: 0.78rem; color: #64748b; text-align: center; }
+
+        /* Pulso al actualizar */
+        @keyframes sfwPulse {
+          0%,100% { box-shadow: 0 4px 16px rgba(0,0,0,0.18); }
+          50% { box-shadow: 0 4px 20px rgba(8,145,178,0.5); }
+        }
+        .sfw-pulse { animation: sfwPulse 0.5s ease; }
+
+        /* Ocultar al scrollear hacia arriba */
+        #${WIDGET_ID}.sfw-hidden { opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; }
+        #${WIDGET_ID} { transition: opacity 0.2s, transform 0.2s; }
+
+        @media (max-width: 600px) {
+          #${WIDGET_ID} { bottom: 62px; right: 10px; }
+          #sfw-collapsed { font-size: 0.76rem; padding: 5px 10px; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    function _sfwInit() {
+      if (document.getElementById(WIDGET_ID)) return;
+      _sfwInjectStyles();
+      const w = document.createElement('div');
+      w.id = WIDGET_ID;
+      w.innerHTML = `
+        <div id="sfw-expanded">
+          <div class="sfw-header" id="sfw-header">
+            <div>
+              <div class="sfw-titulo">Este cuestionario</div>
+              <div class="sfw-pagina" id="sfw-pagina">Pág 1 / 1</div>
+            </div>
+            <button class="sfw-xbtn" id="sfw-close">✕</button>
+          </div>
+          <div class="sfw-stats-row">
+            <div class="sfw-stat">
+              <div class="sfw-num total" id="sfw-resp">0</div>
+              <div class="sfw-lbl">Resp.</div>
+            </div>
+            <div class="sfw-stat">
+              <div class="sfw-num ok" id="sfw-ok">0</div>
+              <div class="sfw-lbl">Correctas</div>
+            </div>
+            <div class="sfw-stat">
+              <div class="sfw-num err" id="sfw-err">0</div>
+              <div class="sfw-lbl">Incorrectas</div>
+            </div>
+          </div>
+          <div class="sfw-barra-wrap">
+            <div class="sfw-barra-fill" id="sfw-barra" style="width:0%"></div>
+          </div>
+          <div class="sfw-fraccion" id="sfw-fraccion"><b>0</b> / 0 respondidas</div>
+        </div>
+        <div id="sfw-collapsed" title="Ver progreso de este cuestionario">
+          <span id="sfw-col-pag">Pág 1/1</span>
+          <span class="sfw-sep">|</span>
+          <span class="sfw-ok-mini" id="sfw-col-ok">0✓</span>
+          <span class="sfw-err-mini" id="sfw-col-err">0✗</span>
+        </div>`;
+      document.body.appendChild(w);
+
+      document.getElementById('sfw-collapsed').addEventListener('click', _sfwToggle);
+      document.getElementById('sfw-header').addEventListener('click', _sfwColapsar);
+      document.getElementById('sfw-close').addEventListener('click', e => { e.stopPropagation(); _sfwColapsar(); });
+
+      // Scroll: mostrar al bajar, ocultar al subir
+      let _lastY = window.scrollY;
+      window.addEventListener('scroll', () => {
+        const wd = document.getElementById(WIDGET_ID);
+        if (!wd || wd.style.display === 'none') return;
+        const cur = window.scrollY;
+        if (cur > _lastY) wd.classList.remove('sfw-hidden');
+        else wd.classList.add('sfw-hidden');
+        _lastY = cur;
+      }, { passive: true });
+    }
+
+    let _sfwTimer = null;
+    function _sfwExpandir() {
+      const col = document.getElementById('sfw-collapsed');
+      const exp = document.getElementById('sfw-expanded');
+      if (!col || !exp) return;
+      col.style.display = 'none';
+      exp.style.display = 'flex';
+      clearTimeout(_sfwTimer);
+      _sfwTimer = setTimeout(_sfwColapsar, 5000);
+    }
+    function _sfwColapsar() {
+      clearTimeout(_sfwTimer);
+      const col = document.getElementById('sfw-collapsed');
+      const exp = document.getElementById('sfw-expanded');
+      if (!exp || !col) return;
+      exp.style.display = 'none';
+      col.style.display = 'flex';
+    }
+    function _sfwToggle() {
+      const exp = document.getElementById('sfw-expanded');
+      if (!exp) return;
+      if (exp.style.display === 'flex') _sfwColapsar(); else _sfwExpandir();
+    }
+
+    function _sfwActualizar(ok, err, total) {
+      const resp = ok + err;
+      const pct  = total > 0 ? Math.round((resp / total) * 100) : 0;
+
+      const colOk  = document.getElementById('sfw-col-ok');
+      const colErr = document.getElementById('sfw-col-err');
+      if (colOk)  colOk.textContent  = `${ok}✓`;
+      if (colErr) colErr.textContent = `${err}✗`;
+
+      const elResp = document.getElementById('sfw-resp');
+      const elOk   = document.getElementById('sfw-ok');
+      const elErr  = document.getElementById('sfw-err');
+      const elBar  = document.getElementById('sfw-barra');
+      const elFrac = document.getElementById('sfw-fraccion');
+      if (elResp) elResp.textContent = resp;
+      if (elOk)   elOk.textContent   = ok;
+      if (elErr)  elErr.textContent  = err;
+      if (elBar)  {
+        elBar.style.width = pct + '%';
+        elBar.classList.toggle('done', resp === total && total > 0);
+      }
+      if (elFrac) elFrac.innerHTML = `<b>${resp}</b> / ${total} respondidas`;
+
+      // Pulso al actualizar
+      const col = document.getElementById('sfw-collapsed');
+      if (col) {
+        col.classList.remove('sfw-pulse');
+        void col.offsetWidth; // reflow para reiniciar animación
+        col.classList.add('sfw-pulse');
+        setTimeout(() => col.classList.remove('sfw-pulse'), 600);
+      }
+
+      // Actualizar label 📊 en barra inferior
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        window._ubActualizarLabelProgreso(resp, total);
+      }
+
+      // Si está expandido, reiniciar auto-colapso
+      const exp = document.getElementById('sfw-expanded');
+      if (exp && exp.style.display === 'flex') {
+        clearTimeout(_sfwTimer);
+        _sfwTimer = setTimeout(_sfwColapsar, 5000);
+      }
+    }
+
+    // API pública
+    window._simpleWidgetInit = function(seccionId) {
+      _sfwSeccion = seccionId;
+      _sfwInit();
+      const wd = document.getElementById(WIDGET_ID);
+      if (wd) {
+        wd.style.display = 'block';
+        wd.classList.add('sfw-hidden');
+        // Asegurar estado colapsado al entrar
+        const exp = document.getElementById('sfw-expanded');
+        const col = document.getElementById('sfw-collapsed');
+        if (exp) exp.style.display = 'none';
+        if (col) col.style.display = 'flex';
+      }
+      // Calcular stats iniciales (preguntas ya respondidas en sesiones anteriores)
+      window._simpleWidgetUpdate(seccionId);
+    };
+
+    window._simpleWidgetUpdate = function(seccionId) {
+      if (seccionId !== _sfwSeccion) return;
+      const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
+      const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
+      let ok = 0, err = 0;
+      for (let i = 0; i < total; i++) {
+        const v = puntajes[i];
+        if (v === 1) ok++; else if (v === 0) err++;
+      }
+      _sfwActualizar(ok, err, total);
+    };
+
+    window._simpleWidgetOcultar = function() {
+      _sfwSeccion = null;
+      clearTimeout(_sfwTimer);
+      const wd = document.getElementById(WIDGET_ID);
+      if (wd) wd.style.display = 'none';
+      // Restablecer label al ocultar
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        window._ubActualizarLabelProgreso(null);
+      }
+    };
+  })();
+
   // ======== FUNCIONES DEL TEMPORIZADOR DEL SIMULACRO ========
   
   function iniciarTemporizador() {
@@ -1600,6 +1894,33 @@
           100% { opacity: 1; transform: translateY(0) scale(1); }
         }
         #timer-simulacro { animation: timerEntrada 0.45s cubic-bezier(0.34,1.56,0.64,1) both; }
+
+        /* ===== TIMER RESPONSIVE MÓVIL ===== */
+        @media (max-width: 600px) {
+          #timer-simulacro {
+            top: 8px;
+            right: 8px;
+            padding: 7px 12px 9px;
+            min-width: 110px;
+            border-radius: 11px;
+          }
+          #timer-simulacro .timer-icon {
+            font-size: 0.75rem;
+            margin-bottom: 1px;
+          }
+          #timer-simulacro .timer-label {
+            font-size: 0.55rem;
+            letter-spacing: 0.08em;
+            margin-bottom: 2px;
+          }
+          #timer-display {
+            font-size: 1.1rem;
+          }
+          #timer-simulacro .timer-barra-wrap {
+            margin-top: 5px;
+            height: 2px;
+          }
+        }
 
         /* ===== ALERTAS FLOTANTES DE TIEMPO ===== */
         .simulacro-alerta {
@@ -3032,6 +3353,15 @@
     // para que el usuario vea el cambio inmediatamente al responder cada pregunta.
     if (typeof window._pag2UpdateStats === 'function') {
       window._pag2UpdateStats(seccionId);
+    }
+
+    // ── Actualizar widget flotante y label 📊 para Simulacro / Único / UBA ──
+    // El paginador NO gestiona estos cuestionarios (todos en 1 página),
+    // por lo que actualizamos aquí directamente.
+    if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+      if (typeof window._simpleWidgetUpdate === 'function') {
+        window._simpleWidgetUpdate(seccionId);
+      }
     }
 
     // ===== Verificar si se respondió la ÚLTIMA pregunta y mostrar puntuación automáticamente =====
