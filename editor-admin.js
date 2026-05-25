@@ -1303,21 +1303,43 @@
       preg.explicacion = nuevaExpl;
 
       try {
-        const { doc, setDoc, serverTimestamp } = window.__fb;
+        const { doc, setDoc, updateDoc, serverTimestamp } = window.__fb;
         const _fbDb        = window._fbDb;
         const _currentUser = window._currentUser;
 
-        // V27: escritura completa sin merge:true para garantizar que todos los
-        // campos se persisten (con merge:true, un campo undefined puede quedar con valor viejo)
-        await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`), {
-          seccionId, qIndex: qIndex + 1,
+        // ── ESCRITURA DUAL EN FIRESTORE ──────────────────────────────────────
+        // Colección principal (fuente de verdad): preguntas/{seccionId}/items/{docId}
+        // Colección legacy (compatibilidad):      questions/{docId}
+        // Costo: 2 escrituras por edición — sin lecturas extra.
+        const _pregData = {
           pregunta   : nuevaPreg,
           opciones   : nuevasOpciones,
           correcta   : nuevaCorrecta,
           explicacion: nuevaExpl,
           updatedAt  : serverTimestamp(),
-          updatedBy  : _currentUser.uid
-        });
+          updatedBy  : _currentUser.uid,
+        };
+        const _docIdPrincipal = `${seccionId}_${qIndex + 1}`;
+
+        // 1. Escritura principal: preguntas/{seccionId}/items/{docId}
+        // updateDoc falla si el doc no existe → fallback a setDoc
+        try {
+          await updateDoc(
+            doc(_fbDb, 'preguntas', seccionId, 'items', _docIdPrincipal),
+            _pregData
+          );
+        } catch (_updateErr) {
+          // Documento no existe aún (pregunta nueva): crearlo completo
+          await setDoc(
+            doc(_fbDb, 'preguntas', seccionId, 'items', _docIdPrincipal),
+            { seccionId, qIndex: qIndex + 1, ..._pregData }
+          );
+        }
+
+        // 2. Escritura legacy: questions/{docId} (no bloquea el flujo si falla)
+        setDoc(doc(_fbDb, 'questions', _docIdPrincipal), {
+          seccionId, qIndex: qIndex + 1, ..._pregData
+        }).catch(e => console.warn('[EDITOR] Legacy write falló (no crítico):', e.message));
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
 
