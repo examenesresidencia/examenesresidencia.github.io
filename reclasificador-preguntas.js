@@ -486,6 +486,9 @@
         const { doc, setDoc, deleteDoc, getDocs, collection } = window.__fb;
         const _fbDb = window._fbDb;
 
+        // Normalización de texto (para comparar preguntas en el progress de usuarios)
+        const _norm = t => (t || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 120);
+
         // 1. Obtener el próximo índice libre en la sección destino
         const nuevoIndice = await _proximoIndice(destino);
         const nuevoDocId  = `${destino}_${nuevoIndice}`;
@@ -564,11 +567,13 @@
         try { localStorage.removeItem('fb_edits_cache_' + destino); } catch (_) {}
 
         // 5c. Parche quirúrgico en localStorage del admin (su propia sesión)
+        // qIndex es el índice base-0 de la pregunta en el array pps[seccionOrigen],
+        // que coincide exactamente con el índice que espera _reindexSectionStateRecl.
         const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
         let state = {};
         try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
         if (state[seccionOrigen]) {
-          _reindexSectionStateRecl(state[seccionOrigen], idxEnSeccion);
+          _reindexSectionStateRecl(state[seccionOrigen], qIndex);
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
         }
 
@@ -576,10 +581,10 @@
         //   - Reindexar unansweredOrder de la sección origen
         //   - Migrar la pregunta respondida a la sección destino
         try {
-          await _reindexAllUsersProgressRecl(seccionOrigen, idxEnSeccion, {
+          await _reindexAllUsersProgressRecl(seccionOrigen, qIndex, {
             seccionDestino : destino,
             nuevoDocId     : nuevoDocId,
-            nuevoIdx       : nuevoIndiceDestino - 1,
+            nuevoIdx       : nuevoIndice - 1,  // nuevoIndice es base-1 (N del docId); el array es base-0
             textoNorm      : _norm(pregClonada.pregunta),
           });
         } catch (_reindexErr) {
