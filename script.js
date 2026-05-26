@@ -809,38 +809,6 @@
           (Date.now() - cached.ts) < PREGUNTAS_CACHE_TTL) {
         if (!window.preguntasPorSeccion) window.preguntasPorSeccion = {};
         const preguntasLimpias = cached.preguntas.filter(p => !p._origenExamen);
-
-        // ── APLICAR EDICIONES LOCALES SOBRE EL IDB ───────────────────────────────
-        // El admin puede haber editado preguntas después de que este IDB fue generado.
-        // fb_edits_cache_{seccionId} guarda siempre la edición más reciente de cada
-        // pregunta. Si su ts > cached.ts (más nuevo que el IDB), la aplicamos encima.
-        // Costo: 0 lecturas Firestore. Solo lectura de localStorage (< 1ms).
-        try {
-          const _editRaw = localStorage.getItem('fb_edits_cache_' + seccionId);
-          if (_editRaw) {
-            const _editCache = JSON.parse(_editRaw);
-            // Aplicar SIEMPRE las ediciones del cache local (no solo si son más nuevas
-            // que el IDB), porque el IDB pudo haber sido parcheado con versión incorrecta.
-            // El fb_edits_cache_ siempre tiene la última edición confirmada por el admin.
-            if (_editCache && Array.isArray(_editCache.data) && _editCache.data.length > 0) {
-              _editCache.data.forEach(function(ed) {
-                const idx = ed.qIndex - 1;  // base-1 en cache → base-0 en array
-                if (!preguntasLimpias[idx]) return;
-                if (ed.pregunta    !== undefined) preguntasLimpias[idx].pregunta    = ed.pregunta;
-                if (ed.opciones    !== undefined) preguntasLimpias[idx].opciones    = ed.opciones;
-                if (ed.correcta    !== undefined) preguntasLimpias[idx].correcta    = ed.correcta;
-                if (ed.explicacion !== undefined) preguntasLimpias[idx].explicacion = ed.explicacion;
-                if (ed.imagen      !== undefined) preguntasLimpias[idx].imagen      = ed.imagen;
-              });
-              console.log('[CACHE-HIT] Ediciones locales aplicadas sobre IDB →', seccionId,
-                '|', _editCache.data.length, 'edición(es)');
-            }
-          }
-        } catch (_edErr) {
-          console.warn('[CACHE-HIT] No se pudieron aplicar ediciones locales:', _edErr.message);
-        }
-        // ── FIN APLICAR EDICIONES ─────────────────────────────────────────────────
-
         window.preguntasPorSeccion[seccionId] = preguntasLimpias;
         _seccionesYaCargadas.add(seccionId);
         _debugLog('✅ Caché OK: ' + seccionId + ' → ' + preguntasLimpias.length + ' pregs');
