@@ -1343,33 +1343,78 @@
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
 
-        // V27: Invalidar caché de ediciones ANTES del parche IDB
-        // (fuerza recarga fresca desde Firestore en la próxima visita de cualquier usuario)
-        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+        // ── ESTRATEGIA DE CACHÉ POST-EDICIÓN ────────────────────────────────────
+        // Objetivo: 0 lecturas Firestore al recargar, siempre mostrando la versión más nueva.
+        //
+        // 1. Guardar la edición en fb_edits_cache_ (localStorage) con timestamp NOW.
+        //    Esto sirve de "parche de ediciones" que se aplica sobre el caché IDB al cargar.
+        //    El objeto tiene la misma forma que el server devuelve desde questions/.
+        //
+        // 2. Parchear el IDB directamente (parche quirúrgico).
+        //    Así al recargar, si el IDB es válido, ya tiene el dato nuevo sin ir a Firestore.
+        //
+        // 3. Si el IDB no existe o falla → no pasa nada: al recargar descarga de preguntas/
+        //    y aplica el fb_edits_cache_ que acabamos de actualizar → dato correcto igual.
 
-        // ── Parche quirúrgico en caché IDB del admin ─────────────────────────────
-        // 0 lecturas de Firestore. Actualiza IndexedDB directamente.
+        // ── PASO 1: Actualizar fb_edits_cache_ localmente ────────────────────────
+        // En vez de borrar el caché de ediciones, lo ACTUALIZAMOS con el dato nuevo.
+        // Esto garantiza persistencia sin lecturas adicionales a Firestore.
+        try {
+          const _editCacheKey = 'fb_edits_cache_' + seccionId;
+          let _edits = { ts: 0, data: [] };
+          try {
+            const _raw = localStorage.getItem(_editCacheKey);
+            if (_raw) _edits = JSON.parse(_raw);
+            if (!Array.isArray(_edits.data)) _edits.data = [];
+          } catch (_) { _edits = { ts: 0, data: [] }; }
+
+          // Buscar si ya existe edición para este qIndex y reemplazar; si no, agregar
+          const _editIdx = _edits.data.findIndex(e => e.qIndex === qIndex + 1);
+          const _editEntry = {
+            seccionId,
+            qIndex    : qIndex + 1,  // base-1 (igual que en Firestore)
+            pregunta  : nuevaPreg,
+            opciones  : nuevasOpciones,
+            correcta  : nuevaCorrecta,
+            explicacion: nuevaExpl,
+          };
+          if (_editIdx >= 0) _edits.data[_editIdx] = _editEntry;
+          else               _edits.data.push(_editEntry);
+          _edits.ts = Date.now();  // renovar timestamp para que dure 1h más
+
+          localStorage.setItem(_editCacheKey, JSON.stringify(_edits));
+          console.log('[EDITOR] fb_edits_cache_ actualizado → sección:', seccionId, '| qIndex:', qIndex + 1);
+        } catch (_editCacheErr) {
+          // Si el localStorage falla, borrar el caché para forzar recarga limpia
+          try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
+          console.warn('[EDITOR] fb_edits_cache_ falló, invalidado:', _editCacheErr.message);
+        }
+
+        // ── PASO 2: Parche quirúrgico en IDB del admin ────────────────────────────
+        // Intenta actualizar el IDB directamente. Si falla, no es crítico porque
+        // el PASO 1 garantiza que al recargar las ediciones se apliquen igual.
         const _ck = 'fb_q_cache_' + seccionId;
         try {
-          const _cached = await window._idbCache.get(_ck);
-          if (_cached && _cached.preguntas) {
-            if (_cached.preguntas[qIndex]) {
+          if (window._idbCache) {
+            const _cached = await window._idbCache.get(_ck);
+            if (_cached && _cached.preguntas && _cached.preguntas[qIndex]) {
               _cached.preguntas[qIndex].pregunta    = nuevaPreg;
               _cached.preguntas[qIndex].opciones    = nuevasOpciones;
               _cached.preguntas[qIndex].correcta    = nuevaCorrecta;
               _cached.preguntas[qIndex].explicacion = nuevaExpl;
               _cached.ts = Date.now();
               await window._idbCache.set(_ck, _cached);
-              console.log('[EDITOR V27] Caché IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
-            } else {
-              // Pregunta no está en IDB: invalidar para forzar recarga completa
+              console.log('[EDITOR] IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
+            } else if (_cached && _cached.preguntas && !_cached.preguntas[qIndex]) {
+              // Pregunta no hallada en IDB: invalidar para que recargue limpio
               await window._idbCache.remove(_ck);
-              console.log('[EDITOR V27] Pregunta no en IDB, caché invalidado → sección:', seccionId);
+              console.log('[EDITOR] IDB invalidado (pregunta no hallada) → sección:', seccionId);
             }
+            // Si _cached === null: el IDB no tenía caché → no hace falta hacer nada
           }
         } catch (_idbErr) {
           try { await window._idbCache.remove(_ck); } catch (_) {}
-          console.warn('[EDITOR V27] IDB falló, caché invalidado:', _idbErr.message);
+          console.warn('[EDITOR] IDB parche falló, invalidado:', _idbErr.message);
         }
 
         // También parchear la memoria (preguntasPorSeccion) en tiempo real
