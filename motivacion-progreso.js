@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// motivacion-progreso.js  — v2
+// motivacion-progreso.js  — v1
 // ────────────────────────────────────────────────────────────────
 // MÓDULO INDEPENDIENTE que mejora dos cosas sin tocar script.js:
 //
