@@ -2518,22 +2518,28 @@
     // Fix 4: también elimina entradas cuyo índice supera el total actual de preguntas
     // (preguntas "fantasma" que fueron borradas y dejaron un índice huérfano).
     {
-      const _gradedTrue = new Set(
+      // FIX CRÍTICO: graded guarda true (correcta) O false (incorrecta).
+      // La limpieza debe conservar AMBOS valores — cualquier pregunta respondida
+      // (correcta O incorrecta) debe permanecer en answeredOrder.
+      // BUG anterior: solo se conservaban las graded===true, lo que causaba que las
+      // respondidas incorrectamente cayeran en unanswered y se mezclaran entre las
+      // sin responder, generando el desorden de páginas reportado.
+      const _gradedRespondidas = new Set(
         Object.keys(s.graded || {})
           .map(k => parseInt(k, 10))
-          .filter(k => !isNaN(k) && s.graded[k] === true)
+          .filter(k => !isNaN(k) && s.graded[k] !== undefined && s.graded[k] !== null)
       );
       const _antesLimpieza = s.answeredOrder.length;
-      // Filtrar por graded=true, sin duplicados, y dentro del rango válido de preguntas
+      // Filtrar: respondida (graded definido), sin duplicados, dentro del rango válido
       const _idxVistos = new Set();
       s.answeredOrder = s.answeredOrder.filter(e => {
         const idx = typeof e === 'number' ? e : e.idx;
-        if (!_gradedTrue.has(idx) || _idxVistos.has(idx)) return false;
-        if (idx >= preguntasLen) return false; // Fix 4: índice fuera de rango (pregunta borrada)
+        if (!_gradedRespondidas.has(idx) || _idxVistos.has(idx)) return false;
+        if (idx >= preguntasLen) return false; // índice fuera de rango (pregunta borrada)
         _idxVistos.add(idx);
         return true;
       });
-      // Fix 4: también limpiar graded, answers y shuffleMap de índices fuera de rango
+      // También limpiar graded, answers y shuffleMap de índices fuera de rango
       ['graded', 'answers', 'shuffleMap'].forEach(campo => {
         if (!s[campo]) return;
         Object.keys(s[campo]).forEach(k => {
@@ -2543,7 +2549,7 @@
       if (s.answeredOrder.length !== _antesLimpieza) {
         console.log('[LIMPIEZA] answeredOrder depurado: '
           + _antesLimpieza + ' → ' + s.answeredOrder.length
-          + ' (graded=true, sin duplicados, sin índices fuera de rango)');
+          + ' (respondidas correctas+incorrectas, sin duplicados, sin fuera de rango)');
         if (!window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
       }
     }
@@ -2554,9 +2560,11 @@
     // quedó incompleto (ej: solo 7 de 138 entradas). graded es la fuente de verdad.
     // Cualquier índice marcado en graded que no esté ya en answeredOrder se agrega al final.
     {
+      // FIX: incluir tanto graded===true (correctas) como graded===false (incorrectas)
+      // porque ambas son preguntas respondidas que deben aparecer en answeredOrder
       const _gradedKeys = Object.keys(s.graded || {})
         .map(k => parseInt(k, 10))
-        .filter(k => !isNaN(k) && s.graded[k] === true);
+        .filter(k => !isNaN(k) && s.graded[k] !== undefined && s.graded[k] !== null);
 
       if (_gradedKeys.length > 0) {
         const _idxEnAnswered = new Set(
@@ -2708,11 +2716,17 @@
     });
     if (_cambioDeResolucion && !window._fbSyncInProgress) saveJSON(STORAGE_KEY, state);
 
-    // Construir el conjunto de índices aún sin responder
+    // Construir el conjunto de índices aún sin responder.
+    // FIX CRÍTICO: la condición anterior era `!graded[i]` que es true tanto cuando
+    // graded[i] es undefined (sin responder) COMO cuando es false (respondida incorrecta).
+    // Esto metía las incorrectas en unanswered y las distribuía entre las sin responder.
+    // La condición correcta es: graded[i] === undefined O graded[i] === null (genuinamente sin responder).
     const unanswered = [];
     const graded = s.graded || {}; // protección: puede ser undefined al recargar
     for (let i = 0; i < preguntasLen; i++) {
-      if (!graded[i] && !_indicesYaUsados.has(i)) unanswered.push(i);
+      const gradedVal = graded[i];
+      const sinResponder = (gradedVal === undefined || gradedVal === null);
+      if (sinResponder && !_indicesYaUsados.has(i)) unanswered.push(i);
     }
 
     // 2) Sin responder: el orden se genera UNA SOLA VEZ (primer ingreso al intento)
