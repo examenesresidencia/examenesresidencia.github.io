@@ -1303,118 +1303,51 @@
       preg.explicacion = nuevaExpl;
 
       try {
-        const { doc, setDoc, updateDoc, serverTimestamp } = window.__fb;
+        const { doc, setDoc, serverTimestamp } = window.__fb;
         const _fbDb        = window._fbDb;
         const _currentUser = window._currentUser;
 
-        // ── ESCRITURA DUAL EN FIRESTORE ──────────────────────────────────────
-        // Colección principal (fuente de verdad): preguntas/{seccionId}/items/{docId}
-        // Colección legacy (compatibilidad):      questions/{docId}
-        // Costo: 2 escrituras por edición — sin lecturas extra.
-        const _pregData = {
+        // V27: escritura completa sin merge:true para garantizar que todos los
+        // campos se persisten (con merge:true, un campo undefined puede quedar con valor viejo)
+        await setDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`), {
+          seccionId, qIndex: qIndex + 1,
           pregunta   : nuevaPreg,
           opciones   : nuevasOpciones,
           correcta   : nuevaCorrecta,
           explicacion: nuevaExpl,
           updatedAt  : serverTimestamp(),
-          updatedBy  : _currentUser.uid,
-        };
-        const _docIdPrincipal = `${seccionId}_${qIndex + 1}`;
-
-        // 1. Escritura principal: preguntas/{seccionId}/items/{docId}
-        // updateDoc falla si el doc no existe → fallback a setDoc
-        try {
-          await updateDoc(
-            doc(_fbDb, 'preguntas', seccionId, 'items', _docIdPrincipal),
-            _pregData
-          );
-        } catch (_updateErr) {
-          // Documento no existe aún (pregunta nueva): crearlo completo
-          await setDoc(
-            doc(_fbDb, 'preguntas', seccionId, 'items', _docIdPrincipal),
-            { seccionId, qIndex: qIndex + 1, ..._pregData }
-          );
-        }
-
-        // 2. Escritura legacy: questions/{docId} (no bloquea el flujo si falla)
-        setDoc(doc(_fbDb, 'questions', _docIdPrincipal), {
-          seccionId, qIndex: qIndex + 1, ..._pregData
-        }).catch(e => console.warn('[EDITOR] Legacy write falló (no crítico):', e.message));
+          updatedBy  : _currentUser.uid
+        });
 
         _eaToast('✅ Pregunta guardada en Firestore', 'success');
 
-        // ── ESTRATEGIA DE CACHÉ POST-EDICIÓN ────────────────────────────────────
-        // Objetivo: 0 lecturas Firestore al recargar, siempre mostrando la versión más nueva.
-        //
-        // 1. Guardar la edición en fb_edits_cache_ (localStorage) con timestamp NOW.
-        //    Esto sirve de "parche de ediciones" que se aplica sobre el caché IDB al cargar.
-        //    El objeto tiene la misma forma que el server devuelve desde questions/.
-        //
-        // 2. Parchear el IDB directamente (parche quirúrgico).
-        //    Así al recargar, si el IDB es válido, ya tiene el dato nuevo sin ir a Firestore.
-        //
-        // 3. Si el IDB no existe o falla → no pasa nada: al recargar descarga de preguntas/
-        //    y aplica el fb_edits_cache_ que acabamos de actualizar → dato correcto igual.
+        // V27: Invalidar caché de ediciones ANTES del parche IDB
+        // (fuerza recarga fresca desde Firestore en la próxima visita de cualquier usuario)
+        try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
 
-        // ── PASO 1: Actualizar fb_edits_cache_ localmente ────────────────────────
-        // En vez de borrar el caché de ediciones, lo ACTUALIZAMOS con el dato nuevo.
-        // Esto garantiza persistencia sin lecturas adicionales a Firestore.
-        try {
-          const _editCacheKey = 'fb_edits_cache_' + seccionId;
-          let _edits = { ts: 0, data: [] };
-          try {
-            const _raw = localStorage.getItem(_editCacheKey);
-            if (_raw) _edits = JSON.parse(_raw);
-            if (!Array.isArray(_edits.data)) _edits.data = [];
-          } catch (_) { _edits = { ts: 0, data: [] }; }
-
-          // Buscar si ya existe edición para este qIndex y reemplazar; si no, agregar
-          const _editIdx = _edits.data.findIndex(e => e.qIndex === qIndex + 1);
-          const _editEntry = {
-            seccionId,
-            qIndex    : qIndex + 1,  // base-1 (igual que en Firestore)
-            pregunta  : nuevaPreg,
-            opciones  : nuevasOpciones,
-            correcta  : nuevaCorrecta,
-            explicacion: nuevaExpl,
-          };
-          if (_editIdx >= 0) _edits.data[_editIdx] = _editEntry;
-          else               _edits.data.push(_editEntry);
-          _edits.ts = Date.now();  // renovar timestamp para que dure 1h más
-
-          localStorage.setItem(_editCacheKey, JSON.stringify(_edits));
-          console.log('[EDITOR] fb_edits_cache_ actualizado → sección:', seccionId, '| qIndex:', qIndex + 1);
-        } catch (_editCacheErr) {
-          // Si el localStorage falla, borrar el caché para forzar recarga limpia
-          try { localStorage.removeItem('fb_edits_cache_' + seccionId); } catch (_) {}
-          console.warn('[EDITOR] fb_edits_cache_ falló, invalidado:', _editCacheErr.message);
-        }
-
-        // ── PASO 2: Parche quirúrgico en IDB del admin ────────────────────────────
-        // Intenta actualizar el IDB directamente. Si falla, no es crítico porque
-        // el PASO 1 garantiza que al recargar las ediciones se apliquen igual.
+        // ── Parche quirúrgico en caché IDB del admin ─────────────────────────────
+        // 0 lecturas de Firestore. Actualiza IndexedDB directamente.
         const _ck = 'fb_q_cache_' + seccionId;
         try {
-          if (window._idbCache) {
-            const _cached = await window._idbCache.get(_ck);
-            if (_cached && _cached.preguntas && _cached.preguntas[qIndex]) {
+          const _cached = await window._idbCache.get(_ck);
+          if (_cached && _cached.preguntas) {
+            if (_cached.preguntas[qIndex]) {
               _cached.preguntas[qIndex].pregunta    = nuevaPreg;
               _cached.preguntas[qIndex].opciones    = nuevasOpciones;
               _cached.preguntas[qIndex].correcta    = nuevaCorrecta;
               _cached.preguntas[qIndex].explicacion = nuevaExpl;
               _cached.ts = Date.now();
               await window._idbCache.set(_ck, _cached);
-              console.log('[EDITOR] IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
-            } else if (_cached && _cached.preguntas && !_cached.preguntas[qIndex]) {
-              // Pregunta no hallada en IDB: invalidar para que recargue limpio
+              console.log('[EDITOR V27] Caché IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
+            } else {
+              // Pregunta no está en IDB: invalidar para forzar recarga completa
               await window._idbCache.remove(_ck);
-              console.log('[EDITOR] IDB invalidado (pregunta no hallada) → sección:', seccionId);
+              console.log('[EDITOR V27] Pregunta no en IDB, caché invalidado → sección:', seccionId);
             }
-            // Si _cached === null: el IDB no tenía caché → no hace falta hacer nada
           }
         } catch (_idbErr) {
           try { await window._idbCache.remove(_ck); } catch (_) {}
-          console.warn('[EDITOR] IDB parche falló, invalidado:', _idbErr.message);
+          console.warn('[EDITOR V27] IDB falló, caché invalidado:', _idbErr.message);
         }
 
         // También parchear la memoria (preguntasPorSeccion) en tiempo real
@@ -1703,8 +1636,13 @@
         const { doc, deleteDoc } = window.__fb;
         const _fbDb = window._fbDb;
 
-        // 1. Eliminar documento de Firestore
-        await deleteDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`));
+        // 1. Eliminar de AMBAS colecciones de Firestore
+        // Colección principal (fuente de verdad que cargan los usuarios):
+        await deleteDoc(doc(_fbDb, 'preguntas', seccionId, 'items', `${seccionId}_${qIndex + 1}`))
+          .catch(e => console.warn('[EA] preguntas/items deleteDoc falló (puede no existir aún):', e.message));
+        // Colección legacy:
+        await deleteDoc(doc(_fbDb, 'questions', `${seccionId}_${qIndex + 1}`))
+          .catch(e => console.warn('[EA] questions deleteDoc falló:', e.message));
 
         // 2. Parche quirúrgico en caché de la sección actual:
         //    Quitar la pregunta del array en memoria y en localStorage
@@ -1737,9 +1675,23 @@
         const scrollAntes = window.scrollY;
         cerrarDlg();
 
-        // Parche quirúrgico en localStorage del admin (su propia sesión):
-        // Reindexar en lugar de borrar preserva answeredOrder y unansweredOrder.
+        // Parche quirúrgico en localStorage + memoria del admin:
+        // Reindexar preserva answeredOrder/unansweredOrder sin desordenar las páginas.
         const STORAGE_KEY = window.STORAGE_KEY || 'quiz_state_v3';
+
+        // Reindexar estado en memoria (window.state)
+        if (window.state && window.state[seccionId]) {
+          _reindexSectionState(window.state[seccionId], qIndex);
+          console.log('[EA] window.state reindexado para', seccionId, 'removedIdx=', qIndex);
+        }
+
+        // Reindexar puntajesPorSeccion en memoria (afecta al paginador)
+        if (window.puntajesPorSeccion && Array.isArray(window.puntajesPorSeccion[seccionId])) {
+          window.puntajesPorSeccion[seccionId].splice(qIndex, 1);
+          console.log('[EA] puntajesPorSeccion reindexado para', seccionId);
+        }
+
+        // Reindexar localStorage
         let state = {};
         try { state = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (_) {}
         if (state[seccionId]) {
@@ -1747,13 +1699,48 @@
           localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
         }
 
-        // Parche en Firestore: reindexar unansweredOrder de TODOS los usuarios.
-        // answeredOrder sobrevive por la ancla doble (docId+texto), pero
-        // unansweredOrder son índices crudos que quedan desfasados en -1.
+        // ── Reindexar estado local del admin ─────────────────────────────────
+        // Ya hecho arriba. Ahora también reindexar el estado en memoria (window.state)
+        if (typeof window.state === 'object' && window.state[seccionId]) {
+          _reindexSectionState(window.state[seccionId], qIndex);
+          console.log('[EA] state en memoria reindexado para', seccionId, 'removedIdx=', qIndex);
+        }
+
+        // ── Parche también en IDB del admin ──────────────────────────────────────
+        try {
+          const _idbKey = 'fb_q_cache_' + seccionId;
+          if (window._idbCache) {
+            const _idbData = await window._idbCache.get(_idbKey);
+            if (_idbData && Array.isArray(_idbData.preguntas)) {
+              _idbData.preguntas.splice(qIndex, 1);
+              _idbData.ts = Date.now();
+              await window._idbCache.set(_idbKey, _idbData);
+              console.log('[EA] IDB admin parcheado tras eliminación:', seccionId);
+            }
+          }
+        } catch (_idbErr) {
+          console.warn('[EA] IDB parche falló tras eliminación:', _idbErr.message);
+        }
+
+        // ── Reindexar Firestore para TODOS los usuarios ───────────────────────────
+        // Hace: reindexar unansweredOrder + answeredOrder + graded + answers + shuffleMap.
+        // También recalifica la pregunta eliminada (si alguien la tenía respondida,
+        // se elimina de graded para no contar en el score).
         try {
           await _reindexAllUsersProgress(seccionId, qIndex);
         } catch (_reindexErr) {
           console.warn('[EA] Error reindexando progress de usuarios:', _reindexErr.message);
+        }
+
+        // ── Notificar a todos los usuarios en tiempo real (onSnapshot) ───────────
+        // Envía esEliminacion:true para que el cliente elimine la pregunta del DOM
+        // y reindexe su estado local sin recargar toda la sección.
+        if (typeof window._bumpContentVersion === 'function') {
+          await window._bumpContentVersion(seccionId, qIndex, null, {
+            esEdicionPuntual: false,   // forzar recarga completa en el cliente
+            esEliminacion   : true,    // marcar como eliminación (no edición)
+            qIndexEliminado : qIndex,  // índice eliminado para reindexar en cliente
+          });
         }
 
         if (typeof window.generarCuestionario === 'function') {
