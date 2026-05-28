@@ -1,6 +1,15 @@
 // ════════════════════════════════════════════════════════════════
-// editor-admin.js  — V27
+// editor-admin.js  — V28
 // ────────────────────────────────────────────────────────────────
+// V28: 4 correcciones al flujo de edición admin:
+//   1. Parche IDB + localStorage en el save handler del admin:
+//      Ahora se parchea TAMBIÉN localStorage como fallback al IDB,
+//      garantizando que el F5 del admin muestre los datos recién editados
+//      y no los anteriores.
+//   2. Recalificación inmediata en el DOM del admin: si la pregunta
+//      estaba respondida y cambió la correcta, se llama
+//      window._recalificarPregunta() para repintar el color verde/rojo
+//      en el mismo instante del guardado (sin esperar al snapshot).
 // V24: Corregido el update quirúrgico del DOM al guardar una edición.
 //      Los selectores anteriores (.pregunta-texto, .opcion-label, etc.)
 //      no coincidían con el HTML real generado por script.js.
@@ -1328,6 +1337,7 @@
         // ── Parche quirúrgico en caché IDB del admin ─────────────────────────────
         // 0 lecturas de Firestore. Actualiza IndexedDB directamente.
         const _ck = 'fb_q_cache_' + seccionId;
+        let _idbParcheado = false;
         try {
           const _cached = await window._idbCache.get(_ck);
           if (_cached && _cached.preguntas) {
@@ -1338,6 +1348,7 @@
               _cached.preguntas[qIndex].explicacion = nuevaExpl;
               _cached.ts = Date.now();
               await window._idbCache.set(_ck, _cached);
+              _idbParcheado = true;
               console.log('[EDITOR V27] Caché IDB parcheado → sección:', seccionId, '| qIndex:', qIndex);
             } else {
               // Pregunta no está en IDB: invalidar para forzar recarga completa
@@ -1348,6 +1359,26 @@
         } catch (_idbErr) {
           try { await window._idbCache.remove(_ck); } catch (_) {}
           console.warn('[EDITOR V27] IDB falló, caché invalidado:', _idbErr.message);
+        }
+
+        // ── Fallback: parche en localStorage (para cuando IDB no esté disponible) ──
+        // Esto garantiza que el F5 del admin vea los datos correctos incluso si IDB falló.
+        try {
+          const _lsRaw = localStorage.getItem(_ck);
+          if (_lsRaw) {
+            const _lsCached = JSON.parse(_lsRaw);
+            if (_lsCached && _lsCached.preguntas && _lsCached.preguntas[qIndex]) {
+              _lsCached.preguntas[qIndex].pregunta    = nuevaPreg;
+              _lsCached.preguntas[qIndex].opciones    = nuevasOpciones;
+              _lsCached.preguntas[qIndex].correcta    = nuevaCorrecta;
+              _lsCached.preguntas[qIndex].explicacion = nuevaExpl;
+              _lsCached.ts = Date.now();
+              localStorage.setItem(_ck, JSON.stringify(_lsCached));
+              console.log('[EDITOR V27] Caché localStorage parcheado → sección:', seccionId, '| qIndex:', qIndex);
+            }
+          }
+        } catch (_lsErr) {
+          console.warn('[EDITOR V27] localStorage parche falló:', _lsErr.message);
         }
 
         // También parchear la memoria (preguntasPorSeccion) en tiempo real
@@ -1430,6 +1461,13 @@
           setTimeout(() => { _pregEl.style.boxShadow = ''; }, 1800);
 
           console.log('[EDITOR] DOM actualizado quirúrgicamente para qIndex:', qIndex);
+
+          // 5. Si cambió la respuesta correcta Y la pregunta ya fue respondida
+          //    → recalificar y repintar el color correcto/incorrecto en el DOM del admin.
+          //    (El admin puede estar viendo la misma sección desde su cuenta de usuario.)
+          if (cambioRespuesta && typeof window._recalificarPregunta === 'function') {
+            window._recalificarPregunta(seccionId, qIndex, nuevaCorrecta);
+          }
 
           // Notificar al paginador para que actualice stats (si cambió la correcta)
           if (cambioRespuesta && typeof window._pag2UpdateStats === 'function') {
