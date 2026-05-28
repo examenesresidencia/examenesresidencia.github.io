@@ -1,4 +1,14 @@
-//PRUEBA 28  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 29  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix v29: 3 correcciones al sistema de sincronización en tiempo real:
+//   1. _bumpContentVersion ahora envía `qIndexes` (array) y `nuevasCorrectas`
+//      (array de objetos {qIndex, correcta}) además de los campos legacy,
+//      resolviendo el bug donde el listener recibía nuevasCorrectas=[] y por
+//      lo tanto _recalificarPregunta nunca se ejecutaba en el cliente.
+//   2. _updatePreguntaEnDOM ahora llama _recalificarPregunta cuando la pregunta
+//      ya fue respondida y cambió la correcta, repintando verde/rojo al instante.
+//   3. Admin self-skip: el listener onSnapshot del admin omite su propia edición
+//      (identificada por window._lastAdminSaveVersion) para evitar un double-patch
+//      que sobreescribía el DOM ya actualizado en el save handler.
 // Fix v24: TRES mejoras profesionales en un solo bloque:
 //   1. mostrarExplicacion() siempre sincroniza contenido desde preguntasPorSeccion
 //      antes de mostrar, garantizando que el usuario ve la explicación actualizada
@@ -8606,11 +8616,33 @@ function fbSaveProgressToCloud() {
       const docId = esSubidaNueva
         ? 'contentVersion_' + seccionId
         : 'contentVersion';
+
+      // Construir qIndexes y nuevasCorrectas en el formato que espera el listener:
+      //   qIndexes: [qIndex]  (array de índices base-0)
+      //   nuevasCorrectas: [{qIndex, correcta}]  (array de objetos)
+      const qIndexes      = (qIndex !== null && qIndex !== undefined) ? [qIndex] : [];
+      const nuevasCorrectas = (qIndex !== null && qIndex !== undefined && nuevaCorrecta)
+        ? [{ qIndex, correcta: nuevaCorrecta }]
+        : [];
+
+      // Registrar el timestamp de esta versión para que el listener del admin la omita
+      // (evitar doble-parche sobre el DOM ya actualizado en el save handler)
+      const versionTimestamp = Date.now();
+      window._lastAdminSaveVersion = String(versionTimestamp);
+      // Limpiar la marca después de 8 segundos (tiempo suficiente para que llegue el snapshot)
+      setTimeout(() => {
+        if (window._lastAdminSaveVersion === String(versionTimestamp)) {
+          window._lastAdminSaveVersion = null;
+        }
+      }, 8000);
+
       await setDoc(doc(_fbDb, 'meta', docId), {
-        version         : Date.now(),
+        version         : versionTimestamp,
         seccionId,
-        qIndex          : qIndex ?? null,
-        nuevaCorrecta   : nuevaCorrecta ?? null,
+        qIndex          : qIndex ?? null,        // compatibilidad backward
+        nuevaCorrecta   : nuevaCorrecta ?? null,  // compatibilidad backward
+        qIndexes,                                 // nuevo: array para el listener
+        nuevasCorrectas,                          // nuevo: array de objetos para recalificación
         startIdx        : opciones.startIdx ?? null,
         esEdicionPuntual: esEdicionPuntual,
         // Datos embebidos: el cliente los aplica directamente (0 lecturas extra a Firestore)
@@ -8951,7 +8983,7 @@ function fbSaveProgressToCloud() {
     // 2. Opciones — solo si la pregunta no fue respondida aún
     //    Las labels tienen el texto directamente como nodo de texto (después del input)
     const sState = state[seccionId];
-    const yaRespondida = sState?.graded?.[qIndex];
+    const yaRespondida = sState?.graded?.[qIndex] !== undefined && sState?.graded?.[qIndex] !== null;
     if (!yaRespondida && ed.opciones !== undefined) {
       const inputs = Array.from(document.getElementsByName(`pregunta${seccionId}${qIndex}`));
       inputs.forEach((inp, mixedIdx) => {
@@ -8965,6 +8997,15 @@ function fbSaveProgressToCloud() {
           nodoTexto.textContent = ' ' + ed.opciones[originalIdx];
         }
       });
+    }
+
+    // 2b. Si la pregunta ya fue respondida Y cambió la correcta → recalificar y repintar
+    //     (antes esto no ocurría porque _recalificarPregunta se llama DESPUÉS en
+    //     _aplicarEdicionPuntual, pero cuando los datos vienen embebidos la función
+    //     se invocaba con nuevasCorrectas=[] por un bug en _bumpContentVersion)
+    if (yaRespondida && ed.correcta !== undefined) {
+      _recalificarPregunta(seccionId, qIndex, ed.correcta);
+      // _recalificarPregunta ya actualiza puntajeEl, graded y muestra toast
     }
 
     // 3. Explicación — solo si está abierta en este momento
@@ -9272,6 +9313,16 @@ function fbSaveProgressToCloud() {
 
         // Cambio en tiempo real (post primera lectura)
         try { if (versionRemota) localStorage.setItem(_CONTENT_VERSION_KEY, String(versionRemota)); } catch (_) {}
+
+        // Si el admin acaba de guardar esta versión (en los últimos 5s), omitir el parche
+        // propio para evitar un double-update sobre el DOM que ya fue actualizado quirúrgicamente
+        // en el save handler de editor-admin.js.
+        const _lastAdminSave = window._lastAdminSaveVersion;
+        if (_lastAdminSave && String(_lastAdminSave) === String(versionRemota)) {
+          console.log('[CONTENT-SYNC] Tiempo real → omitido: versión propia del admin (ya parcheada)');
+          return;
+        }
+
         _despacharCambio('Tiempo real');
       },
       (err) => { console.warn('[CONTENT-SYNC] Error en listener principal:', err.message); }
@@ -10327,6 +10378,7 @@ function fbSaveProgressToCloud() {
   window._bumpContentVersion         = _bumpContentVersion;
   window._registrarEdicionPendiente  = _registrarEdicionPendiente;
   window._aplicarEdicionPuntual      = _aplicarEdicionPuntual;
+  window._recalificarPregunta        = _recalificarPregunta;
   window._seccionesYaCargadas = _seccionesYaCargadas;
   window.STORAGE_KEY          = STORAGE_KEY;
   window.GITHUB_IMAGES_BASE   = GITHUB_IMAGES_BASE;
