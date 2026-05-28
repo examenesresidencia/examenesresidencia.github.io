@@ -685,15 +685,29 @@
     // así que puntajesPorSeccion ya tiene los datos correctos de TODO el cuestionario.
     // Llamamos aquí para que el botón muestre "N/Total" desde el primer instante,
     // sin necesidad de navegar a ninguna página ni responder nada.
+    // FIX: si _ubActualizarLabelProgreso aún no está definida (race condition en F5),
+    // reintentamos con un pequeño delay hasta que esté disponible (máx 2s).
     (function _labelInicial() {
-      const puntajesInicial = (window.puntajesPorSeccion || {})[seccionId] || [];
-      let respInicial = 0;
-      for (let i = 0; i < preguntas.length; i++) {
-        const v = puntajesInicial[i];
-        if (v === 1 || v === 0) respInicial++;
+      function _aplicarLabel() {
+        const puntajesInicial = (window.puntajesPorSeccion || {})[seccionId] || [];
+        let respInicial = 0;
+        for (let i = 0; i < preguntas.length; i++) {
+          const v = puntajesInicial[i];
+          if (v === 1 || v === 0) respInicial++;
+        }
+        if (typeof window._ubActualizarLabelProgreso === 'function') {
+          window._ubActualizarLabelProgreso(respInicial, preguntas.length);
+          return true;
+        }
+        return false;
       }
-      if (typeof window._ubActualizarLabelProgreso === 'function') {
-        window._ubActualizarLabelProgreso(respInicial, preguntas.length);
+      // Intentar de inmediato
+      if (!_aplicarLabel()) {
+        // Si no está lista, reintentar cada 100ms hasta 2s
+        let intentos = 0;
+        const intervalo = setInterval(() => {
+          if (_aplicarLabel() || ++intentos >= 20) clearInterval(intervalo);
+        }, 100);
       }
     })();
 
@@ -770,7 +784,7 @@
           </button>
           <button id="pag2-tempo-btn-${seccionId}"
             class="pag2-btn-tempo${_timerEsActivo(seccionId) ? ' tempo-activo' : ''}"
-            title="${_timerEsActivo(seccionId) ? 'Temporizador activo — clic para desactivar' : 'Activar temporizador de 60 min'}">
+            title="${_timerEsActivo(seccionId) ? 'Temporizador activo — clic para desactivar' : `Activar temporizador (${TIMER_OPCIONES.find(o => o.seg === _timerGetDuracion(seccionId))?.label || '60 min'})`}">
             ⏱️ Tempo
           </button>
         </div>
@@ -842,7 +856,7 @@
           else if (seg === 0) _timerModalAgotado(seccionId, pag);
         } else if (!d[k]) {
           // Página nueva: resetear display
-          _timerWidgetActualizar(seccionId, pag, TIMER_DURACION);
+          _timerWidgetActualizar(seccionId, pag, _timerGetDuracion(seccionId));
         }
       } else {
         _timerWidgetOcultar();
@@ -954,7 +968,8 @@
           // Re-render solo el botón sin recargar página
           const activo = _timerEsActivo(seccionId);
           btnTempo.className = 'pag2-btn-tempo' + (activo ? ' tempo-activo' : '');
-          btnTempo.title = activo ? 'Temporizador activo — clic para desactivar' : 'Activar temporizador de 60 min';
+          const durLabel = TIMER_OPCIONES.find(o => o.seg === _timerGetDuracion(seccionId))?.label || '60 min';
+          btnTempo.title = activo ? 'Temporizador activo — clic para desactivar' : `Activar temporizador (${durLabel})`;
           // Sincronizar todos los botones Tempo de la página (top e info)
           document.querySelectorAll(`[id^="pag2-tempo-btn-"]`).forEach(b => {
             b.className = 'pag2-btn-tempo' + (activo ? ' tempo-activo' : '');
@@ -1369,10 +1384,56 @@
   })();
 
   // ════════════════════════════════════════════════════════════════
-  // MOTOR DE TEMPORIZADOR — 60 min por página, por sección
+  // MOTOR DE TEMPORIZADOR — 30 / 45 / 60 min por página, por sección
   // ════════════════════════════════════════════════════════════════
   const TIMER_KEY = 'quiz_timer_v1';
-  const TIMER_DURACION = 60 * 60; // segundos
+  const TIMER_DURACION_DEFAULT = 60 * 60; // segundos (fallback)
+
+  // Opciones de duración disponibles (en segundos)
+  const TIMER_OPCIONES = [
+    { seg: 60 * 60, label: '60 min', desc: '1 hora' },
+    { seg: 45 * 60, label: '45 min', desc: '45 minutos' },
+    { seg: 30 * 60, label: '30 min', desc: '30 minutos' }
+  ];
+
+  // Leer la duración configurada para una sección (guardada en localStorage)
+  function _timerGetDuracion(seccionId) {
+    const d = _timerLoad();
+    return d['duracion__' + seccionId] || TIMER_DURACION_DEFAULT;
+  }
+
+  // Guardar la duración elegida para una sección
+  function _timerSetDuracion(seccionId, seg) {
+    const d = _timerLoad();
+    d['duracion__' + seccionId] = seg;
+    _timerSave(d);
+  }
+
+  // Calcular los umbrales de advertencia proporcionales a la duración
+  function _timerGetAdvertencias(duracionSeg) {
+    if (duracionSeg >= 60 * 60) {
+      // 60 min: avisos a 30min, 15min, 5min
+      return [
+        { seg: 30 * 60, key: 30, msg: '⏱️ Quedan 30 minutos', cls: 't-verde' },
+        { seg: 15 * 60, key: 15, msg: '⚠️ Quedan 15 minutos', cls: 't-naranja' },
+        { seg:  5 * 60, key:  5, msg: '🔴 ¡Solo quedan 5 minutos!', cls: 't-rojo' }
+      ];
+    } else if (duracionSeg >= 45 * 60) {
+      // 45 min: avisos a 20min, 10min, 5min
+      return [
+        { seg: 20 * 60, key: 20, msg: '⏱️ Quedan 20 minutos', cls: 't-verde' },
+        { seg: 10 * 60, key: 10, msg: '⚠️ Quedan 10 minutos', cls: 't-naranja' },
+        { seg:  5 * 60, key:  5, msg: '🔴 ¡Solo quedan 5 minutos!', cls: 't-rojo' }
+      ];
+    } else {
+      // 30 min: avisos a 15min, 8min, 3min
+      return [
+        { seg: 15 * 60, key: 15, msg: '⏱️ Quedan 15 minutos', cls: 't-verde' },
+        { seg:  8 * 60, key:  8, msg: '⚠️ Quedan 8 minutos', cls: 't-naranja' },
+        { seg:  3 * 60, key:  3, msg: '🔴 ¡Solo quedan 3 minutos!', cls: 't-rojo' }
+      ];
+    }
+  }
 
   function _timerLoad() {
     try { return JSON.parse(localStorage.getItem(TIMER_KEY) || '{}'); }
@@ -1400,10 +1461,94 @@
   }
 
   function _timerActivar(seccionId) {
-    const d = _timerLoad();
-    d['habilitado__' + seccionId] = true;
-    _timerSave(d);
-    _timerWidgetMostrar(seccionId);
+    // Mostrar modal de selección de duración antes de activar
+    _timerModalSeleccionDuracion(seccionId, function(segElegidos) {
+      _timerSetDuracion(seccionId, segElegidos);
+      const d = _timerLoad();
+      d['habilitado__' + seccionId] = true;
+      _timerSave(d);
+      _timerWidgetMostrar(seccionId);
+    });
+  }
+
+  function _timerModalSeleccionDuracion(seccionId, onConfirm) {
+    // Remover modal anterior si existe
+    document.getElementById('pag2-timer-duracion-modal')?.remove();
+
+    const durActual = _timerGetDuracion(seccionId);
+
+    const ov = document.createElement('div');
+    ov.id = 'pag2-timer-duracion-modal';
+    ov.style.cssText = `
+      position:fixed;inset:0;z-index:28000;display:flex;align-items:center;justify-content:center;
+      background:rgba(5,10,20,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+      animation:pag2FI .2s ease both;
+    `;
+
+    const opcHtml = TIMER_OPCIONES.map(op => `
+      <button class="ptd-opcion${op.seg === durActual ? ' ptd-seleccionada' : ''}"
+        data-seg="${op.seg}">
+        <span class="ptd-op-label">${op.label}</span>
+        <span class="ptd-op-desc">${op.desc}</span>
+      </button>
+    `).join('');
+
+    ov.innerHTML = `
+      <div style="
+        background:linear-gradient(160deg,#0d2137,#0a1628);
+        border:1.5px solid rgba(56,189,248,0.25);
+        border-radius:20px;padding:32px 28px 26px;max-width:400px;width:92%;box-sizing:border-box;
+        box-shadow:0 30px 80px rgba(0,0,0,.7), 0 0 40px rgba(56,189,248,0.1);
+        animation:pag2BI .26s cubic-bezier(.34,1.2,.64,1) both;font-family:inherit;
+        text-align:center;
+      ">
+        <div style="font-size:2rem;margin-bottom:12px;">⏱️</div>
+        <div style="font-size:1.05rem;font-weight:800;color:#f1f5f9;margin-bottom:6px;">Activar temporizador</div>
+        <div style="font-size:.82rem;color:#64748b;margin-bottom:22px;line-height:1.5;">
+          Elegí la duración para esta página.<br>El tiempo comenzará al responder la primera pregunta.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:22px;">
+          ${opcHtml}
+        </div>
+        <style>
+          .ptd-opcion {
+            width:100%;padding:13px 20px;border-radius:12px;
+            border:1.5px solid rgba(56,189,248,0.2);
+            background:rgba(56,189,248,0.05);color:#94a3b8;
+            font-size:.92rem;font-weight:600;cursor:pointer;font-family:inherit;
+            display:flex;align-items:center;justify-content:space-between;
+            transition:all .18s;
+          }
+          .ptd-opcion:hover { background:rgba(56,189,248,0.12);border-color:rgba(56,189,248,.45);color:#e2e8f0; }
+          .ptd-opcion.ptd-seleccionada {
+            background:rgba(56,189,248,0.15);border-color:rgba(56,189,248,.6);color:#7dd3fc;
+            box-shadow:0 0 0 2px rgba(56,189,248,0.18);
+          }
+          .ptd-op-label { font-size:1rem;font-weight:800; }
+          .ptd-op-desc  { font-size:.78rem;opacity:.65;font-weight:400; }
+        </style>
+        <button id="ptd-cancelar" style="
+          width:100%;padding:10px;border-radius:10px;
+          background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);
+          color:#475569;font-size:.85rem;font-weight:600;cursor:pointer;font-family:inherit;
+          transition:background .15s;
+        ">Cancelar</button>
+      </div>
+    `;
+
+    document.body.appendChild(ov);
+
+    // Click en una opción → confirmar y cerrar
+    ov.querySelectorAll('.ptd-opcion').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const seg = parseInt(btn.dataset.seg, 10);
+        ov.remove();
+        onConfirm(seg);
+      });
+    });
+
+    // Cancelar
+    document.getElementById('ptd-cancelar').addEventListener('click', () => ov.remove());
   }
 
   function _timerDesactivar(seccionId) {
@@ -1432,9 +1577,10 @@
   function _timerSegundosRestantes(seccionId, pag) {
     const d = _timerLoad();
     const k = _timerKey(seccionId, pag);
-    if (!d[k]) return TIMER_DURACION;
+    const dur = _timerGetDuracion(seccionId);
+    if (!d[k]) return dur;
     const elapsed = Math.floor((Date.now() - d[k]) / 1000);
-    return Math.max(0, TIMER_DURACION - elapsed);
+    return Math.max(0, dur - elapsed);
   }
 
   function _timerFmt(seg) {
@@ -1469,23 +1615,20 @@
     const advKey = seccionId + '__' + pag;
     if (!_timerAdvMostradas[advKey]) _timerAdvMostradas[advKey] = {};
 
+    const duracion = _timerGetDuracion(seccionId);
+    const advertencias = _timerGetAdvertencias(duracion);
+
     window._timerInterval = setInterval(() => {
       const seg = _timerSegundosRestantes(seccionId, pag);
       _timerWidgetActualizar(seccionId, pag, seg);
 
-      // Advertencias
-      if (seg <= 30*60 && seg > 30*60-5 && !_timerAdvMostradas[advKey][30]) {
-        _timerAdvMostradas[advKey][30] = true;
-        _timerToast('⏱️ Quedan 30 minutos', 't-verde');
-      }
-      if (seg <= 15*60 && seg > 15*60-5 && !_timerAdvMostradas[advKey][15]) {
-        _timerAdvMostradas[advKey][15] = true;
-        _timerToast('⚠️ Quedan 15 minutos', 't-naranja');
-      }
-      if (seg <= 5*60 && seg > 5*60-5 && !_timerAdvMostradas[advKey][5]) {
-        _timerAdvMostradas[advKey][5] = true;
-        _timerToast('🔴 ¡Solo quedan 5 minutos!', 't-rojo');
-      }
+      // Advertencias proporcionales a la duración elegida
+      advertencias.forEach(adv => {
+        if (seg <= adv.seg && seg > adv.seg - 5 && !_timerAdvMostradas[advKey][adv.key]) {
+          _timerAdvMostradas[advKey][adv.key] = true;
+          _timerToast(adv.msg, adv.cls);
+        }
+      });
 
       if (seg === 0) {
         clearInterval(window._timerInterval);
@@ -1502,6 +1645,8 @@
 
   // Crear / mostrar el widget flotante del timer
   function _timerWidgetMostrar(seccionId) {
+    const dur = _timerGetDuracion(seccionId);
+    const durLabel = TIMER_OPCIONES.find(o => o.seg === dur)?.label || '60 min';
     let w = document.getElementById('pag2-timer-widget');
     if (!w) {
       w = document.createElement('div');
@@ -1512,14 +1657,18 @@
           <span class="ptw-drag-hint">⠿ mover</span>
         </div>
         <div class="ptw-body">
-          <div class="ptw-display" id="ptw-display">01:00:00</div>
-          <div class="ptw-label">tiempo restante</div>
+          <div class="ptw-display" id="ptw-display">${_timerFmt(dur)}</div>
+          <div class="ptw-label" id="ptw-dur-label">${durLabel}</div>
           <div class="ptw-barra-wrap"><div class="ptw-barra-fill" id="ptw-barra" style="width:100%"></div></div>
           <div class="ptw-pagina" id="ptw-pagina">Página —</div>
           <div class="ptw-lock-msg" id="ptw-lock">🔒 Navegación bloqueada</div>
         </div>`;
       document.body.appendChild(w);
       _timerWidgetDrag(w);
+    } else {
+      // Actualizar el label de duración si el widget ya existe
+      const labelEl = document.getElementById('ptw-dur-label');
+      if (labelEl) labelEl.textContent = durLabel;
     }
     w.classList.remove('timer-oculto');
 
@@ -1532,7 +1681,7 @@
       _timerWidgetActualizar(seccionId, pagActual, seg);
       if (!window._timerInterval) _timerIniciarTick(seccionId, pagActual);
     } else {
-      _timerWidgetActualizar(seccionId, pagActual, TIMER_DURACION);
+      _timerWidgetActualizar(seccionId, pagActual, dur);
     }
   }
 
@@ -1548,20 +1697,23 @@
     const lockEl = document.getElementById('ptw-lock');
     if (!disp) return;
 
+    const dur = _timerGetDuracion(seccionId);
+
     disp.textContent = _timerFmt(seg);
-    const pct = (seg / TIMER_DURACION) * 100;
+    const pct = (seg / dur) * 100;
     if (barra) { barra.style.width = pct + '%'; }
+
+    // Umbrales de color proporcionales a la duración elegida
+    const p40 = dur * 0.40; // ~40% del tiempo → naranja
+    const p15 = dur * 0.15; // ~15% del tiempo → crítico
 
     // Color del display y barra
     disp.className = 'ptw-display';
     if (barra) barra.className = 'ptw-barra-fill';
-    if (seg > 30*60) {
+    if (seg > p40) {
       disp.classList.add('timer-verde');
       if (barra) barra.classList.add('verde');
-    } else if (seg > 15*60) {
-      disp.classList.add('timer-verde');
-      if (barra) barra.classList.add('verde');
-    } else if (seg > 5*60) {
+    } else if (seg > p15) {
       disp.classList.add('timer-naranja');
       if (barra) barra.classList.add('naranja');
     } else if (seg > 0) {
@@ -1623,6 +1775,8 @@
   // Modal de tiempo agotado
   function _timerModalAgotado(seccionId, pag) {
     document.getElementById('pag2-timer-modal')?.remove();
+    const dur = _timerGetDuracion(seccionId);
+    const minLabel = TIMER_OPCIONES.find(o => o.seg === dur)?.label || '60 min';
     const ov = document.createElement('div');
     ov.id = 'pag2-timer-modal';
     ov.innerHTML = `
@@ -1630,7 +1784,7 @@
         <div class="ptm-icono">⏰</div>
         <div class="ptm-titulo">¡Se acabó el tiempo!</div>
         <div class="ptm-sub">
-          Los 60 minutos para la <strong style="color:#f1f5f9">página ${pag + 1}</strong> terminaron.<br>
+          Los ${minLabel} para la <strong style="color:#f1f5f9">página ${pag + 1}</strong> terminaron.<br>
           Las preguntas que respondas a partir de ahora quedarán <em style="color:#fbbf24">fuera del tiempo del simulacro</em>.<br><br>
           ¿Qué querés hacer?
         </div>
@@ -1668,7 +1822,7 @@
       const indices = displayOrder.slice(pag * PAGE_SIZE, (pag + 1) * PAGE_SIZE);
       _reiniciarPagina(seccionId, indices);
       // Resetear el timer del widget
-      _timerWidgetActualizar(seccionId, pag, TIMER_DURACION);
+      _timerWidgetActualizar(seccionId, pag, _timerGetDuracion(seccionId));
       // Recargar la página del cuestionario
       if (typeof window.generarCuestionario === 'function') window.generarCuestionario(seccionId);
     };
