@@ -874,31 +874,19 @@
   // el baseline debe resetearse para que no se acumule entre sesiones.
   document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; _tallyUltimoTotal = null; });
 
-  // ── Hook sobre _pag2UpdateStats (paginador) ──────────────────
-  // El paginador redefine window._pag2UpdateStats cada vez que el usuario
-  // abre una nueva sección (dentro de _paginar → closure).
-  // Para sobrevivir a esas redefiniciones usamos Object.defineProperty con
-  // un setter que envuelve automáticamente cada nueva función asignada.
+  // ── Hook sobre _pag2UpdateStats ───────────────────────────────
+  // script.js llama window._pag2UpdateStats(seccionId) después de cada respuesta.
+  // Problema 1: el paginador la redefine al cambiar de sección → usamos defineProperty.
+  // Problema 2: para el usuario ADMIN el paginador hace bypass y NUNCA define esta
+  //             función → instalamos una propia que actúa como fallback.
   function _hookPag2UpdateStats() {
-    // Esperar a que exista por primera vez
-    if (typeof window._pag2UpdateStats !== 'function') {
-      setTimeout(_hookPag2UpdateStats, 100);
-      return;
-    }
 
-    // Capturar baseline con la primera función disponible
-    setTimeout(_capturarBaseline, 80);
-
-    // Valor interno real (lo que _pag2UpdateStats "realmente es")
-    let _innerFn = window._pag2UpdateStats;
-
-    // Crear un wrapper que intercepta llamadas y detecta respuestas nuevas
     function _crearWrapper(fn) {
       const wrapper = function(seccionId) {
         const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
         const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
 
-        fn.call(this, seccionId);
+        if (fn) fn.call(this, seccionId); // llamar al paginador real si existe
 
         const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
         const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
@@ -908,38 +896,41 @@
           _onRespuesta(seccionId);
         }
       };
-      // Copiar flags del paginador para que _watchHookTimer no agregue otro wrapper
       wrapper._motivacionWrapper = true;
-      wrapper._timerHooked = fn._timerHooked || false;
+      wrapper._timerHooked = fn ? (fn._timerHooked || false) : false;
       return wrapper;
     }
 
-    // Instalar setter para interceptar futuras redefiniciones
+    // Si la función aún no existe (admin), la creamos nosotros;
+    // si ya existe (usuario normal), la envolvemos.
+    let _innerFn = typeof window._pag2UpdateStats === 'function'
+      ? window._pag2UpdateStats
+      : null;
+
+    // Capturar baseline con los datos actuales
+    setTimeout(_capturarBaseline, 100);
+
     try {
       Object.defineProperty(window, '_pag2UpdateStats', {
         get: function() { return _innerFn; },
         set: function(newFn) {
           if (newFn && !newFn._motivacionWrapper) {
-            // Nueva función del paginador (cambio de sección) → envolver automáticamente
             _innerFn = _crearWrapper(newFn);
-            // NO reseteamos el baseline aquí — el baseline es por sesión, no por sección
           } else {
             _innerFn = newFn;
           }
         },
         configurable: true
       });
-      // Envolver la función ya existente
       _innerFn = _crearWrapper(_innerFn);
-      console.log('[MOTIVACION] Hook persistente sobre _pag2UpdateStats instalado ✓');
+      console.log('[MOTIVACION] Hook sobre _pag2UpdateStats instalado ✓');
     } catch (e) {
-      // Fallback: polling cada 500ms por si defineProperty no está disponible
       console.warn('[MOTIVACION] defineProperty falló, usando polling', e);
       window._pag2UpdateStats = _crearWrapper(_innerFn);
       setInterval(() => {
         const cur = window._pag2UpdateStats;
-        if (cur && !cur._motivacionWrapper) {
-          window._pag2UpdateStats = _crearWrapper(cur);
+        if (!cur || !cur._motivacionWrapper) {
+          window._pag2UpdateStats = _crearWrapper(cur || null);
         }
       }, 500);
     }
@@ -1109,11 +1100,113 @@
     console.log('[MOTIVACION] Hook sobre mostrarResultadoFinal instalado ✓');
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // 3. SINCRONIZACIÓN CON FIREBASE — daily tally en la nube
+  // ════════════════════════════════════════════════════════════════
+  // El tally diario se guarda en el mismo documento 'progress/{uid}'
+  // bajo el campo 'dailyTally'. Se sincroniza:
+  //   • Al cargar sesión (fb:usuarioAprobadoActivo): merge nube + local
+  //   • Al guardar (hook sobre window._fbSaveProgressToCloud): incluye el tally
+
+  function _mergeTallies(a, b) {
+    // Fusiona dos objetos tally { "YYYY-MM-DD": { total, ok, err } }
+    // Para cada día toma el mayor total (la fuente más completa)
+    const result = Object.assign({}, a);
+    Object.keys(b || {}).forEach(dia => {
+      if (!result[dia] || (b[dia].total || 0) > (result[dia].total || 0)) {
+        result[dia] = b[dia];
+      }
+    });
+    return result;
+  }
+
+  // Cargar tally desde la nube y mergearlo con el local
+  async function _sincronizarTallyDesdeNube() {
+    try {
+      const uid = window._fbCurrentUser?.uid;
+      const fbDb = window._fbDb;
+      const fb   = window.__fb || window.__firebase_firestore;
+      if (!uid || !fbDb || !fb) return;
+
+      const { doc, getDoc } = fb;
+      const snap = await getDoc(doc(fbDb, 'progress', uid));
+      if (!snap.exists()) return;
+
+      const cloudTally = snap.data()?.dailyTally || {};
+      if (!Object.keys(cloudTally).length) return;
+
+      const localTally = _loadJSON(DAILY_TALLY_KEY, {});
+      const merged = _mergeTallies(localTally, cloudTally);
+      _saveJSON(DAILY_TALLY_KEY, merged);
+      console.log('[MOTIVACION] Tally sincronizado desde la nube:', Object.keys(merged).length, 'días');
+    } catch (e) {
+      console.warn('[MOTIVACION] Error sincronizando tally desde nube:', e.message);
+    }
+  }
+
+  // Hookear _fbSaveProgressToCloud para incluir el tally en cada guardado
+  function _hookFirebaseSave() {
+    const orig = window._fbSaveProgressToCloud;
+    if (typeof orig !== 'function') {
+      setTimeout(_hookFirebaseSave, 300);
+      return;
+    }
+    if (orig._tallyHooked) return;
+
+    window._fbSaveProgressToCloud = async function() {
+      // Antes de guardar, inyectar el tally en el documento de Firestore
+      try {
+        const uid = window._fbCurrentUser?.uid;
+        const fbDb = window._fbDb;
+        const fb   = window.__fb || window.__firebase_firestore;
+        if (uid && fbDb && fb) {
+          const { doc, updateDoc } = fb;
+          const tally = _loadJSON(DAILY_TALLY_KEY, {});
+          if (Object.keys(tally).length > 0) {
+            // updateDoc solo pisa el campo dailyTally, no toca state ni attemptLog
+            updateDoc(doc(fbDb, 'progress', uid), { dailyTally: tally })
+              .catch(e => console.warn('[MOTIVACION] Error guardando tally en nube:', e.message));
+          }
+        }
+      } catch (e) {
+        console.warn('[MOTIVACION] Error en hook Firebase save:', e.message);
+      }
+      return orig.apply(this, arguments);
+    };
+    window._fbSaveProgressToCloud._tallyHooked = true;
+    console.log('[MOTIVACION] Hook Firebase save instalado ✓');
+  }
+
+  // Al cerrar sesión también guardar el tally directamente
+  document.addEventListener('fb:sesionCerrada', async () => {
+    try {
+      const uid = window._fbCurrentUser?.uid;
+      const fbDb = window._fbDb;
+      const fb   = window.__fb || window.__firebase_firestore;
+      if (uid && fbDb && fb) {
+        const { doc, updateDoc } = fb;
+        const tally = _loadJSON(DAILY_TALLY_KEY, {});
+        if (Object.keys(tally).length > 0) {
+          await updateDoc(doc(fbDb, 'progress', uid), { dailyTally: tally })
+            .catch(() => {});
+        }
+      }
+    } catch (_) {}
+    _tallyBaseline = null;
+    _tallyUltimoTotal = null;
+  });
+
+  // Al iniciar sesión, cargar tally de la nube
+  document.addEventListener('fb:usuarioAprobadoActivo', () => {
+    setTimeout(_sincronizarTallyDesdeNube, 800);
+  });
+
   // ── Instalación ───────────────────────────────────────────────
   function _instalar() {
     _instalarPanelMejorado();
     _hookPag2UpdateStats();
     _hookMostrarResultadoFinal();
+    _hookFirebaseSave();
     console.log('[MOTIVACION] Módulo motivacion-progreso.js cargado ✓');
   }
 
