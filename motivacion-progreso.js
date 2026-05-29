@@ -806,11 +806,14 @@
     return seccionId + '_p' + pagNum;
   }
 
-  // ── Actualizar tally diario al responder cada pregunta ────────
-  // Recorre todos los puntajesPorSeccion y calcula el total global del día.
-  // Guarda el snapshot en DAILY_TALLY_KEY con la fecha de hoy.
-  function _actualizarDailyTally() {
-    const hoy = _todayISO();
+  // ── Baseline de respuestas al inicio de la sesión ──────────────
+  // Se captura UNA SOLA VEZ cuando el paginador termina de cargar la sección.
+  // Luego el tally de hoy = totalActual - _tallyBaseline.
+  // Esto evita que preguntas respondidas en días anteriores se cuenten como "de hoy".
+  let _tallyBaseline = null;  // null = no inicializado aún
+
+  function _capturarBaseline() {
+    if (_tallyBaseline !== null) return; // ya capturado
     const puntajes = window.puntajesPorSeccion || {};
     let total = 0, ok = 0, err = 0;
     Object.keys(puntajes).forEach(secId => {
@@ -820,26 +823,125 @@
         else if (v === 0) { total++; err++; }
       });
     });
-    // Sólo guardar si hay al menos una respuesta
-    if (total === 0) return;
+    _tallyBaseline = { total, ok, err };
+    console.log('[MOTIVACION] Baseline capturado:', _tallyBaseline);
+  }
+
+  // ── Actualizar tally diario al responder cada pregunta ────────
+  // Calcula el DELTA respecto al baseline de inicio de sesión.
+  // Así solo se cuentan las respuestas dadas HOY en esta sesión.
+  function _actualizarDailyTally() {
+    // Asegurar que el baseline esté capturado antes del primer delta
+    if (_tallyBaseline === null) _capturarBaseline();
+
+    const hoy = _todayISO();
+    const puntajes = window.puntajesPorSeccion || {};
+    let totalActual = 0, okActual = 0, errActual = 0;
+    Object.keys(puntajes).forEach(secId => {
+      const arr = puntajes[secId] || [];
+      arr.forEach(v => {
+        if (v === 1)      { totalActual++; okActual++; }
+        else if (v === 0) { totalActual++; errActual++; }
+      });
+    });
+
+    // Calcular delta respecto al baseline (respuestas nuevas de esta sesión)
+    const deltaTotal = Math.max(0, totalActual - (_tallyBaseline?.total || 0));
+    const deltaOk    = Math.max(0, okActual    - (_tallyBaseline?.ok    || 0));
+    const deltaErr   = Math.max(0, errActual   - (_tallyBaseline?.err   || 0));
+
+    // No guardar si no hubo respuestas nuevas en esta sesión
+    if (deltaTotal === 0) return;
+
+    // Acumular con lo que ya había en el tally de hoy (de sesiones anteriores del mismo día)
     const tally = _loadJSON(DAILY_TALLY_KEY, {});
-    tally[hoy] = { total, ok, err };
+    const prevHoy = tally[hoy] || { total: 0, ok: 0, err: 0 };
+    tally[hoy] = {
+      total: prevHoy.total + deltaTotal,
+      ok   : prevHoy.ok   + deltaOk,
+      err  : prevHoy.err  + deltaErr,
+    };
     _saveJSON(DAILY_TALLY_KEY, tally);
   }
+
+  // ── Resetear baseline al cerrar sesión ────────────────────────
+  // Importante: si el usuario hace logout y login en la misma sesión del navegador,
+  // el baseline debe resetearse para que no se acumule entre sesiones.
+  document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; });
 
   // ── Hook sobre _pag2UpdateStats (paginador) ──────────────────
   // Cada vez que el paginador actualiza las stats, verificamos si
   // la página quedó completa y si ya fue celebrada.
+  // FIX: el tally solo se actualiza cuando el usuario RESPONDE (no al navegar).
+  // _pag2UpdateStats se llama tanto al responder como internamente al renderizar.
+  // Usamos window._pag2UpdateStats._ultimoTotal para detectar si hubo respuesta nueva.
   function _hookPag2UpdateStats() {
     const orig = window._pag2UpdateStats;
     if (typeof orig !== 'function') { setTimeout(_hookPag2UpdateStats, 200); return; }
 
+    // Capturar baseline ahora que puntajesPorSeccion ya debería tener datos
+    // (el paginador llama _prePoblarPuntajes antes de exponer _pag2UpdateStats)
+    setTimeout(_capturarBaseline, 50);
+
     window._pag2UpdateStats = function(seccionId) {
+      // Contar respuestas ANTES de que orig actualice el DOM
+      const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
+      const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
+
       orig.call(this, seccionId); // ejecutar original primero
-      _actualizarDailyTally();    // registrar respuesta en tally diario
-      _onRespuesta(seccionId);    // luego verificar motivación
+
+      // Contar respuestas DESPUÉS — si aumentaron, el usuario respondió algo nuevo
+      const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
+      const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
+
+      if (respondeDespues > respondiaAntes) {
+        // Solo actualizar tally si efectivamente se registró una respuesta nueva
+        _actualizarDailyTally();
+        _onRespuesta(seccionId);
+      }
     };
     console.log('[MOTIVACION] Hook sobre _pag2UpdateStats instalado ✓');
+  }
+
+  // ── Pausar el timer cuando la página queda completa con tiempo restante ─
+  // Marca la página como "pagCompleta" en el localStorage del timer (quiz_timer_v1)
+  // para que _timerEstaCorriendo() devuelva false → libera la navegación.
+  // Detiene el interval del tick y oculta el widget flotante.
+  function _pausarTimerPorPaginaCompleta(seccionId, pag) {
+    const TIMER_KEY = 'quiz_timer_v1';
+    let d;
+    try { d = JSON.parse(localStorage.getItem(TIMER_KEY) || '{}'); } catch (_) { d = {}; }
+
+    const k = seccionId + '__' + pag;
+    // Solo actuar si el timer está realmente corriendo (inicio registrado, no agotado)
+    if (!d[k] || d[k + '__agotado'] || d[k + '__pagCompleta']) return;
+
+    // Calcular segundos restantes antes de detener
+    const dur = d['duracion__' + seccionId] || 3600;
+    const elapsed = Math.floor((Date.now() - d[k]) / 1000);
+    const segRestantes = Math.max(0, dur - elapsed);
+
+    // Guardar los segundos restantes para restaurar en la próxima página (info visual)
+    d[k + '__segRestantes'] = segRestantes;
+    // Marcar como "pagCompleta" → _timerEstaCorriendo() devolverá false
+    d[k + '__pagCompleta'] = true;
+    try { localStorage.setItem(TIMER_KEY, JSON.stringify(d)); } catch (_) {}
+
+    // Detener el interval del tick
+    if (window._timerInterval) {
+      clearInterval(window._timerInterval);
+      window._timerInterval = null;
+    }
+
+    // Ocultar el widget flotante del timer
+    const w = document.getElementById('pag2-timer-widget');
+    if (w) w.classList.add('timer-oculto');
+
+    // Ocultar también el mensaje "🔒 Navegación bloqueada"
+    const lockEl = document.getElementById('ptw-lock');
+    if (lockEl) lockEl.style.display = 'none';
+
+    console.log(`[MOTIVACION] Timer pausado por página completa — ${seccionId} pág ${pag + 1}, ${segRestantes}s restantes`);
   }
 
   // ── Lógica principal al responder una pregunta ───────────────
@@ -883,6 +985,9 @@
       if (!shown[clave]) {
         shown[clave] = true;
         _saveJSON(MOT_SHOWN_KEY, shown);
+
+        // ── Pausar el timer si está corriendo con tiempo restante ──
+        _pausarTimerPorPaginaCompleta(seccionId, pagActiva);
 
         const esFinal = pagActiva === totalPages - 1;
         const subtitle = esFinal
