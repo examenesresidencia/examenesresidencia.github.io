@@ -1781,6 +1781,32 @@
 
   // Modal de tiempo agotado
   function _timerModalAgotado(seccionId, pag) {
+    // ── Si la página ya estaba completa (todas respondidas), no mostrar
+    // el modal de "tiempo agotado" — el módulo motivacion-progreso.js
+    // ya habrá mostrado (o mostrará) el modal motivacional y pausado el timer.
+    const PAGE_SIZE_LOCAL = 50;
+    const pregsTotal = (window.preguntasPorSeccion || {})[seccionId] || [];
+    const displayOrder2 = window._getDisplayOrder
+      ? window._getDisplayOrder(seccionId, pregsTotal.length)
+      : Array.from({ length: pregsTotal.length }, (_, i) => i);
+    const indicesPagLocal = displayOrder2.slice(pag * PAGE_SIZE_LOCAL, (pag + 1) * PAGE_SIZE_LOCAL);
+    if (indicesPagLocal.length > 0) {
+      const puntajesLocal = (window.puntajesPorSeccion || {})[seccionId] || [];
+      const respondidas = indicesPagLocal.filter(i => {
+        const v = puntajesLocal[i]; return v === 1 || v === 0;
+      }).length;
+      if (respondidas === indicesPagLocal.length) {
+        // Página 100% completa: marcar como pagCompleta y no mostrar modal agotado
+        const d = _timerLoad();
+        const k = _timerKey(seccionId, pag);
+        d[k + '__pagCompleta'] = true;
+        _timerSave(d);
+        if (window._timerInterval) { clearInterval(window._timerInterval); window._timerInterval = null; }
+        _timerWidgetOcultar();
+        return; // motivacion-progreso.js maneja el modal
+      }
+    }
+
     document.getElementById('pag2-timer-modal')?.remove();
     const dur = _timerGetDuracion(seccionId);
     const minLabel = TIMER_OPCIONES.find(o => o.seg === dur)?.label || '60 min';
