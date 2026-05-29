@@ -870,37 +870,75 @@
   document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; });
 
   // ── Hook sobre _pag2UpdateStats (paginador) ──────────────────
-  // Cada vez que el paginador actualiza las stats, verificamos si
-  // la página quedó completa y si ya fue celebrada.
-  // FIX: el tally solo se actualiza cuando el usuario RESPONDE (no al navegar).
-  // _pag2UpdateStats se llama tanto al responder como internamente al renderizar.
-  // Usamos window._pag2UpdateStats._ultimoTotal para detectar si hubo respuesta nueva.
+  // El paginador redefine window._pag2UpdateStats cada vez que el usuario
+  // abre una nueva sección (dentro de _paginar → closure).
+  // Para sobrevivir a esas redefiniciones usamos Object.defineProperty con
+  // un setter que envuelve automáticamente cada nueva función asignada.
   function _hookPag2UpdateStats() {
-    const orig = window._pag2UpdateStats;
-    if (typeof orig !== 'function') { setTimeout(_hookPag2UpdateStats, 200); return; }
+    // Esperar a que exista por primera vez
+    if (typeof window._pag2UpdateStats !== 'function') {
+      setTimeout(_hookPag2UpdateStats, 100);
+      return;
+    }
 
-    // Capturar baseline ahora que puntajesPorSeccion ya debería tener datos
-    // (el paginador llama _prePoblarPuntajes antes de exponer _pag2UpdateStats)
-    setTimeout(_capturarBaseline, 50);
+    // Capturar baseline con la primera función disponible
+    setTimeout(_capturarBaseline, 80);
 
-    window._pag2UpdateStats = function(seccionId) {
-      // Contar respuestas ANTES de que orig actualice el DOM
-      const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
-      const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
+    // Valor interno real (lo que _pag2UpdateStats "realmente es")
+    let _innerFn = window._pag2UpdateStats;
 
-      orig.call(this, seccionId); // ejecutar original primero
+    // Crear un wrapper que intercepta llamadas y detecta respuestas nuevas
+    function _crearWrapper(fn) {
+      const wrapper = function(seccionId) {
+        const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
+        const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
 
-      // Contar respuestas DESPUÉS — si aumentaron, el usuario respondió algo nuevo
-      const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
-      const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
+        fn.call(this, seccionId);
 
-      if (respondeDespues > respondiaAntes) {
-        // Solo actualizar tally si efectivamente se registró una respuesta nueva
-        _actualizarDailyTally();
-        _onRespuesta(seccionId);
-      }
-    };
-    console.log('[MOTIVACION] Hook sobre _pag2UpdateStats instalado ✓');
+        const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
+        const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
+
+        if (respondeDespues > respondiaAntes) {
+          _actualizarDailyTally();
+          _onRespuesta(seccionId);
+        }
+      };
+      // Copiar flags del paginador para que _watchHookTimer no agregue otro wrapper
+      wrapper._motivacionWrapper = true;
+      wrapper._timerHooked = fn._timerHooked || false;
+      return wrapper;
+    }
+
+    // Instalar setter para interceptar futuras redefiniciones
+    try {
+      Object.defineProperty(window, '_pag2UpdateStats', {
+        get: function() { return _innerFn; },
+        set: function(newFn) {
+          if (newFn && !newFn._motivacionWrapper) {
+            // Nueva función del paginador (cambio de sección) → envolver
+            _innerFn = _crearWrapper(newFn);
+            setTimeout(_capturarBaseline, 80); // nuevo baseline para la nueva sección
+          } else {
+            _innerFn = newFn;
+          }
+        },
+        configurable: true
+      });
+      // Envolver la función ya existente
+      _innerFn = _crearWrapper(_innerFn);
+      console.log('[MOTIVACION] Hook persistente sobre _pag2UpdateStats instalado ✓');
+    } catch (e) {
+      // Fallback: polling cada 500ms por si defineProperty no está disponible
+      console.warn('[MOTIVACION] defineProperty falló, usando polling', e);
+      window._pag2UpdateStats = _crearWrapper(_innerFn);
+      setInterval(() => {
+        const cur = window._pag2UpdateStats;
+        if (cur && !cur._motivacionWrapper) {
+          window._pag2UpdateStats = _crearWrapper(cur);
+          setTimeout(_capturarBaseline, 80);
+        }
+      }, 500);
+    }
   }
 
   // ── Pausar el timer cuando la página queda completa con tiempo restante ─
