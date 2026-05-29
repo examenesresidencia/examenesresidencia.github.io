@@ -807,13 +807,16 @@
   }
 
   // ── Baseline de respuestas al inicio de la sesión ──────────────
-  // Se captura UNA SOLA VEZ cuando el paginador termina de cargar la sección.
-  // Luego el tally de hoy = totalActual - _tallyBaseline.
-  // Esto evita que preguntas respondidas en días anteriores se cuenten como "de hoy".
-  let _tallyBaseline = null;  // null = no inicializado aún
+  // _tallyBaseline: total de respuestas al cargar la sección (para no contar las viejas).
+  // _tallyUltimoTotal: total en la última llamada, para calcular delta INCREMENTAL.
+  // IMPORTANTE: el delta debe ser incremental (respecto a la última llamada),
+  // NO acumulado desde el baseline. Si fuera acumulado, cada llamada sumaría
+  // todas las respuestas nuevas de la sesión en lugar de solo la última.
+  let _tallyBaseline    = null;
+  let _tallyUltimoTotal = null;
 
   function _capturarBaseline() {
-    if (_tallyBaseline !== null) return; // ya capturado
+    if (_tallyBaseline !== null) return; // ya capturado en esta sesión
     const puntajes = window.puntajesPorSeccion || {};
     let total = 0, ok = 0, err = 0;
     Object.keys(puntajes).forEach(secId => {
@@ -823,15 +826,14 @@
         else if (v === 0) { total++; err++; }
       });
     });
-    _tallyBaseline = { total, ok, err };
+    _tallyBaseline    = { total, ok, err };
+    _tallyUltimoTotal = { total, ok, err }; // el "último" arranca igual al baseline
     console.log('[MOTIVACION] Baseline capturado:', _tallyBaseline);
   }
 
   // ── Actualizar tally diario al responder cada pregunta ────────
-  // Calcula el DELTA respecto al baseline de inicio de sesión.
-  // Así solo se cuentan las respuestas dadas HOY en esta sesión.
+  // Usa delta INCREMENTAL: solo cuenta lo nuevo respecto a la llamada anterior.
   function _actualizarDailyTally() {
-    // Asegurar que el baseline esté capturado antes del primer delta
     if (_tallyBaseline === null) _capturarBaseline();
 
     const hoy = _todayISO();
@@ -845,15 +847,17 @@
       });
     });
 
-    // Calcular delta respecto al baseline (respuestas nuevas de esta sesión)
-    const deltaTotal = Math.max(0, totalActual - (_tallyBaseline?.total || 0));
-    const deltaOk    = Math.max(0, okActual    - (_tallyBaseline?.ok    || 0));
-    const deltaErr   = Math.max(0, errActual   - (_tallyBaseline?.err   || 0));
+    // Delta INCREMENTAL respecto a la última vez que guardamos
+    const prev = _tallyUltimoTotal || _tallyBaseline || { total: 0, ok: 0, err: 0 };
+    const deltaTotal = Math.max(0, totalActual - prev.total);
+    const deltaOk    = Math.max(0, okActual    - prev.ok);
+    const deltaErr   = Math.max(0, errActual   - prev.err);
 
-    // No guardar si no hubo respuestas nuevas en esta sesión
-    if (deltaTotal === 0) return;
+    // Actualizar referencia para la próxima llamada
+    _tallyUltimoTotal = { total: totalActual, ok: okActual, err: errActual };
 
-    // Acumular con lo que ya había en el tally de hoy (de sesiones anteriores del mismo día)
+    if (deltaTotal === 0) return; // nada nuevo
+
     const tally = _loadJSON(DAILY_TALLY_KEY, {});
     const prevHoy = tally[hoy] || { total: 0, ok: 0, err: 0 };
     tally[hoy] = {
@@ -862,12 +866,13 @@
       err  : prevHoy.err  + deltaErr,
     };
     _saveJSON(DAILY_TALLY_KEY, tally);
+    console.log(`[MOTIVACION] Tally +${deltaTotal} (${deltaOk}✓ ${deltaErr}✗) → hoy total: ${tally[hoy].total}`);
   }
 
   // ── Resetear baseline al cerrar sesión ────────────────────────
   // Importante: si el usuario hace logout y login en la misma sesión del navegador,
   // el baseline debe resetearse para que no se acumule entre sesiones.
-  document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; });
+  document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; _tallyUltimoTotal = null; });
 
   // ── Hook sobre _pag2UpdateStats (paginador) ──────────────────
   // El paginador redefine window._pag2UpdateStats cada vez que el usuario
@@ -915,9 +920,9 @@
         get: function() { return _innerFn; },
         set: function(newFn) {
           if (newFn && !newFn._motivacionWrapper) {
-            // Nueva función del paginador (cambio de sección) → envolver
+            // Nueva función del paginador (cambio de sección) → envolver automáticamente
             _innerFn = _crearWrapper(newFn);
-            setTimeout(_capturarBaseline, 80); // nuevo baseline para la nueva sección
+            // NO reseteamos el baseline aquí — el baseline es por sesión, no por sección
           } else {
             _innerFn = newFn;
           }
@@ -935,7 +940,6 @@
         const cur = window._pag2UpdateStats;
         if (cur && !cur._motivacionWrapper) {
           window._pag2UpdateStats = _crearWrapper(cur);
-          setTimeout(_capturarBaseline, 80);
         }
       }, 500);
     }
