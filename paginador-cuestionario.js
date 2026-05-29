@@ -846,16 +846,21 @@
 
       // ── Restaurar timer si estaba activo ──
       if (_timerEsActivo(seccionId)) {
-        _timerWidgetMostrar(seccionId);
         const d = _timerLoad();
         const k = _timerKey(seccionId, pag);
-        if (d[k] && !d[k + '__agotado']) {
+        if (d[k + '__pagCompleta']) {
+          // Página ya completada con tiempo restante: NO mostrar el timer,
+          // la navegación está libre y el widget permanece oculto.
+          _timerWidgetOcultar();
+        } else if (d[k] && !d[k + '__agotado']) {
+          _timerWidgetMostrar(seccionId);
           const seg = _timerSegundosRestantes(seccionId, pag);
           _timerWidgetActualizar(seccionId, pag, seg);
           if (!window._timerInterval && seg > 0) _timerIniciarTick(seccionId, pag);
           else if (seg === 0) _timerModalAgotado(seccionId, pag);
         } else if (!d[k]) {
-          // Página nueva: resetear display
+          // Página nueva: mostrar widget con tiempo completo, listo para iniciar
+          _timerWidgetMostrar(seccionId);
           _timerWidgetActualizar(seccionId, pag, _timerGetDuracion(seccionId));
         }
       } else {
@@ -1457,7 +1462,9 @@
     const d = _timerLoad();
     const pagActual = _getPagina(seccionId);
     const k = _timerKey(seccionId, pagActual);
-    return !!d[k] && !d[k + '__agotado'];
+    // Si la página fue completada con tiempo restante, el timer se considera
+    // detenido (no bloquea la navegación y no muestra el lock)
+    return !!d[k] && !d[k + '__agotado'] && !d[k + '__pagCompleta'];
   }
 
   function _timerActivar(seccionId) {
@@ -1676,7 +1683,7 @@
     const pagActual = _getPagina(seccionId);
     const d = _timerLoad();
     const k = _timerKey(seccionId, pagActual);
-    if (d[k] && !d[k + '__agotado']) {
+    if (d[k] && !d[k + '__agotado'] && !d[k + '__pagCompleta']) {
       const seg = _timerSegundosRestantes(seccionId, pagActual);
       _timerWidgetActualizar(seccionId, pagActual, seg);
       if (!window._timerInterval) _timerIniciarTick(seccionId, pagActual);
@@ -1861,10 +1868,15 @@
   // Al cambiar de sección / recargar, restaurar el timer si estaba activo
   window._timerRestaurarSiActivo = function(seccionId) {
     if (!_timerEsActivo(seccionId)) { _timerWidgetOcultar(); return; }
-    _timerWidgetMostrar(seccionId);
     const pagActual = _getPagina(seccionId);
     const d = _timerLoad();
     const k = _timerKey(seccionId, pagActual);
+    if (d[k + '__pagCompleta']) {
+      // Página ya completada con tiempo restante: ocultar widget, navegación libre
+      _timerWidgetOcultar();
+      return;
+    }
+    _timerWidgetMostrar(seccionId);
     if (d[k] && !d[k + '__agotado']) {
       const seg = _timerSegundosRestantes(seccionId, pagActual);
       if (seg > 0) _timerIniciarTick(seccionId, pagActual);
