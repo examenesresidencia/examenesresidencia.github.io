@@ -956,20 +956,55 @@
   let _tallyBaseline    = null;
   let _tallyUltimoTotal = null;
 
-  function _capturarBaseline() {
-    if (_tallyBaseline !== null) return; // ya capturado en esta sesión
-    const puntajes = window.puntajesPorSeccion || {};
-    let total = 0, ok = 0, err = 0;
-    Object.keys(puntajes).forEach(secId => {
-      const arr = puntajes[secId] || [];
-      arr.forEach(v => {
-        if (v === 1)      { total++; ok++; }
-        else if (v === 0) { total++; err++; }
+  // Contar respuestas desde localStorage (TODAS las secciones, no solo la activa en memoria)
+  function _contarDesdeStorage() {
+    try {
+      const SK = window.STORAGE_KEY || 'quiz_state_v3';
+      const state = JSON.parse(localStorage.getItem(SK) || '{}');
+      let total = 0, ok = 0, err = 0;
+      Object.keys(state).forEach(secId => {
+        if (secId === 'simulador') return;
+        const sec = state[secId] || {};
+        const graded = sec.graded || {};
+        const answers = sec.answers || {};
+        const shuffleMap = sec.shuffleMap || {};
+        const preguntas = (window.preguntasPorSeccion || {})[secId] || [];
+        Object.keys(graded).forEach(idxStr => {
+          const idx = parseInt(idxStr);
+          total++;
+          const preg = preguntas[idx];
+          if (!preg) { err++; return; }
+          const correctas = (preg.correctas || []).slice().sort((a,b)=>a-b);
+          const respGuardadas = answers[idx] || [];
+          const mInv = shuffleMap[idx];
+          const selOrig = mInv
+            ? respGuardadas.map(i => mInv[i] ?? i).sort((a,b)=>a-b)
+            : respGuardadas.slice().sort((a,b)=>a-b);
+          const esCorrecta = correctas.length === selOrig.length &&
+            correctas.every((v,i) => v === selOrig[i]);
+          if (esCorrecta) ok++; else err++;
+        });
       });
-    });
-    _tallyBaseline    = { total, ok, err };
-    _tallyUltimoTotal = { total, ok, err }; // el "último" arranca igual al baseline
-    console.log('[MOTIVACION] Baseline capturado:', _tallyBaseline);
+      return { total, ok, err };
+    } catch(e) {
+      const puntajes = window.puntajesPorSeccion || {};
+      let total = 0, ok = 0, err = 0;
+      Object.keys(puntajes).forEach(secId => {
+        (puntajes[secId] || []).forEach(v => {
+          if (v === 1) { total++; ok++; }
+          else if (v === 0) { total++; err++; }
+        });
+      });
+      return { total, ok, err };
+    }
+  }
+
+  function _capturarBaseline() {
+    if (_tallyBaseline !== null) return;
+    const counts = _contarDesdeStorage();
+    _tallyBaseline    = counts;
+    _tallyUltimoTotal = { ...counts };
+    console.log('[MOTIVACION] Baseline capturado desde storage:', _tallyBaseline);
   }
 
   // ── Actualizar tally diario al responder cada pregunta ────────
@@ -978,15 +1013,8 @@
     if (_tallyBaseline === null) _capturarBaseline();
 
     const hoy = _todayISO();
-    const puntajes = window.puntajesPorSeccion || {};
-    let totalActual = 0, okActual = 0, errActual = 0;
-    Object.keys(puntajes).forEach(secId => {
-      const arr = puntajes[secId] || [];
-      arr.forEach(v => {
-        if (v === 1)      { totalActual++; okActual++; }
-        else if (v === 0) { totalActual++; errActual++; }
-      });
-    });
+    // Leer desde storage (todas las secciones) para evitar que el baseline sea incompleto
+    const { total: totalActual, ok: okActual, err: errActual } = _contarDesdeStorage();
 
     // Delta INCREMENTAL respecto a la última vez que guardamos
     const prev = _tallyUltimoTotal || _tallyBaseline || { total: 0, ok: 0, err: 0 };
@@ -1345,7 +1373,31 @@
   // Al iniciar sesión, cargar tally de la nube
   document.addEventListener('fb:usuarioAprobadoActivo', () => {
     setTimeout(_sincronizarTallyDesdeNube, 800);
+    // Corregir el tally de hoy si fue inflado (baseline capturado con storage vacío)
+    // Se ejecuta después de que el storage ya cargó desde Firebase
+    setTimeout(_corregirTallyHoy, 1500);
   });
+
+  // Corrige el tally de hoy si el valor guardado es mayor que las respuestas
+  // dadas realmente en esta sesión (síntoma de baseline capturado demasiado bajo)
+  function _corregirTallyHoy() {
+    const hoy = _todayISO();
+    const tally = _loadJSON(DAILY_TALLY_KEY, {});
+    if (!tally[hoy]) return; // no hay dato de hoy, nada que corregir
+
+    // Recapturar baseline correcto desde storage
+    const storageTotal = _contarDesdeStorage();
+    // El tally de hoy no puede ser mayor que el total histórico
+    // (imposible haber respondido más de lo que hay en el storage)
+    if (tally[hoy].total > storageTotal.total) {
+      console.warn('[MOTIVACION] Tally de hoy inflado, corrigiendo:', tally[hoy], '→ borrando');
+      delete tally[hoy];
+      _saveJSON(DAILY_TALLY_KEY, tally);
+      // Resetear baseline y último para recalcular limpio
+      _tallyBaseline    = storageTotal;
+      _tallyUltimoTotal = { ...storageTotal };
+    }
+  }
 
   // ── Instalación ───────────────────────────────────────────────
   function _instalar() {
