@@ -108,9 +108,18 @@
   }
 
   // ── Calcular totales globales ────────────────────────────────
-  function _calcularTotales(porDia) {
+  // Lee directamente de puntajesPorSeccion (fuente de verdad real-time).
+  // NO usa el tally diario para esto, así siempre refleja el estado actual.
+  function _calcularTotales() {
+    const puntajes = window.puntajesPorSeccion || {};
     let total = 0, ok = 0, err = 0;
-    Object.values(porDia).forEach(d => { total += d.total; ok += d.ok; err += d.err; });
+    Object.keys(puntajes).forEach(secId => {
+      const arr = puntajes[secId] || [];
+      arr.forEach(v => {
+        if (v === 1)      { total++; ok++; }
+        else if (v === 0) { total++; err++; }
+      });
+    });
     return { total, ok, err };
   }
 
@@ -325,7 +334,7 @@
     if (!panel) return;
 
     const porDia   = _calcularDiarios();
-    const totales  = _calcularTotales(porDia);
+    const totales  = _calcularTotales();
     const racha    = _calcularRacha(porDia);
     const pctGlobal = totales.total > 0
       ? Math.round((totales.ok / totales.total) * 100) : 0;
@@ -807,13 +816,16 @@
   }
 
   // ── Baseline de respuestas al inicio de la sesión ──────────────
-  // Se captura UNA SOLA VEZ cuando el paginador termina de cargar la sección.
-  // Luego el tally de hoy = totalActual - _tallyBaseline.
-  // Esto evita que preguntas respondidas en días anteriores se cuenten como "de hoy".
-  let _tallyBaseline = null;  // null = no inicializado aún
+  // _tallyBaseline: total de respuestas al cargar la sección (para no contar las viejas).
+  // _tallyUltimoTotal: total en la última llamada, para calcular delta INCREMENTAL.
+  // IMPORTANTE: el delta debe ser incremental (respecto a la última llamada),
+  // NO acumulado desde el baseline. Si fuera acumulado, cada llamada sumaría
+  // todas las respuestas nuevas de la sesión en lugar de solo la última.
+  let _tallyBaseline    = null;
+  let _tallyUltimoTotal = null;
 
   function _capturarBaseline() {
-    if (_tallyBaseline !== null) return; // ya capturado
+    if (_tallyBaseline !== null) return; // ya capturado en esta sesión
     const puntajes = window.puntajesPorSeccion || {};
     let total = 0, ok = 0, err = 0;
     Object.keys(puntajes).forEach(secId => {
@@ -823,15 +835,14 @@
         else if (v === 0) { total++; err++; }
       });
     });
-    _tallyBaseline = { total, ok, err };
+    _tallyBaseline    = { total, ok, err };
+    _tallyUltimoTotal = { total, ok, err }; // el "último" arranca igual al baseline
     console.log('[MOTIVACION] Baseline capturado:', _tallyBaseline);
   }
 
   // ── Actualizar tally diario al responder cada pregunta ────────
-  // Calcula el DELTA respecto al baseline de inicio de sesión.
-  // Así solo se cuentan las respuestas dadas HOY en esta sesión.
+  // Usa delta INCREMENTAL: solo cuenta lo nuevo respecto a la llamada anterior.
   function _actualizarDailyTally() {
-    // Asegurar que el baseline esté capturado antes del primer delta
     if (_tallyBaseline === null) _capturarBaseline();
 
     const hoy = _todayISO();
@@ -845,15 +856,17 @@
       });
     });
 
-    // Calcular delta respecto al baseline (respuestas nuevas de esta sesión)
-    const deltaTotal = Math.max(0, totalActual - (_tallyBaseline?.total || 0));
-    const deltaOk    = Math.max(0, okActual    - (_tallyBaseline?.ok    || 0));
-    const deltaErr   = Math.max(0, errActual   - (_tallyBaseline?.err   || 0));
+    // Delta INCREMENTAL respecto a la última vez que guardamos
+    const prev = _tallyUltimoTotal || _tallyBaseline || { total: 0, ok: 0, err: 0 };
+    const deltaTotal = Math.max(0, totalActual - prev.total);
+    const deltaOk    = Math.max(0, okActual    - prev.ok);
+    const deltaErr   = Math.max(0, errActual   - prev.err);
 
-    // No guardar si no hubo respuestas nuevas en esta sesión
-    if (deltaTotal === 0) return;
+    // Actualizar referencia para la próxima llamada
+    _tallyUltimoTotal = { total: totalActual, ok: okActual, err: errActual };
 
-    // Acumular con lo que ya había en el tally de hoy (de sesiones anteriores del mismo día)
+    if (deltaTotal === 0) return; // nada nuevo
+
     const tally = _loadJSON(DAILY_TALLY_KEY, {});
     const prevHoy = tally[hoy] || { total: 0, ok: 0, err: 0 };
     tally[hoy] = {
@@ -862,51 +875,127 @@
       err  : prevHoy.err  + deltaErr,
     };
     _saveJSON(DAILY_TALLY_KEY, tally);
+    console.log(`[MOTIVACION] Tally +${deltaTotal} (${deltaOk}✓ ${deltaErr}✗) → hoy total: ${tally[hoy].total}`);
   }
 
   // ── Resetear baseline al cerrar sesión ────────────────────────
   // Importante: si el usuario hace logout y login en la misma sesión del navegador,
   // el baseline debe resetearse para que no se acumule entre sesiones.
-  document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; });
+  document.addEventListener('fb:sesionCerrada', () => { _tallyBaseline = null; _tallyUltimoTotal = null; });
 
-  // ── Hook sobre _pag2UpdateStats (paginador) ──────────────────
-  // Cada vez que el paginador actualiza las stats, verificamos si
-  // la página quedó completa y si ya fue celebrada.
-  // FIX: el tally solo se actualiza cuando el usuario RESPONDE (no al navegar).
-  // _pag2UpdateStats se llama tanto al responder como internamente al renderizar.
-  // Usamos window._pag2UpdateStats._ultimoTotal para detectar si hubo respuesta nueva.
+  // ── Hook sobre _pag2UpdateStats ───────────────────────────────
+  // script.js llama window._pag2UpdateStats(seccionId) después de cada respuesta.
+  // Problema 1: el paginador la redefine al cambiar de sección → usamos defineProperty.
+  // Problema 2: para el usuario ADMIN el paginador hace bypass y NUNCA define esta
+  //             función → instalamos una propia que actúa como fallback.
   function _hookPag2UpdateStats() {
-    const orig = window._pag2UpdateStats;
-    if (typeof orig !== 'function') { setTimeout(_hookPag2UpdateStats, 200); return; }
 
-    // Capturar baseline ahora que puntajesPorSeccion ya debería tener datos
-    // (el paginador llama _prePoblarPuntajes antes de exponer _pag2UpdateStats)
-    setTimeout(_capturarBaseline, 50);
+    function _crearWrapper(fn) {
+      const wrapper = function(seccionId) {
+        const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
+        const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
 
-    window._pag2UpdateStats = function(seccionId) {
-      // Contar respuestas ANTES de que orig actualice el DOM
-      const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
-      const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
+        if (fn) fn.call(this, seccionId); // llamar al paginador real si existe
 
-      orig.call(this, seccionId); // ejecutar original primero
+        const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
+        const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
 
-      // Contar respuestas DESPUÉS — si aumentaron, el usuario respondió algo nuevo
-      const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
-      const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
+        if (respondeDespues > respondiaAntes) {
+          _actualizarDailyTally();
+          _onRespuesta(seccionId);
+        }
+      };
+      wrapper._motivacionWrapper = true;
+      wrapper._timerHooked = fn ? (fn._timerHooked || false) : false;
+      return wrapper;
+    }
 
-      if (respondeDespues > respondiaAntes) {
-        // Solo actualizar tally si efectivamente se registró una respuesta nueva
-        _actualizarDailyTally();
-        _onRespuesta(seccionId);
-      }
-    };
-    console.log('[MOTIVACION] Hook sobre _pag2UpdateStats instalado ✓');
+    // Si la función aún no existe (admin), la creamos nosotros;
+    // si ya existe (usuario normal), la envolvemos.
+    let _innerFn = typeof window._pag2UpdateStats === 'function'
+      ? window._pag2UpdateStats
+      : null;
+
+    // Capturar baseline con los datos actuales
+    setTimeout(_capturarBaseline, 100);
+
+    try {
+      Object.defineProperty(window, '_pag2UpdateStats', {
+        get: function() { return _innerFn; },
+        set: function(newFn) {
+          if (newFn && !newFn._motivacionWrapper) {
+            _innerFn = _crearWrapper(newFn);
+          } else {
+            _innerFn = newFn;
+          }
+        },
+        configurable: true
+      });
+      _innerFn = _crearWrapper(_innerFn);
+      console.log('[MOTIVACION] Hook sobre _pag2UpdateStats instalado ✓');
+    } catch (e) {
+      console.warn('[MOTIVACION] defineProperty falló, usando polling', e);
+      window._pag2UpdateStats = _crearWrapper(_innerFn);
+      setInterval(() => {
+        const cur = window._pag2UpdateStats;
+        if (!cur || !cur._motivacionWrapper) {
+          window._pag2UpdateStats = _crearWrapper(cur || null);
+        }
+      }, 500);
+    }
+  }
+
+  // ── Pausar el timer cuando la página queda completa con tiempo restante ─
+  // Marca la página como "pagCompleta" en el localStorage del timer (quiz_timer_v1)
+  // para que _timerEstaCorriendo() devuelva false → libera la navegación.
+  // Detiene el interval del tick y oculta el widget flotante.
+  function _pausarTimerPorPaginaCompleta(seccionId, pag) {
+    const TIMER_KEY = 'quiz_timer_v1';
+    let d;
+    try { d = JSON.parse(localStorage.getItem(TIMER_KEY) || '{}'); } catch (_) { d = {}; }
+
+    const k = seccionId + '__' + pag;
+    // Solo actuar si el timer está realmente corriendo (inicio registrado, no agotado)
+    if (!d[k] || d[k + '__agotado'] || d[k + '__pagCompleta']) return;
+
+    // Calcular segundos restantes antes de detener
+    const dur = d['duracion__' + seccionId] || 3600;
+    const elapsed = Math.floor((Date.now() - d[k]) / 1000);
+    const segRestantes = Math.max(0, dur - elapsed);
+
+    // Guardar los segundos restantes para restaurar en la próxima página (info visual)
+    d[k + '__segRestantes'] = segRestantes;
+    // Marcar como "pagCompleta" → _timerEstaCorriendo() devolverá false
+    d[k + '__pagCompleta'] = true;
+    try { localStorage.setItem(TIMER_KEY, JSON.stringify(d)); } catch (_) {}
+
+    // Detener el interval del tick
+    if (window._timerInterval) {
+      clearInterval(window._timerInterval);
+      window._timerInterval = null;
+    }
+
+    // Ocultar el widget flotante del timer
+    const w = document.getElementById('pag2-timer-widget');
+    if (w) w.classList.add('timer-oculto');
+
+    // Ocultar también el mensaje "🔒 Navegación bloqueada"
+    const lockEl = document.getElementById('ptw-lock');
+    if (lockEl) lockEl.style.display = 'none';
+
+    console.log(`[MOTIVACION] Timer pausado por página completa — ${seccionId} pág ${pag + 1}, ${segRestantes}s restantes`);
   }
 
   // ── Lógica principal al responder una pregunta ───────────────
   function _onRespuesta(seccionId) {
     // No disparar para el simulacro (tiene su propio modal)
     if (!seccionId || seccionId === 'simulador') return;
+
+    // Si el panel está abierto, actualizarlo en tiempo real
+    const panel = document.getElementById('panel-progreso');
+    if (panel && panel.style.display !== 'none') {
+      _renderPanelMejorado();
+    }
 
     const PAGE_SIZE = 50;
 
@@ -944,6 +1033,9 @@
       if (!shown[clave]) {
         shown[clave] = true;
         _saveJSON(MOT_SHOWN_KEY, shown);
+
+        // ── Pausar el timer si está corriendo con tiempo restante ──
+        _pausarTimerPorPaginaCompleta(seccionId, pagActiva);
 
         const esFinal = pagActiva === totalPages - 1;
         const subtitle = esFinal
@@ -1023,11 +1115,113 @@
     console.log('[MOTIVACION] Hook sobre mostrarResultadoFinal instalado ✓');
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // 3. SINCRONIZACIÓN CON FIREBASE — daily tally en la nube
+  // ════════════════════════════════════════════════════════════════
+  // El tally diario se guarda en el mismo documento 'progress/{uid}'
+  // bajo el campo 'dailyTally'. Se sincroniza:
+  //   • Al cargar sesión (fb:usuarioAprobadoActivo): merge nube + local
+  //   • Al guardar (hook sobre window._fbSaveProgressToCloud): incluye el tally
+
+  function _mergeTallies(a, b) {
+    // Fusiona dos objetos tally { "YYYY-MM-DD": { total, ok, err } }
+    // Para cada día toma el mayor total (la fuente más completa)
+    const result = Object.assign({}, a);
+    Object.keys(b || {}).forEach(dia => {
+      if (!result[dia] || (b[dia].total || 0) > (result[dia].total || 0)) {
+        result[dia] = b[dia];
+      }
+    });
+    return result;
+  }
+
+  // Cargar tally desde la nube y mergearlo con el local
+  async function _sincronizarTallyDesdeNube() {
+    try {
+      const uid = window._fbCurrentUser?.uid;
+      const fbDb = window._fbDb;
+      const fb   = window.__fb || window.__firebase_firestore;
+      if (!uid || !fbDb || !fb) return;
+
+      const { doc, getDoc } = fb;
+      const snap = await getDoc(doc(fbDb, 'progress', uid));
+      if (!snap.exists()) return;
+
+      const cloudTally = snap.data()?.dailyTally || {};
+      if (!Object.keys(cloudTally).length) return;
+
+      const localTally = _loadJSON(DAILY_TALLY_KEY, {});
+      const merged = _mergeTallies(localTally, cloudTally);
+      _saveJSON(DAILY_TALLY_KEY, merged);
+      console.log('[MOTIVACION] Tally sincronizado desde la nube:', Object.keys(merged).length, 'días');
+    } catch (e) {
+      console.warn('[MOTIVACION] Error sincronizando tally desde nube:', e.message);
+    }
+  }
+
+  // Hookear _fbSaveProgressToCloud para incluir el tally en cada guardado
+  function _hookFirebaseSave() {
+    const orig = window._fbSaveProgressToCloud;
+    if (typeof orig !== 'function') {
+      setTimeout(_hookFirebaseSave, 300);
+      return;
+    }
+    if (orig._tallyHooked) return;
+
+    window._fbSaveProgressToCloud = async function() {
+      // Antes de guardar, inyectar el tally en el documento de Firestore
+      try {
+        const uid = window._fbCurrentUser?.uid;
+        const fbDb = window._fbDb;
+        const fb   = window.__fb || window.__firebase_firestore;
+        if (uid && fbDb && fb) {
+          const { doc, updateDoc } = fb;
+          const tally = _loadJSON(DAILY_TALLY_KEY, {});
+          if (Object.keys(tally).length > 0) {
+            // updateDoc solo pisa el campo dailyTally, no toca state ni attemptLog
+            updateDoc(doc(fbDb, 'progress', uid), { dailyTally: tally })
+              .catch(e => console.warn('[MOTIVACION] Error guardando tally en nube:', e.message));
+          }
+        }
+      } catch (e) {
+        console.warn('[MOTIVACION] Error en hook Firebase save:', e.message);
+      }
+      return orig.apply(this, arguments);
+    };
+    window._fbSaveProgressToCloud._tallyHooked = true;
+    console.log('[MOTIVACION] Hook Firebase save instalado ✓');
+  }
+
+  // Al cerrar sesión también guardar el tally directamente
+  document.addEventListener('fb:sesionCerrada', async () => {
+    try {
+      const uid = window._fbCurrentUser?.uid;
+      const fbDb = window._fbDb;
+      const fb   = window.__fb || window.__firebase_firestore;
+      if (uid && fbDb && fb) {
+        const { doc, updateDoc } = fb;
+        const tally = _loadJSON(DAILY_TALLY_KEY, {});
+        if (Object.keys(tally).length > 0) {
+          await updateDoc(doc(fbDb, 'progress', uid), { dailyTally: tally })
+            .catch(() => {});
+        }
+      }
+    } catch (_) {}
+    _tallyBaseline = null;
+    _tallyUltimoTotal = null;
+  });
+
+  // Al iniciar sesión, cargar tally de la nube
+  document.addEventListener('fb:usuarioAprobadoActivo', () => {
+    setTimeout(_sincronizarTallyDesdeNube, 800);
+  });
+
   // ── Instalación ───────────────────────────────────────────────
   function _instalar() {
     _instalarPanelMejorado();
     _hookPag2UpdateStats();
     _hookMostrarResultadoFinal();
+    _hookFirebaseSave();
     console.log('[MOTIVACION] Módulo motivacion-progreso.js cargado ✓');
   }
 
