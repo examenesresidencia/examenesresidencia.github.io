@@ -65,8 +65,10 @@
   // attemptLog: registra al completar cuestionarios ≤50 / simulacro.
   // Se fusionan; si un día tiene datos en tally, ese día se usa del tally.
   function _calcularDiarios() {
-    const tally = _loadJSON(DAILY_TALLY_KEY, {});
+    const tally  = _loadJSON(DAILY_TALLY_KEY, {});
     const porDia = {};
+
+    // 1. Datos del tally diario (sesiones anteriores ya guardadas)
     Object.keys(tally).forEach(dia => {
       const t = tally[dia];
       if (!porDia[dia]) porDia[dia] = { total: 0, ok: 0, err: 0 };
@@ -74,7 +76,8 @@
       porDia[dia].ok    += t.ok    || 0;
       porDia[dia].err   += t.err   || 0;
     });
-    // Agregar attemptLog solo para días sin datos en tally (evita doble conteo)
+
+    // 2. AttemptLog solo para días sin datos en tally (evita doble conteo)
     const log = _loadJSON(ATTEMPT_LOG_KEY, []);
     log.forEach(item => {
       const dia = (item.iso || '').substring(0, 10) || _todayISO();
@@ -84,6 +87,29 @@
       porDia[dia].ok    += item.score || 0;
       porDia[dia].err   += (item.total - item.score) || 0;
     });
+
+    // 3. FALLBACK: si hoy no tiene datos en tally ni en log, calcular desde
+    //    puntajesPorSeccion usando el baseline de sesión (_tallyBaseline).
+    //    Esto garantiza que la racha y el panel "Por día" reflejen actividad
+    //    actual aunque el hook de tally no haya podido guardar aún.
+    const hoy = _todayISO();
+    if (!porDia[hoy] && _tallyBaseline !== null) {
+      const puntajes = window.puntajesPorSeccion || {};
+      let totalActual = 0, okActual = 0, errActual = 0;
+      Object.keys(puntajes).forEach(secId => {
+        (puntajes[secId] || []).forEach(v => {
+          if (v === 1)      { totalActual++; okActual++; }
+          else if (v === 0) { totalActual++; errActual++; }
+        });
+      });
+      const deltaTotal = Math.max(0, totalActual - (_tallyBaseline.total || 0));
+      const deltaOk    = Math.max(0, okActual    - (_tallyBaseline.ok    || 0));
+      const deltaErr   = Math.max(0, errActual   - (_tallyBaseline.err   || 0));
+      if (deltaTotal > 0) {
+        porDia[hoy] = { total: deltaTotal, ok: deltaOk, err: deltaErr };
+      }
+    }
+
     return porDia;
   }
 
@@ -108,14 +134,19 @@
   }
 
   // ── Calcular totales globales ────────────────────────────────
-  // Lee directamente de puntajesPorSeccion (fuente de verdad real-time).
-  // NO usa el tally diario para esto, así siempre refleja el estado actual.
+  // Delega en _calcularTotalesDesdeStorage (definida más abajo) para
+  // obtener el total real de TODAS las secciones, no solo la activa.
   function _calcularTotales() {
+    // Llamada diferida: _calcularTotalesDesdeStorage se define después de esta función.
+    // En tiempo de ejecución ya existe, así que funciona correctamente.
+    if (typeof _calcularTotalesDesdeStorage === 'function') {
+      return _calcularTotalesDesdeStorage();
+    }
+    // Fallback: solo sección activa en memoria
     const puntajes = window.puntajesPorSeccion || {};
     let total = 0, ok = 0, err = 0;
     Object.keys(puntajes).forEach(secId => {
-      const arr = puntajes[secId] || [];
-      arr.forEach(v => {
+      (puntajes[secId] || []).forEach(v => {
         if (v === 1)      { total++; ok++; }
         else if (v === 0) { total++; err++; }
       });
@@ -309,6 +340,104 @@
   }
 
   // ── Reemplazar buildProgressUI cuando esté disponible ────────
+  // ── Calcular totales globales desde localStorage (todas las secciones) ──
+  // Fuente de verdad: quiz_state_v3 que tiene graded+answers de todo el historial.
+  // Para secciones activas en memoria usa puntajesPorSeccion (más actualizado).
+  function _calcularTotalesDesdeStorage() {
+    try {
+      const SK = window.STORAGE_KEY || 'quiz_state_v3';
+      const state = JSON.parse(localStorage.getItem(SK) || '{}');
+      const enMemoria = window.puntajesPorSeccion || {};
+      let total = 0, ok = 0, err = 0;
+
+      Object.keys(state).forEach(secId => {
+        if (secId === 'simulador') return;
+
+        // Si está en memoria, usar esos valores (más frescos)
+        if (enMemoria[secId]) {
+          (enMemoria[secId] || []).forEach(v => {
+            if (v === 1)      { total++; ok++; }
+            else if (v === 0) { total++; err++; }
+          });
+          return;
+        }
+
+        // No está en memoria: reconstruir desde graded + answers + correctas del state
+        const sec = state[secId] || {};
+        const graded = sec.graded || {};
+        const answers = sec.answers || {};
+        const shuffleMap = sec.shuffleMap || {};
+        const preguntas = (window.preguntasPorSeccion || {})[secId] || [];
+
+        Object.keys(graded).forEach(idxStr => {
+          const idx = parseInt(idxStr);
+          total++;
+          if (!preguntas[idx]) { err++; return; } // sin datos, asumir incorrecto
+
+          const preg = preguntas[idx];
+          const correctas = (preg.correctas || []).slice().sort((a,b)=>a-b);
+          const respGuardadas = answers[idx] || [];
+          const mInv = shuffleMap[idx];
+          let selOrig;
+          if (mInv) {
+            selOrig = respGuardadas.map(i => mInv[i] ?? i).sort((a,b)=>a-b);
+          } else {
+            selOrig = respGuardadas.slice().sort((a,b)=>a-b);
+          }
+          const esCorrecta = correctas.length === selOrig.length &&
+            correctas.every((v, i) => v === selOrig[i]);
+          if (esCorrecta) ok++; else err++;
+        });
+      });
+
+      return { total, ok, err };
+    } catch (e) {
+      // Fallback: solo lo que hay en memoria
+      const puntajes = window.puntajesPorSeccion || {};
+      let total = 0, ok = 0, err = 0;
+      Object.keys(puntajes).forEach(secId => {
+        (puntajes[secId] || []).forEach(v => {
+          if (v === 1) { total++; ok++; }
+          else if (v === 0) { total++; err++; }
+        });
+      });
+      return { total, ok, err };
+    }
+  }
+
+  // ── Texto dinámico del botón: "respondidas / total" del cuestionario en curso ──
+  function _actualizarTextoBoton() {
+    // Detectar sección activa desde el hash de la URL
+    const hash = window.location.hash.replace('#', '').trim();
+    const seccionId = (hash && hash !== 'menu' && hash !== 'simulador') ? hash : null;
+
+    let textoCorto, textoLargo;
+
+    if (seccionId) {
+      const preguntas = (window.preguntasPorSeccion || {})[seccionId] || [];
+      const puntajes  = (window.puntajesPorSeccion  || {})[seccionId] || [];
+      const total     = preguntas.length;
+      if (total > 0) {
+        const respondidas = puntajes.filter(v => v === 1 || v === 0).length;
+        textoCorto = `📊 ${respondidas}/${total}`;
+        textoLargo = `📊 ${respondidas}/${total} respondidas`;
+      }
+    }
+
+    if (!textoCorto) {
+      textoCorto = '📊';
+      textoLargo = '📊 Ver mi progreso';
+    }
+
+    // btn-ver-progreso: botón compacto del cuestionario
+    const btn = document.getElementById('btn-ver-progreso');
+    if (btn) btn.textContent = textoCorto;
+
+    // fb-bar-ver-progreso: botón en la barra de usuario (más espacio)
+    const barBtn = document.getElementById('fb-bar-ver-progreso');
+    if (barBtn) barBtn.textContent = textoLargo;
+  }
+
   function _instalarPanelMejorado() {
     const panel = document.getElementById('panel-progreso');
     const btnProgreso = document.getElementById('btn-ver-progreso');
@@ -323,6 +452,9 @@
       _renderPanelMejorado();
       panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
     });
+
+    // Texto inicial del botón
+    _actualizarTextoBoton();
 
     // Conectar el botón Cerrar (ya existe en buildProgressUI original)
     // Se actualizará en _renderPanelMejorado
@@ -892,18 +1024,14 @@
 
     function _crearWrapper(fn) {
       const wrapper = function(seccionId) {
-        const puntajesAntes = (window.puntajesPorSeccion || {})[seccionId] || [];
-        const respondiaAntes = puntajesAntes.filter(v => v === 1 || v === 0).length;
-
         if (fn) fn.call(this, seccionId); // llamar al paginador real si existe
 
-        const puntajesDespues = (window.puntajesPorSeccion || {})[seccionId] || [];
-        const respondeDespues = puntajesDespues.filter(v => v === 1 || v === 0).length;
-
-        if (respondeDespues > respondiaAntes) {
-          _actualizarDailyTally();
-          _onRespuesta(seccionId);
-        }
+        // Siempre llamar _actualizarDailyTally — ella misma detecta si hubo
+        // cambio real comparando con _tallyUltimoTotal (el total de la llamada anterior).
+        // NO usar comparación antes/después aquí porque script.js ya actualizó
+        // puntajesPorSeccion ANTES de llamar a _pag2UpdateStats.
+        _actualizarDailyTally();
+        _onRespuesta(seccionId);
       };
       wrapper._motivacionWrapper = true;
       wrapper._timerHooked = fn ? (fn._timerHooked || false) : false;
@@ -996,6 +1124,9 @@
     if (panel && panel.style.display !== 'none') {
       _renderPanelMejorado();
     }
+
+    // Actualizar texto del botón con respondidas/total del cuestionario en curso
+    _actualizarTextoBoton();
 
     const PAGE_SIZE = 50;
 
