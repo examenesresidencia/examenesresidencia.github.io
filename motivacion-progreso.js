@@ -453,11 +453,28 @@
       panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
     });
 
-    // Texto inicial del botón
-    _actualizarTextoBoton();
+    // Actualizar botón cuando cambia la sección (hashchange)
+    window.addEventListener('hashchange', () => {
+      // Pequeño delay para que el paginador cargue preguntasPorSeccion
+      setTimeout(_actualizarTextoBoton, 300);
+      setTimeout(_actualizarTextoBoton, 800);
+      setTimeout(_actualizarTextoBoton, 1500);
+    });
 
-    // Conectar el botón Cerrar (ya existe en buildProgressUI original)
-    // Se actualizará en _renderPanelMejorado
+    // Polling al inicio: intentar hasta que preguntasPorSeccion tenga datos
+    // (cubre el caso de recarga de página / ingreso directo al cuestionario)
+    let _intentos = 0;
+    function _esperarPaginador() {
+      const hash = window.location.hash.replace('#', '').trim();
+      if (!hash || hash === 'menu' || hash === 'simulador') return;
+      const preguntas = (window.preguntasPorSeccion || {})[hash] || [];
+      if (preguntas.length > 0) {
+        _actualizarTextoBoton();
+        return;
+      }
+      if (_intentos++ < 20) setTimeout(_esperarPaginador, 300);
+    }
+    _esperarPaginador();
   }
 
   // ── Render del panel mejorado ────────────────────────────────
@@ -1373,9 +1390,11 @@
   // Al iniciar sesión, cargar tally de la nube
   document.addEventListener('fb:usuarioAprobadoActivo', () => {
     setTimeout(_sincronizarTallyDesdeNube, 800);
-    // Corregir el tally de hoy si fue inflado (baseline capturado con storage vacío)
-    // Se ejecuta después de que el storage ya cargó desde Firebase
     setTimeout(_corregirTallyHoy, 1500);
+    // Actualizar botón de la barra de usuario (aparece después del login)
+    setTimeout(_actualizarTextoBoton, 500);
+    setTimeout(_actualizarTextoBoton, 1200);
+    setTimeout(_actualizarTextoBoton, 2500);
   });
 
   // Corrige el tally de hoy si el valor guardado es mayor que las respuestas
