@@ -1,5 +1,14 @@
-//PRUEBA 29  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix v29: 3 correcciones al sistema de sincronización en tiempo real:
+//PRUEBA 30  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+// Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
+//   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
+//      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
+//      la pregunta del array local preguntasPorSeccion, actualiza IDB/localStorage,
+//      reindexea unansweredOrder/answeredOrder/graded, anima la desaparición del nodo DOM
+//      y actualiza el contador 📊 N/total. 0 lecturas extra a Firestore.
+//   2. _despacharCambio en onSnapshot ahora maneja el flag esReclasificacion=true
+//      despachando _aplicarReclasificacionLocal en lugar de recargar toda la sección.
+//      (reclasificador-preguntas.js agrega el paso 5e que llama _bumpContentVersion
+//       con ese flag después de completar la reclasificación en Firestore).
 //   1. _bumpContentVersion ahora envía `qIndexes` (array) y `nuevasCorrectas`
 //      (array de objetos {qIndex, correcta}) además de los campos legacy,
 //      resolviendo el bug donde el listener recibía nuevasCorrectas=[] y por
@@ -8958,6 +8967,136 @@ function fbSaveProgressToCloud() {
     return chunks;
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // _aplicarReclasificacionLocal
+  // Llamado por el listener onSnapshot cuando admin reclasifica una pregunta.
+  // Elimina la pregunta del array local y actualiza el DOM/contadores
+  // SIN recargar nada desde Firestore (0 lecturas extra).
+  //
+  // Reglas estrictas:
+  //  - NO toca preguntas ya respondidas (graded=true)
+  //  - NO altera el orden relativo de las demás preguntas
+  //  - NO mezcla respondidas con no respondidas
+  //  - Solo aplica si el usuario está viendo esa sección actualmente
+  //  - Muestra toast discreto indicando origen → destino
+  // ════════════════════════════════════════════════════════════════
+  function _aplicarReclasificacionLocal(seccionId, qIndexReclasif, destinoLabel) {
+    // ── 1. Verificar que la sección está cargada en memoria ──────────────────
+    const preguntas = (window.preguntasPorSeccion || {})[seccionId];
+    if (!Array.isArray(preguntas) || preguntas.length === 0) {
+      // La sección no está en memoria: solo limpiar caché para la próxima entrada
+      try { _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId); } catch (_) {}
+      if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+      _seccionesYaCargadas.delete(seccionId);
+      console.log('[RECLASIF-LOCAL] Sección no en memoria — caché invalidado para próxima entrada:', seccionId);
+      return;
+    }
+
+    if (qIndexReclasif < 0 || qIndexReclasif >= preguntas.length) {
+      console.warn('[RECLASIF-LOCAL] qIndex fuera de rango:', qIndexReclasif, '/', preguntas.length);
+      return;
+    }
+
+    // ── 2. NO tocar si la pregunta ya fue respondida ──────────────────────────
+    const s = state[seccionId];
+    if (s && s.graded && s.graded[qIndexReclasif] !== undefined) {
+      console.info('[RECLASIF-LOCAL] Pregunta respondida — no se altera:', seccionId, qIndexReclasif);
+      // Igual eliminarla del array para mantener conteos coherentes en la próxima entrada,
+      // pero sin tocar el DOM ni el estado de progreso del usuario.
+      // El reindexado del progreso ya lo hizo _reindexAllUsersProgressRecl en Firestore.
+      return;
+    }
+
+    // ── 3. Eliminar del array local (sin alterar el resto) ───────────────────
+    window.preguntasPorSeccion[seccionId].splice(qIndexReclasif, 1);
+
+    // ── 4. Actualizar IDB y localStorage caché ───────────────────────────────
+    const _ck = PREGUNTAS_CACHE_PREFIX + seccionId;
+    _idbCache.get(_ck).then(cached => {
+      if (cached && Array.isArray(cached.preguntas)) {
+        cached.preguntas.splice(qIndexReclasif, 1);
+        cached.ts = Date.now();
+        _idbCache.set(_ck, cached);
+      }
+    }).catch(() => {
+      try { _idbCache.remove(_ck); } catch (_) {}
+    });
+
+    // ── 5. Reindexar state local (unansweredOrder) ──────────────────────────
+    // Idéntico a _reindexSectionStateRecl del reclasificador, pero inline
+    // para no depender de que ese módulo esté cargado.
+    if (s) {
+      const shift = i => i > qIndexReclasif ? i - 1 : i;
+      if (Array.isArray(s.unansweredOrder)) {
+        s.unansweredOrder = s.unansweredOrder
+          .filter(i => i !== qIndexReclasif)
+          .map(shift);
+      }
+      if (Array.isArray(s.answeredOrder)) {
+        s.answeredOrder = s.answeredOrder
+          .filter(e => (typeof e === 'number' ? e : e.idx) !== qIndexReclasif)
+          .map(e => typeof e === 'number' ? shift(e) : { ...e, idx: shift(e.idx) });
+      }
+      ['graded', 'answers', 'shuffleMap'].forEach(campo => {
+        if (!s[campo]) return;
+        const nuevo = {};
+        Object.entries(s[campo]).forEach(([k, v]) => {
+          const ki = parseInt(k, 10);
+          if (isNaN(ki) || ki === qIndexReclasif) return;
+          nuevo[ki > qIndexReclasif ? ki - 1 : ki] = v;
+        });
+        s[campo] = nuevo;
+      });
+      saveJSON(STORAGE_KEY, state);
+    }
+
+    // ── 6. Actualizar DOM solo si el usuario está viendo esta sección ────────
+    const estaViendo = (currentSection === seccionId);
+    if (estaViendo) {
+      // Eliminar el nodo DOM de la pregunta reclasificada
+      const puntajeEl = document.getElementById(`puntaje-${seccionId}-${qIndexReclasif}`);
+      if (puntajeEl) {
+        const pregDiv = puntajeEl.closest('.pregunta');
+        if (pregDiv) {
+          pregDiv.style.transition = 'opacity 0.3s, max-height 0.35s';
+          pregDiv.style.opacity    = '0';
+          pregDiv.style.overflow   = 'hidden';
+          pregDiv.style.maxHeight  = pregDiv.offsetHeight + 'px';
+          requestAnimationFrame(() => {
+            pregDiv.style.maxHeight = '0';
+            setTimeout(() => {
+              try { pregDiv.remove(); } catch (_) {}
+            }, 360);
+          });
+        }
+      }
+
+      // Actualizar el label del botón de progreso (ej: "📊 65/899" → "📊 65/898")
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        const totalNuevo = window.preguntasPorSeccion[seccionId].length;
+        // Calcular respondidas actuales
+        const respondidas = s
+          ? Object.keys(s.graded || {}).filter(k => s.graded[k] !== undefined).length
+          : 0;
+        window._ubActualizarLabelProgreso(respondidas, totalNuevo);
+      }
+
+      // Actualizar stats del paginador si está activo
+      if (typeof window._pag2UpdateStats === 'function') {
+        window._pag2UpdateStats(seccionId);
+      }
+
+      // Toast discreto: informar al usuario del movimiento
+      fbToast(
+        `🔀 Una pregunta de "${seccionId}" fue movida a "${destinoLabel}"`,
+        'info',
+        4500
+      );
+    }
+
+    console.log(`[RECLASIF-LOCAL] ✅ qIndex=${qIndexReclasif} eliminado de "${seccionId}" (total: ${window.preguntasPorSeccion[seccionId]?.length ?? '?'})`);
+  }
+
   // Update quirúrgico: toca solo los nodos DOM de la pregunta editada.
   // No re-renderiza el cuestionario completo — preserva scroll, selecciones y explicaciones abiertas.
   function _updatePreguntaEnDOM(seccionId, qIndex, ed) {
@@ -9274,14 +9413,27 @@ function fbSaveProgressToCloud() {
         const qIndex        = data.qIndex        ?? null;
         const nuevaCorrecta = data.nuevaCorrecta ?? null;
 
-        // Helper: despacha el cambio según si es edición puntual o forzado global
+        // Helper: despacha el cambio según si es edición puntual, reclasificación o forzado global
         const _despacharCambio = (motivo) => {
-          const esEdicionPuntual = data.esEdicionPuntual === true;
+          const esEdicionPuntual  = data.esEdicionPuntual  === true;
+          const esReclasificacion = data.esReclasificacion === true;
           const qIndexes        = data.qIndexes ?? (qIndex !== null && qIndex !== undefined ? [qIndex] : []);
           const nuevasCorrectas = data.nuevasCorrectas ?? [];
           // Datos embebidos: viajan dentro del snapshot, 0 lecturas extra a Firestore
           const preguntaData    = data.preguntaData ?? null;
           if (!seccionId) return;
+
+          // ── Reclasificación: eliminación quirúrgica local, 0 lecturas Firestore ──
+          if (esReclasificacion) {
+            const qIndexReclasif = data.qIndexReclasif ?? null;
+            const destLabel      = data.destinoLabel   ?? data.seccionDestino ?? '';
+            console.log(`[CONTENT-SYNC] ${motivo} → reclasificación: qIndex=${qIndexReclasif} fuera de "${seccionId}" hacia "${destLabel}"`);
+            if (qIndexReclasif !== null && qIndexReclasif !== undefined) {
+              _aplicarReclasificacionLocal(seccionId, qIndexReclasif, destLabel);
+            }
+            return;
+          }
+
           if (esEdicionPuntual && qIndexes.length > 0) {
             // ✅ EFICIENTE: descarga solo las N preguntas editadas
             // ceil(N/30) consultas a Firestore, 1 sola re-renderización
