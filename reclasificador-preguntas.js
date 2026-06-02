@@ -1,8 +1,14 @@
 // ════════════════════════════════════════════════════════════════
-// reclasificador-preguntas.js  — V23
+// reclasificador-preguntas.js  — V24
 // ────────────────────────────────────────────────────────────────
-// Permite reclasificar preguntas hacia otra especialidad con impacto
-// directo en Firestore. Visible solo para admin y usuario elegido.
+// V24: Sincronización en tiempo real para usuarios activos.
+//   Paso 5e (nuevo): tras completar la reclasificación en Firestore,
+//   llama window._bumpContentVersion con esReclasificacion=true,
+//   qIndexReclasif y destinoLabel. Esto dispara el listener onSnapshot
+//   en script.js v30 que aplica _aplicarReclasificacionLocal en todos
+//   los clientes activos con 0 lecturas extra a Firestore.
+//   Antes de esta versión, el usuario veía 899 preguntas aunque el admin
+//   hubiera reclasificado varias, porque el caché local nunca se invalidaba.
 //
 // LÓGICA:
 //   1. Agrega un botón "🔀 Reclasificar" junto a los botones de cada pregunta.
@@ -589,6 +595,24 @@
           });
         } catch (_reindexErr) {
           console.warn('[RECLASIF] Error reindexando progress de usuarios:', _reindexErr.message);
+        }
+
+        // 5e. Notificar a TODOS los usuarios activos vía el listener en tiempo real.
+        //     Usa el mismo sistema meta/contentVersion que ya escucha script.js,
+        //     con el flag esReclasificacion=true para que el listener aplique
+        //     la eliminación quirúrgica sin recargar toda la sección desde Firestore.
+        //     Costo: 1 escritura en Firestore → 1 lectura por cada usuario activo.
+        try {
+          if (typeof window._bumpContentVersion === 'function') {
+            await window._bumpContentVersion(seccionOrigen, null, null, {
+              esReclasificacion : true,
+              qIndexReclasif    : qIndex,          // índice base-0 eliminado del origen
+              seccionDestino    : destino,          // a dónde fue la pregunta
+              destinoLabel      : (ESPECIALIDADES.find(e => e.id === destino) || { label: destino }).label,
+            });
+          }
+        } catch (_notifErr) {
+          console.warn('[RECLASIF] Error al notificar vía contentVersion (no crítico):', _notifErr.message);
         }
 
         // 6. Re-renderizar la sección origen
