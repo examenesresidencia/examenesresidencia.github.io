@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js - V5
+// buscador-duplicados.js - V4
 // ────────────────────────────────────────────────────────────────
 
 
@@ -802,26 +802,6 @@
       }
     }
 
-    // Actualizar totalPreguntas global y el resumen
-    _dupTotalPreguntasCache -= eliminados;
-    const resumen = document.getElementById('dup-resumen');
-    if (resumen) {
-      resumen.innerHTML = resumen.innerHTML.replace(
-        /<strong style="color:#f1f5f9">[\d.,]+<\/strong> preguntas totales/,
-        `<strong style="color:#f1f5f9">${_dupTotalPreguntasCache.toLocaleString()}</strong> preguntas totales`
-      );
-      resumen.innerHTML = resumen.innerHTML.replace(
-        /Entre secciones: <strong style="color:[^"]+">[\d]+<\/strong> grupos/,
-        `Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos`
-      );
-      const badge = resumen.querySelector('.dup-modo-badge');
-      if (badge) {
-        const modoInterna = document.querySelector('input[name="dup-modo"]:checked')?.value === 'interna';
-        badge.textContent = modoInterna
-          ? `📂 Modo: dentro del mismo cuestionario — ${_dupGruposInternoCache.length} grupos`
-          : `🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos`;
-      }
-    }
     if (errores.length === 0) {
       _bdToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
       // Persistir el caché actualizado (grupos sin las eliminadas, total actualizado)
