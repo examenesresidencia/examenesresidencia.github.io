@@ -389,6 +389,18 @@
         resize:none;
         touch-action:none;
       }
+      /* Mobile: mover el widget encima de la barra inferior, alineado a la derecha de ella */
+      @media (max-width:600px) {
+        #pag2-float-widget {
+          bottom:40px;
+          right:8px;
+          max-width:calc(100vw - 16px);
+        }
+        #pag2-float-collapsed {
+          padding:5px 10px 5px 8px;
+          font-size:0.78rem;
+        }
+      }
       #pag2-float-widget * {
         resize:none;
         box-sizing:border-box;
