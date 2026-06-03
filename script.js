@@ -8620,8 +8620,9 @@ function fbSaveProgressToCloud() {
     if (!window.__fb || !_fbDb) return;
     try {
       const { doc, setDoc, serverTimestamp } = window.__fb;
-      const esSubidaNueva    = opciones.startIdx !== undefined && opciones.startIdx !== null;
-      const esEdicionPuntual = opciones.esEdicionPuntual === true;
+      const esSubidaNueva          = opciones.startIdx !== undefined && opciones.startIdx !== null;
+      const esEdicionPuntual       = opciones.esEdicionPuntual       === true;
+      const esEliminacionDuplicados= opciones.esEliminacionDuplicados === true;
       const docId = esSubidaNueva
         ? 'contentVersion_' + seccionId
         : 'contentVersion';
@@ -8654,14 +8655,17 @@ function fbSaveProgressToCloud() {
         nuevasCorrectas,                          // nuevo: array de objetos para recalificación
         startIdx        : opciones.startIdx ?? null,
         esEdicionPuntual: esEdicionPuntual,
+        esEliminacionDuplicados,                  // nuevo: señal de eliminación de duplicados
+        docIdsEliminados: opciones.docIdsEliminados ?? null, // nuevo: docIds eliminados
         // Datos embebidos: el cliente los aplica directamente (0 lecturas extra a Firestore)
         preguntaData    : opciones.preguntaData ?? null,
         updatedAt       : serverTimestamp()
       });
       console.log('[CONTENT-SYNC] Versión actualizada → sección:', seccionId,
-        esSubidaNueva    ? '| subida incremental desde idx:' + opciones.startIdx :
-        esEdicionPuntual ? '| edición puntual embebida (0 lecturas en clientes)' :
-                           '| edición');
+        esSubidaNueva          ? '| subida incremental desde idx:' + opciones.startIdx :
+        esEdicionPuntual       ? '| edición puntual embebida (0 lecturas en clientes)' :
+        esEliminacionDuplicados? '| eliminación de duplicados (' + (opciones.docIdsEliminados?.length ?? 0) + ' docs)' :
+                                 '| edición');
     } catch (e) {
       console.warn('[CONTENT-SYNC] Error al actualizar versión:', e.message);
     }
@@ -9097,6 +9101,172 @@ function fbSaveProgressToCloud() {
     console.log(`[RECLASIF-LOCAL] ✅ qIndex=${qIndexReclasif} eliminado de "${seccionId}" (total: ${window.preguntasPorSeccion[seccionId]?.length ?? '?'})`);
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // _aplicarEliminacionDuplicadosLocal
+  // Llamado por el listener onSnapshot cuando el admin elimina preguntas
+  // duplicadas. Elimina MÚLTIPLES preguntas por docId de la sección local
+  // y reindexea el progreso del usuario (graded/answers/shuffleMap/
+  // answeredOrder/unansweredOrder) de forma quirúrgica.
+  //
+  // Reglas:
+  //  - Las preguntas ya respondidas que se eliminen se sacan del array
+  //    y de answeredOrder, pero sus puntajes se recalculan en la calificación
+  //    final (el índice simplemente desaparece al compactar)
+  //  - El total visible se actualiza en tiempo real
+  //  - 0 lecturas extra a Firestore
+  // ════════════════════════════════════════════════════════════════
+  function _aplicarEliminacionDuplicadosLocal(seccionId, docIdsEliminados) {
+    const preguntas = (window.preguntasPorSeccion || {})[seccionId];
+    const docIdsSet = new Set(docIdsEliminados);
+
+    if (!Array.isArray(preguntas) || preguntas.length === 0) {
+      // Sección no en memoria: solo invalidar caché para la próxima entrada
+      try { _idbCache.remove(PREGUNTAS_CACHE_PREFIX + seccionId); } catch (_) {}
+      if (window.preguntasPorSeccion) delete window.preguntasPorSeccion[seccionId];
+      _seccionesYaCargadas.delete(seccionId);
+      console.log('[ELIM-DUP-LOCAL] Sección no en memoria — caché invalidado:', seccionId);
+      return;
+    }
+
+    // ── 1. Calcular qué índices (base-0) corresponden a los docIds eliminados ──
+    // Construir mapa docId→idx ANTES de modificar el array
+    const docIdAQIdx = new Map();
+    preguntas.forEach((p, i) => {
+      const d = p._firestoreDocId || p.docId;
+      if (d) docIdAQIdx.set(d, i);
+    });
+
+    // Índices a eliminar, ordenados de MAYOR a MENOR para poder hacer splice sin desplazar
+    const qIdxsEliminar = [...docIdsSet]
+      .map(id => docIdAQIdx.get(id))
+      .filter(i => i !== undefined && i !== null)
+      .sort((a, b) => b - a); // desc
+
+    if (qIdxsEliminar.length === 0) {
+      console.log('[ELIM-DUP-LOCAL] Ningún docId coincide con preguntas en memoria para', seccionId);
+      return;
+    }
+
+    const eliminadosSet = new Set(qIdxsEliminar);
+
+    // ── 2. Eliminar del array local (de atrás hacia adelante para no desplazar) ──
+    qIdxsEliminar.forEach(qi => {
+      window.preguntasPorSeccion[seccionId].splice(qi, 1);
+    });
+
+    // ── 3. Actualizar IDB y localStorage ─────────────────────────────────────
+    const _ck = PREGUNTAS_CACHE_PREFIX + seccionId;
+    _idbCache.get(_ck).then(cached => {
+      if (cached && Array.isArray(cached.preguntas)) {
+        cached.preguntas = cached.preguntas.filter(
+          p => !docIdsSet.has(p._firestoreDocId || p.docId)
+        );
+        cached.ts = Date.now();
+        _idbCache.set(_ck, cached);
+      }
+    }).catch(() => {
+      try { _idbCache.remove(_ck); } catch (_) {}
+    });
+
+    // ── 4. Reindexar state del usuario ────────────────────────────────────────
+    // Al eliminar múltiples índices, cada índice superviviente se corre hacia
+    // abajo tantas posiciones como eliminados haya por DEBAJO de él.
+    // Ejemplo: eliminados=[2,5], índice 7 → nuevo índice = 7-2 = 5
+    const qIdxsElimAsc = [...qIdxsEliminar].sort((a, b) => a - b); // asc para calcular shift
+
+    // shift(i): cuánto baja el índice i (= cantidad de eliminados menores a i)
+    const shift = i => {
+      let cuenta = 0;
+      for (const e of qIdxsElimAsc) {
+        if (e < i) cuenta++;
+        else break;
+      }
+      return cuenta;
+    };
+
+    const s = state[seccionId];
+    if (s) {
+      // unansweredOrder: quitar eliminados, reindexar el resto
+      if (Array.isArray(s.unansweredOrder)) {
+        s.unansweredOrder = s.unansweredOrder
+          .filter(i => !eliminadosSet.has(i))
+          .map(i => i - shift(i));
+      }
+
+      // answeredOrder: quitar eliminados, reindexar el resto
+      if (Array.isArray(s.answeredOrder)) {
+        s.answeredOrder = s.answeredOrder
+          .filter(e => {
+            const idx = typeof e === 'number' ? e : e.idx;
+            return !eliminadosSet.has(idx);
+          })
+          .map(e => {
+            if (typeof e === 'number') return e - shift(e);
+            return { ...e, idx: e.idx - shift(e.idx) };
+          });
+      }
+
+      // graded / answers / shuffleMap: quitar eliminados, reindexar claves
+      ['graded', 'answers', 'shuffleMap'].forEach(campo => {
+        if (!s[campo]) return;
+        const nuevo = {};
+        Object.entries(s[campo]).forEach(([k, v]) => {
+          const ki = parseInt(k, 10);
+          if (isNaN(ki) || eliminadosSet.has(ki)) return; // eliminar
+          nuevo[ki - shift(ki)] = v;
+        });
+        s[campo] = nuevo;
+      });
+
+      saveJSON(STORAGE_KEY, state);
+      console.log('[ELIM-DUP-LOCAL] State reindexado para', seccionId, '→', qIdxsEliminar.length, 'eliminados');
+    }
+
+    // ── 5. Actualizar DOM si el usuario está viendo esta sección ─────────────
+    const estaViendo = (currentSection === seccionId);
+    if (estaViendo) {
+      // Animar y eliminar nodos DOM de las preguntas borradas
+      qIdxsEliminar.forEach(qi => {
+        const puntajeEl = document.getElementById(`puntaje-${seccionId}-${qi}`);
+        if (puntajeEl) {
+          const pregDiv = puntajeEl.closest('.pregunta');
+          if (pregDiv) {
+            pregDiv.style.transition = 'opacity 0.3s, max-height 0.35s';
+            pregDiv.style.opacity    = '0';
+            pregDiv.style.overflow   = 'hidden';
+            pregDiv.style.maxHeight  = pregDiv.offsetHeight + 'px';
+            requestAnimationFrame(() => {
+              pregDiv.style.maxHeight = '0';
+              setTimeout(() => { try { pregDiv.remove(); } catch (_) {} }, 360);
+            });
+          }
+        }
+      });
+
+      // Actualizar label de progreso (ej: "📊 65/899" → "📊 65/895")
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        const totalNuevo    = window.preguntasPorSeccion[seccionId].length;
+        const respondidas   = s
+          ? Object.keys(s.graded || {}).filter(k => s.graded[k] !== undefined).length
+          : 0;
+        window._ubActualizarLabelProgreso(respondidas, totalNuevo);
+      }
+
+      // Actualizar stats del paginador si está activo
+      if (typeof window._pag2UpdateStats === 'function') {
+        window._pag2UpdateStats(seccionId);
+      }
+
+      fbToast(
+        `🗑 ${qIdxsEliminar.length} pregunta${qIdxsEliminar.length > 1 ? 's' : ''} duplicada${qIdxsEliminar.length > 1 ? 's' : ''} eliminada${qIdxsEliminar.length > 1 ? 's' : ''} de "${seccionId}"`,
+        'info',
+        4500
+      );
+    }
+
+    console.log(`[ELIM-DUP-LOCAL] ✅ ${qIdxsEliminar.length} preguntas eliminadas de "${seccionId}" (total: ${window.preguntasPorSeccion[seccionId]?.length ?? '?'})`);
+  }
+
   // Update quirúrgico: toca solo los nodos DOM de la pregunta editada.
   // No re-renderiza el cuestionario completo — preserva scroll, selecciones y explicaciones abiertas.
   function _updatePreguntaEnDOM(seccionId, qIndex, ed) {
@@ -9415,13 +9585,24 @@ function fbSaveProgressToCloud() {
 
         // Helper: despacha el cambio según si es edición puntual, reclasificación o forzado global
         const _despacharCambio = (motivo) => {
-          const esEdicionPuntual  = data.esEdicionPuntual  === true;
-          const esReclasificacion = data.esReclasificacion === true;
+          const esEdicionPuntual       = data.esEdicionPuntual       === true;
+          const esReclasificacion      = data.esReclasificacion      === true;
+          const esEliminacionDuplicados= data.esEliminacionDuplicados === true;
           const qIndexes        = data.qIndexes ?? (qIndex !== null && qIndex !== undefined ? [qIndex] : []);
           const nuevasCorrectas = data.nuevasCorrectas ?? [];
           // Datos embebidos: viajan dentro del snapshot, 0 lecturas extra a Firestore
           const preguntaData    = data.preguntaData ?? null;
           if (!seccionId) return;
+
+          // ── Eliminación de duplicados: quirúrgica, 0 lecturas Firestore ──────────
+          if (esEliminacionDuplicados) {
+            const docIds = data.docIdsEliminados;
+            if (Array.isArray(docIds) && docIds.length > 0) {
+              console.log(`[CONTENT-SYNC] ${motivo} → eliminación duplicados: ${docIds.length} docs en "${seccionId}"`);
+              _aplicarEliminacionDuplicadosLocal(seccionId, docIds);
+            }
+            return;
+          }
 
           // ── Reclasificación: eliminación quirúrgica local, 0 lecturas Firestore ──
           if (esReclasificacion) {
