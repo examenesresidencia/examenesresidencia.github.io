@@ -78,8 +78,9 @@
         }
         #fb-user-bar .ub-ver-progreso:hover { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.6); }
 
-        /* ── Mobile: evitar que la barra crezca y tape el contenido ── */
+        /* ── Mobile: evitar scroll horizontal y que la barra crezca ── */
         @media (max-width: 600px) {
+          html, body { overflow-x: hidden; max-width: 100vw; }
           #fb-user-bar {
             padding: 6px 10px;
             font-size: 0.72rem;
