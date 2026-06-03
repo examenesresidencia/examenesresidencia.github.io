@@ -7390,6 +7390,32 @@
         font-weight:500;
       }
       #fb-user-bar .ub-ver-progreso:hover { background:rgba(52,211,153,0.1); border-color:rgba(52,211,153,0.6); }
+      /* ── Mobile: barra compacta para que no tape el contenido ── */
+      @media (max-width:600px) {
+        #fb-user-bar {
+          padding:6px 10px;
+          font-size:0.72rem;
+          flex-wrap:nowrap;
+        }
+        #fb-user-bar .ub-email {
+          max-width:38vw;
+          overflow:hidden;
+          text-overflow:ellipsis;
+          white-space:nowrap;
+          display:inline-block;
+        }
+        #fb-user-bar .ub-ver-progreso {
+          font-size:0.72rem;
+          padding:3px 7px;
+          white-space:nowrap;
+        }
+        #fb-user-bar .ub-logout {
+          font-size:0.72rem;
+          padding:3px 6px;
+          white-space:nowrap;
+        }
+        body { padding-bottom:42px; }
+      }
     `;
     document.head.appendChild(s);
   }
