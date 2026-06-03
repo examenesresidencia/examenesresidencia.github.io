@@ -1,4 +1,4 @@
-//PRUEBA 30  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 31  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
 //   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
 //      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
