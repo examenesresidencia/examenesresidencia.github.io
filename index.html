@@ -77,6 +77,37 @@
             font-weight: 500;
         }
         #fb-user-bar .ub-ver-progreso:hover { background: rgba(52,211,153,0.1); border-color: rgba(52,211,153,0.6); }
+
+        /* ── Mobile: evitar que la barra crezca y tape el contenido ── */
+        @media (max-width: 600px) {
+          #fb-user-bar {
+            padding: 6px 10px;
+            font-size: 0.72rem;
+            flex-wrap: nowrap;
+            min-height: 0;
+          }
+          #fb-user-bar .ub-email {
+            max-width: 38vw;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+          }
+          #fb-user-bar .ub-ver-progreso {
+            font-size: 0.72rem;
+            padding: 3px 7px;
+            white-space: nowrap;
+          }
+          #fb-user-bar .ub-logout {
+            font-size: 0.72rem;
+            padding: 3px 6px;
+            white-space: nowrap;
+          }
+          /* Empujar el contenido para que no quede bajo la barra */
+          body {
+            padding-bottom: 42px;
+          }
+        }
         #fb-loading-shield {
             position: fixed;
             inset: 0;
