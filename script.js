@@ -1,4 +1,4 @@
-//PRUEBA 31  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 32  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
 //   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
 //      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
@@ -7390,19 +7390,29 @@
         font-weight:500;
       }
       #fb-user-bar .ub-ver-progreso:hover { background:rgba(52,211,153,0.1); border-color:rgba(52,211,153,0.6); }
-      /* ── Mobile: barra compacta para que no tape el contenido ── */
+      /* ── Mobile: barra compacta y sin espacio vacío central ── */
       @media (max-width:600px) {
         #fb-user-bar {
           padding:6px 10px;
           font-size:0.72rem;
           flex-wrap:nowrap;
+          justify-content:flex-start;
+          gap:8px;
+        }
+        #fb-user-bar .ub-info {
+          flex-shrink:1;
+          min-width:0;
         }
         #fb-user-bar .ub-email {
-          max-width:38vw;
+          max-width:32vw;
           overflow:hidden;
           text-overflow:ellipsis;
           white-space:nowrap;
           display:inline-block;
+        }
+        #fb-user-bar > div {
+          flex-shrink:0;
+          gap:6px;
         }
         #fb-user-bar .ub-ver-progreso {
           font-size:0.72rem;
@@ -7414,7 +7424,6 @@
           padding:3px 6px;
           white-space:nowrap;
         }
-        body { padding-bottom:42px; }
       }
     `;
     document.head.appendChild(s);
