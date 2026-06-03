@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════════
-// buscador-duplicados.js - V4
+// buscador-duplicados.js - V5
 // ────────────────────────────────────────────────────────────────
 
 
@@ -159,31 +159,25 @@
 
     document.getElementById('dup-btn-scan').onclick = () => _escanearDuplicados();
     document.getElementById('dup-btn-eliminar-todas').onclick = async () => {
+      // Respetar exactamente los mismos filtros que _aplicarFiltrosDuplicados
       const modoInterna  = document.querySelector('input[name="dup-modo"]:checked')?.value === 'interna';
-      const filtroSecc   = document.getElementById('dup-filtro-seccion')?.value || '';
       const filtroTexto  = (document.getElementById('dup-filtro-texto')?.value || '').toLowerCase();
+      const filtroSecc   = document.getElementById('dup-filtro-seccion')?.value || '';
 
-      // Usar los mismos grupos que están VISIBLES en pantalla (respeta filtros)
-      let gruposBase = modoInterna ? _dupGruposInternoCache : _dupGruposCache;
-      if (filtroTexto) {
-        gruposBase = gruposBase.filter(g =>
-          g.some(item => item.pregunta.toLowerCase().includes(filtroTexto))
-        );
-      }
-      if (filtroSecc) {
-        gruposBase = gruposBase.filter(g => g.some(item => item.seccionId === filtroSecc));
-      }
+      let grupos = modoInterna ? _dupGruposInternoCache : _dupGruposCache;
+      if (filtroTexto) grupos = grupos.filter(g => g.some(i => i.pregunta.toLowerCase().includes(filtroTexto)));
+      if (filtroSecc)  grupos = grupos.filter(g => g.some(i => i.seccionId === filtroSecc));
 
-      const paraEliminar = gruposBase.flatMap(g => g.slice(1)); // todos menos el primero de cada grupo
-      if (paraEliminar.length === 0) { _bdToast('✅ No hay duplicados para eliminar', 'info'); return; }
-      const contexto = filtroSecc ? ` en "${filtroSecc}"` : '';
+      const paraEliminar = grupos.flatMap(g => g.slice(1)); // conservar siempre la primera copia
+      if (paraEliminar.length === 0) { _bdToast('✅ No hay duplicados visibles para eliminar', 'info'); return; }
+
+      const seccionLabel = filtroSecc ? `en "${filtroSecc}"` : 'en todas las secciones';
       if (!confirm(
-        `¿Eliminar ${paraEliminar.length} pregunta(s) duplicada(s) de ${gruposBase.length} grupo(s)${contexto}?\n\n` +
+        `¿Eliminar ${paraEliminar.length} pregunta(s) duplicada(s) de ${grupos.length} grupo(s) ${seccionLabel}?\n\n` +
         `Se conservará 1 copia de cada grupo.\n` +
         `Esta acción es permanente y actualiza la base de datos para todos los usuarios.`
       )) return;
       await _eliminarDuplicadosEnFirestore(paraEliminar, null);
-      // Refrescar la lista completa
       _aplicarFiltrosDuplicados();
     };
     document.getElementById('dup-filtro-texto').addEventListener('input', _aplicarFiltrosDuplicados);
@@ -313,6 +307,7 @@
         if (cached && cached.ts && (Date.now() - cached.ts) < _DUP_CACHE_TTL && cached.seccionesEscaneadas > 0) {
           _dupGruposCache = cached.grupos;
           _dupGruposInternoCache = cached.gruposInternos || [];
+          _dupTotalPreguntasCache = cached.totalPreguntas || 0;
           _dupTotalPreguntasCache = cached.totalPreguntas || 0;
           const edad = Math.round((Date.now() - cached.ts) / 60000);
           const edadTexto = edad < 60 ? `${edad} min` : `${Math.round(edad / 60)} hs`;
@@ -807,6 +802,26 @@
       }
     }
 
+    // Actualizar totalPreguntas global y el resumen
+    _dupTotalPreguntasCache -= eliminados;
+    const resumen = document.getElementById('dup-resumen');
+    if (resumen) {
+      resumen.innerHTML = resumen.innerHTML.replace(
+        /<strong style="color:#f1f5f9">[\d.,]+<\/strong> preguntas totales/,
+        `<strong style="color:#f1f5f9">${_dupTotalPreguntasCache.toLocaleString()}</strong> preguntas totales`
+      );
+      resumen.innerHTML = resumen.innerHTML.replace(
+        /Entre secciones: <strong style="color:[^"]+">[\d]+<\/strong> grupos/,
+        `Entre secciones: <strong style="color:${_dupGruposCache.length > 0 ? '#f87171' : '#4ade80'}">${_dupGruposCache.length}</strong> grupos`
+      );
+      const badge = resumen.querySelector('.dup-modo-badge');
+      if (badge) {
+        const modoInterna = document.querySelector('input[name="dup-modo"]:checked')?.value === 'interna';
+        badge.textContent = modoInterna
+          ? `📂 Modo: dentro del mismo cuestionario — ${_dupGruposInternoCache.length} grupos`
+          : `🌐 Modo: entre secciones — ${_dupGruposCache.length} grupos`;
+      }
+    }
     if (errores.length === 0) {
       _bdToast(`✅ ${eliminados} pregunta(s) eliminada(s) de Firestore`, 'success');
       // Persistir el caché actualizado (grupos sin las eliminadas, total actualizado)
