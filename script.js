@@ -1,4 +1,4 @@
-//PRUEBA 32  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 31  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
 //   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
 //      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
@@ -1084,6 +1084,9 @@
     if (typeof window._simpleWidgetOcultar === 'function') {
       window._simpleWidgetOcultar();
     }
+    // Ocultar widget SFW (Pág X/Y · 24✓ 26x) al volver al menú
+    const _sfwW = document.getElementById('simple-fw-widget');
+    if (_sfwW) _sfwW.style.display = 'none';
   }
 
   function showMenu() {
@@ -7390,41 +7393,6 @@
         font-weight:500;
       }
       #fb-user-bar .ub-ver-progreso:hover { background:rgba(52,211,153,0.1); border-color:rgba(52,211,153,0.6); }
-      /* ── Mobile: barra compacta y sin espacio vacío central ── */
-      @media (max-width:600px) {
-        #fb-user-bar {
-          padding:6px 10px;
-          font-size:0.72rem;
-          flex-wrap:nowrap;
-          justify-content:flex-start;
-          gap:8px;
-        }
-        #fb-user-bar .ub-info {
-          flex-shrink:1;
-          min-width:0;
-        }
-        #fb-user-bar .ub-email {
-          max-width:32vw;
-          overflow:hidden;
-          text-overflow:ellipsis;
-          white-space:nowrap;
-          display:inline-block;
-        }
-        #fb-user-bar > div {
-          flex-shrink:0;
-          gap:6px;
-        }
-        #fb-user-bar .ub-ver-progreso {
-          font-size:0.72rem;
-          padding:3px 7px;
-          white-space:nowrap;
-        }
-        #fb-user-bar .ub-logout {
-          font-size:0.72rem;
-          padding:3px 6px;
-          white-space:nowrap;
-        }
-      }
     `;
     document.head.appendChild(s);
   }
@@ -7777,7 +7745,7 @@
     if (respondidas === null || respondidas === undefined) {
       btn.textContent = '📊 Ver mi progreso';
     } else {
-      btn.textContent = `📊 ${respondidas}/${total}`;
+      btn.textContent = `📊 ${respondidas}/${total} respondidas`;
     }
   };
 
