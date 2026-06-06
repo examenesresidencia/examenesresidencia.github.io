@@ -1,4 +1,4 @@
-//PRUEBA 32  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 33  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
 //   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
 //      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
@@ -1026,13 +1026,12 @@
 
       // Inicializar widget flotante simple para Simulacro / Único / UBA
       if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
-        // FIX: reducido de 400ms a 50ms para que el widget esté listo
-        // antes de que el usuario responda la primera pregunta
+        // Pequeño delay para que generarCuestionario termine de renderizar
         setTimeout(() => {
           if (typeof window._simpleWidgetInit === 'function') {
             window._simpleWidgetInit(seccionId);
           }
-        }, 50);
+        }, 400);
       } else {
         // Ocultar widget simple si se va a otra sección
         if (typeof window._simpleWidgetOcultar === 'function') {
@@ -2979,6 +2978,15 @@
         const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
         if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
         restoreSelectionsAndGrades(seccionId);
+        // FIX: actualizar el widget flotante y el label 📊 AQUÍ, justo después de que
+        // restoreSelectionsAndGrades popula puntajesPorSeccion con todos los valores reales.
+        // Antes se hacía en _simpleWidgetInit con un delay de 400ms, pero el render en lotes
+        // puede tardar más que eso → el widget mostraba 0✓ 0✗ aunque hubiera preguntas respondidas.
+        if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
+          if (typeof window._simpleWidgetUpdate === 'function') {
+            window._simpleWidgetUpdate(seccionId);
+          }
+        }
         // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
         // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
         // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
@@ -7900,7 +7908,6 @@
   // y reintenta automáticamente si el botón aún no existe en el DOM.
   window._ubLabelProgreso_ultimo = { respondidas: null, total: null };
   window._ubActualizarLabelProgreso = function(respondidas, total) {
-    // Guardar estado para que fbShowUserBar lo pueda replicar al recrear el botón
     window._ubLabelProgreso_ultimo = { respondidas, total };
     function _aplicar() {
       const btn = document.getElementById('fb-bar-ver-progreso');
