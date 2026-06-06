@@ -1,4 +1,4 @@
-//PRUEBA 33  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
+//PRUEBA 30  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
 // Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
 //   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
 //      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
@@ -1080,7 +1080,7 @@
     if (typeof window._ubActualizarLabelProgreso === 'function') {
       window._ubActualizarLabelProgreso(null);
     }
-    // FIX: limpiar el último valor guardado para que fbShowUserBar muestre "Ver mi progreso"
+    // FIX: limpiar el último valor guardado
     if (window._ubLabelProgreso_ultimo) {
       window._ubLabelProgreso_ultimo = { respondidas: null, total: null };
     }
@@ -1775,7 +1775,15 @@
         const wd = document.getElementById(WIDGET_ID);
         if (wd) wd.style.display = 'block';
       }
-      if (seccionId !== _sfwSeccion) return;
+      // FIX: si _sfwSeccion no coincide pero el widget existe y está visible,
+      // actualizarlo de todos modos (evita que la sección quede "trabada" por un
+      // mismatch de _sfwSeccion cuando el usuario responde antes del delay de 400ms).
+      if (seccionId !== _sfwSeccion) {
+        const _wdCheck = document.getElementById(WIDGET_ID);
+        if (!_wdCheck || _wdCheck.style.display === 'none') return;
+        // El widget está visible pero _sfwSeccion no coincide: corregir y continuar.
+        _sfwSeccion = seccionId;
+      }
       const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
       const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
       let ok = 0, err = 0;
@@ -2978,15 +2986,6 @@
         const btnTotal = document.getElementById(`mostrar-total-${seccionId}`);
         if (btnTotal) btnTotal.onclick = () => mostrarPuntuacionTotal(seccionId);
         restoreSelectionsAndGrades(seccionId);
-        // FIX: actualizar el widget flotante y el label 📊 AQUÍ, justo después de que
-        // restoreSelectionsAndGrades popula puntajesPorSeccion con todos los valores reales.
-        // Antes se hacía en _simpleWidgetInit con un delay de 400ms, pero el render en lotes
-        // puede tardar más que eso → el widget mostraba 0✓ 0✗ aunque hubiera preguntas respondidas.
-        if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
-          if (typeof window._simpleWidgetUpdate === 'function') {
-            window._simpleWidgetUpdate(seccionId);
-          }
-        }
         // Actualizar el separador DESPUÉS de restaurar el estado visual de todas las preguntas.
         // Si se llama antes, el separador queda en posición incorrecta porque los puntajeEl
         // aún tienen textContent vacío (todavía no fueron pintados por restoreSelectionsAndGrades).
@@ -3529,7 +3528,15 @@
       if (typeof window._simpleWidgetUpdate === 'function') {
         window._simpleWidgetUpdate(seccionId);
       }
-
+      // FIX: si _simpleWidgetUpdate no actualizó el label 📊 (ej: widget aún no inicializado),
+      // actualizarlo directamente desde puntajesPorSeccion para garantizar consistencia.
+      if (typeof window._ubActualizarLabelProgreso === 'function') {
+        const _pts_fix = (window.puntajesPorSeccion || {})[seccionId] || [];
+        const _tot_fix = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
+        let _resp_fix = 0;
+        for (let _i = 0; _i < _tot_fix; _i++) { const _v = _pts_fix[_i]; if (_v === 1 || _v === 0) _resp_fix++; }
+        window._ubActualizarLabelProgreso(_resp_fix, _tot_fix);
+      }
     }
 
     // ===== Verificar si se respondió la ÚLTIMA pregunta y mostrar puntuación automáticamente =====
@@ -4261,6 +4268,12 @@
 
     // Regenerar el cuestionario
     generarCuestionario('simulador');
+
+    // FIX: iniciar el temporizador automáticamente al crear un nuevo simulacro,
+    // igual que cuando se entra desde el menú principal (línea ~1024).
+    // reiniciarTemporizador() ya limpió el estado anterior, así que
+    // iniciarTemporizador() arranca uno nuevo desde cero.
+    iniciarTemporizador();
     
     // Actualizar label de progreso inmediatamente (no esperar los 400ms del _simpleWidgetInit)
     if (typeof window._ubActualizarLabelProgreso === 'function') {
@@ -7891,21 +7904,42 @@
       const btn = document.getElementById('btn-ver-progreso');
       if (btn) btn.click();
     };
-    // FIX: reaplica el último label conocido si hay un cuestionario activo
-    // (evita que el botón quede como "📊 Ver mi progreso" cuando fbShowUserBar
-    // recrea el DOM de la barra durante una sesión activa o tras F5)
-    const _ubU = window._ubLabelProgreso_ultimo;
-    if (_ubU && _ubU.respondidas !== null && _ubU.respondidas !== undefined) {
+    // FIX: reaplica el último label conocido si hay un cuestionario activo.
+    // Si _ubLabelProgreso_ultimo es null (ej: primer render tras F5), intentar
+    // recalcular el progreso desde puntajesPorSeccion para no mostrar "Ver mi progreso"
+    // mientras el usuario está resolviendo un cuestionario.
+    (function() {
+      const _ubU = window._ubLabelProgreso_ultimo;
       const _ubB = document.getElementById('fb-bar-ver-progreso');
-      if (_ubB) _ubB.textContent = `📊 ${_ubU.respondidas}/${_ubU.total}`;
-    }
+      if (!_ubB) return;
+      if (_ubU && _ubU.respondidas !== null && _ubU.respondidas !== undefined) {
+        _ubB.textContent = `📊 ${_ubU.respondidas}/${_ubU.total}`;
+        return;
+      }
+      // Intentar recalcular desde puntajesPorSeccion (disponible tras F5 si el
+      // cuestionario se cargó antes de que fbShowUserBar recree el botón).
+      const _pts = window.puntajesPorSeccion || {};
+      let _bestResp = 0, _bestTotal = 0;
+      Object.keys(_pts).forEach(function(sid) {
+        const arr = _pts[sid] || [];
+        const total = arr.length;
+        if (!total) return;
+        let resp = 0;
+        for (let i = 0; i < total; i++) { const v = arr[i]; if (v === 1 || v === 0) resp++; }
+        if (resp > 0 && total > _bestTotal) { _bestResp = resp; _bestTotal = total; }
+      });
+      if (_bestTotal > 0) {
+        _ubB.textContent = `📊 ${_bestResp}/${_bestTotal}`;
+        window._ubLabelProgreso_ultimo = { respondidas: _bestResp, total: _bestTotal };
+      }
+    })();
   }
 
   // ── Actualiza el label del botón "Ver mi progreso" según el contexto ──
   // En el menú: "📊 Ver mi progreso"
-  // Resolviendo cuestionario paginado: "📊 N/total"
+  // Resolviendo cuestionario activo: "📊 N/total"
   // FIX: guarda el último valor para reaplicarlo si fbShowUserBar recrea el botón,
-  // y reintenta automáticamente si el botón aún no existe en el DOM.
+  // y reintenta si el botón aún no existe en el DOM.
   window._ubLabelProgreso_ultimo = { respondidas: null, total: null };
   window._ubActualizarLabelProgreso = function(respondidas, total) {
     window._ubLabelProgreso_ultimo = { respondidas, total };
@@ -7919,7 +7953,6 @@
       }
       return true;
     }
-    // Si el botón no existe todavía (F5, recreación del DOM), reintentar hasta 2s
     if (!_aplicar()) {
       let intentos = 0;
       const iv = setInterval(() => {
