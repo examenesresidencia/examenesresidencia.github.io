@@ -1026,12 +1026,13 @@
 
       // Inicializar widget flotante simple para Simulacro / Único / UBA
       if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
-        // Pequeño delay para que generarCuestionario termine de renderizar
+        // FIX: reducido el delay de 400ms a 80ms para que el widget esté listo
+        // antes de que el usuario pueda responder la primera pregunta
         setTimeout(() => {
           if (typeof window._simpleWidgetInit === 'function') {
             window._simpleWidgetInit(seccionId);
           }
-        }, 400);
+        }, 80);
       } else {
         // Ocultar widget simple si se va a otra sección
         if (typeof window._simpleWidgetOcultar === 'function') {
@@ -1079,6 +1080,10 @@
     // Restablecer el label del botón de progreso al volver al menú
     if (typeof window._ubActualizarLabelProgreso === 'function') {
       window._ubActualizarLabelProgreso(null);
+    }
+    // FIX: limpiar el último valor guardado para que fbShowUserBar muestre "Ver mi progreso"
+    if (window._ubLabelProgreso_ultimo) {
+      window._ubLabelProgreso_ultimo = { respondidas: null, total: null };
     }
     // Ocultar widget flotante simple al volver al menú
     if (typeof window._simpleWidgetOcultar === 'function') {
@@ -1764,13 +1769,16 @@
     };
 
     window._simpleWidgetUpdate = function(seccionId) {
-      // Auto-inicializar _sfwSeccion si aún no se seteó (race condition con el delay de 400ms)
+      // FIX: Auto-inicializar _sfwSeccion si aún no se seteó (race condition con el delay de 400ms)
+      // También aceptar actualización si la sección coincide con la guardada o si el widget
+      // ya existe en el DOM (caso de F5 donde _sfwSeccion puede haberse perdido).
       if (_sfwSeccion === null && seccionId) {
         _sfwSeccion = seccionId;
         _sfwInit(); // crear el widget si no existe todavía
         const wd = document.getElementById(WIDGET_ID);
         if (wd) wd.style.display = 'block';
       }
+      // Si la sección no coincide, ignorar (a menos que el DOM del widget sea del mismo seccionId)
       if (seccionId !== _sfwSeccion) return;
       const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
       const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
@@ -7878,18 +7886,39 @@
       const btn = document.getElementById('btn-ver-progreso');
       if (btn) btn.click();
     };
+    // FIX: reaplica el último label conocido si había un cuestionario activo
+    // (evita que el botón quede como "📊 Ver mi progreso" tras F5 o recreación del DOM)
+    const _ubUlt = window._ubLabelProgreso_ultimo;
+    if (_ubUlt && _ubUlt.respondidas !== null && _ubUlt.respondidas !== undefined) {
+      const _ubBtn = document.getElementById('fb-bar-ver-progreso');
+      if (_ubBtn) _ubBtn.textContent = `📊 ${_ubUlt.respondidas}/${_ubUlt.total}`;
+    }
   }
 
   // ── Actualiza el label del botón "Ver mi progreso" según el contexto ──
   // En el menú: "📊 Ver mi progreso"
-  // Resolviendo cuestionario paginado: "📊 N/50"
+  // Resolviendo cuestionario paginado: "📊 N/total"
+  // FIX: guarda el último valor para reaplicarlo si fbShowUserBar recrea el botón
+  window._ubLabelProgreso_ultimo = { respondidas: null, total: null };
   window._ubActualizarLabelProgreso = function(respondidas, total) {
-    const btn = document.getElementById('fb-bar-ver-progreso');
-    if (!btn) return;
-    if (respondidas === null || respondidas === undefined) {
-      btn.textContent = '📊 Ver mi progreso';
-    } else {
-      btn.textContent = `📊 ${respondidas}/${total}`;
+    window._ubLabelProgreso_ultimo = { respondidas, total };
+    function _aplicar() {
+      const btn = document.getElementById('fb-bar-ver-progreso');
+      if (!btn) return false;
+      if (respondidas === null || respondidas === undefined) {
+        btn.textContent = '📊 Ver mi progreso';
+      } else {
+        btn.textContent = `📊 ${respondidas}/${total}`;
+      }
+      return true;
+    }
+    // FIX: si el botón aún no existe (F5 / recreación del DOM), reintentamos
+    // hasta 2 segundos para garantizar que el label se aplique correctamente
+    if (!_aplicar()) {
+      let intentos = 0;
+      const iv = setInterval(() => {
+        if (_aplicar() || ++intentos >= 20) clearInterval(iv);
+      }, 100);
     }
   };
 
