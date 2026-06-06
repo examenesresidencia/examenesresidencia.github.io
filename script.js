@@ -1807,7 +1807,23 @@
     const timerState = loadJSON(TIMER_STORAGE_KEY, null);
     
     if (timerState && timerState.startTime) {
-      // Recuperar temporizador existente
+      // Verificar si el timer ya estaba vencido antes de recuperarlo
+      const tiempoYaTranscurrido = Date.now() - timerState.startTime;
+      if (tiempoYaTranscurrido >= timerDuration) {
+        // El tiempo ya venció (sesión anterior terminó con el timer corriendo).
+        // Limpiar estado completamente para que el usuario pueda iniciar un nuevo simulacro.
+        console.log('⏰ Timer vencido detectado al recuperar — limpiando estado.');
+        localStorage.removeItem(TIMER_STORAGE_KEY);
+        delete state['simulador'];
+        saveJSON(STORAGE_KEY, state);
+        localStorage.removeItem(SIMULACRO_STORAGE_KEY);
+        timerStartTime = null;
+        timerInterval = null;
+        // Mostrar modal con opciones para que el usuario elija qué hacer
+        setTimeout(() => { mostrarModalTiempoAgotado(0, 100, 0); }, 400);
+        return;
+      }
+      // Recuperar temporizador existente (aún válido)
       timerStartTime = timerState.startTime;
       alertasRealizadas = timerState.alertas || alertasRealizadas;
       console.log('⏰ Temporizador recuperado:', new Date(timerStartTime));
@@ -2192,6 +2208,40 @@
           transition: all 0.18s ease;
         }
         #modal-tiempo-agotado .btn-salir-revision:hover { background: #e2e8f0; }
+        
+        #modal-tiempo-agotado .btn-repetir-simulacro {
+          display: block;
+          width: 100%;
+          padding: 14px 20px;
+          border-radius: 12px;
+          border: none;
+          background: linear-gradient(135deg, #0891b2, #0e7490);
+          color: #fff;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity 0.15s, transform 0.15s;
+          letter-spacing: 0.01em;
+          box-shadow: 0 4px 14px rgba(8,145,178,0.3);
+        }
+        #modal-tiempo-agotado .btn-repetir-simulacro:hover { opacity: 0.88; transform: translateY(-1px); }
+        
+        #modal-tiempo-agotado .btn-nuevo-simulacro {
+          display: block;
+          width: 100%;
+          padding: 14px 20px;
+          border-radius: 12px;
+          border: none;
+          background: linear-gradient(135deg, #059669, #047857);
+          color: #fff;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity 0.15s, transform 0.15s;
+          letter-spacing: 0.01em;
+          box-shadow: 0 4px 14px rgba(5,150,105,0.3);
+        }
+        #modal-tiempo-agotado .btn-nuevo-simulacro:hover { opacity: 0.88; transform: translateY(-1px); }
 
         /* ===== BOTÓN TERMINAR SIMULACRO ===== */
         #btn-terminar-simulacro {
@@ -2433,6 +2483,19 @@
     }, 800);
   }
   
+  // Función interna para limpiar COMPLETAMENTE el estado del simulacro
+  function _limpiarEstadoSimulacroCompleto() {
+    detenerTemporizador();
+    delete state['simulador'];
+    saveJSON(STORAGE_KEY, state);
+    localStorage.removeItem(SIMULACRO_STORAGE_KEY);
+    localStorage.removeItem(TIMER_STORAGE_KEY);
+    if (window.puntajesPorSeccion) window.puntajesPorSeccion['simulador'] = [];
+    const banner = document.getElementById('banner-modo-revision');
+    if (banner) banner.remove();
+    currentSection = null;
+  }
+
   function mostrarModalTiempoAgotado(score, total, pct) {
     // Remover modal anterior si existe
     const existing = document.getElementById('modal-tiempo-agotado');
@@ -2451,6 +2514,8 @@
         </div>
         <div class="modal-btns">
           <button class="btn-revisar" id="btn-revisar-examen">📋 Revisar el examen</button>
+          <button class="btn-repetir-simulacro" id="btn-repetir-simulacro">🔁 Repetir Simulacro</button>
+          <button class="btn-nuevo-simulacro" id="btn-nuevo-simulacro">🔄 Crear Nuevo Simulacro</button>
           <button class="btn-salir-revision" id="btn-salir-sin-revision">🏠 Volver al menú principal</button>
         </div>
       </div>
@@ -2461,9 +2526,42 @@
       overlay.remove();
       activarModoRevision();
     };
+
+    document.getElementById('btn-repetir-simulacro').onclick = function() {
+      overlay.remove();
+      // Guardar las preguntas actuales para repetirlas
+      const preguntasActuales = localStorage.getItem(SIMULACRO_STORAGE_KEY);
+      _limpiarEstadoSimulacroCompleto();
+      // Restaurar las mismas preguntas (mismo set, nuevo intento)
+      if (preguntasActuales) {
+        localStorage.setItem(SIMULACRO_STORAGE_KEY, preguntasActuales);
+      }
+      document.querySelectorAll('.pagina-cuestionario').forEach(p => p.classList.remove('activa'));
+      document.getElementById('menu-principal')?.classList.remove('oculto');
+      restoreScrollPosition();
+      // Abrir directamente el simulacro
+      setTimeout(() => { showSection('simulador'); }, 150);
+    };
+
+    document.getElementById('btn-nuevo-simulacro').onclick = function() {
+      overlay.remove();
+      _limpiarEstadoSimulacroCompleto();
+      // Limpiar también las preguntas para forzar nuevo sorteo
+      localStorage.removeItem(SIMULACRO_STORAGE_KEY);
+      document.querySelectorAll('.pagina-cuestionario').forEach(p => p.classList.remove('activa'));
+      document.getElementById('menu-principal')?.classList.remove('oculto');
+      restoreScrollPosition();
+      // Abrir directamente el simulacro con preguntas nuevas
+      setTimeout(() => { showSection('simulador'); }, 150);
+    };
+
     document.getElementById('btn-salir-sin-revision').onclick = function() {
       overlay.remove();
-      volverAlMenu();
+      // Limpiar estado para que al volver no reaparezca el modal
+      _limpiarEstadoSimulacroCompleto();
+      document.querySelectorAll('.pagina-cuestionario').forEach(p => p.classList.remove('activa'));
+      document.getElementById('menu-principal')?.classList.remove('oculto');
+      restoreScrollPosition();
     };
   }
   
@@ -2490,9 +2588,11 @@
   }
   
   window.salirModoRevision = function() {
-    const banner = document.getElementById('banner-modo-revision');
-    if (banner) banner.remove();
-    volverAlMenu();
+    // Limpiar estado completo del simulacro al salir del modo revisión
+    _limpiarEstadoSimulacroCompleto();
+    document.querySelectorAll('.pagina-cuestionario').forEach(p => p.classList.remove('activa'));
+    document.getElementById('menu-principal')?.classList.remove('oculto');
+    restoreScrollPosition();
   };
   
   function detenerTemporizador() {
@@ -4128,11 +4228,6 @@
     localStorage.removeItem(SIMULACRO_STORAGE_KEY);
     console.log('🗑️ localStorage limpiado, se generarán nuevas preguntas');
     
-    // Limpiar puntajes
-    if (window.puntajesPorSeccion && window.puntajesPorSeccion['simulador']) {
-      window.puntajesPorSeccion['simulador'] = [];
-    }
-    
     // Limpiar resultado visual
     const resultadoTotal = document.getElementById('resultado-total-simulador');
     if (resultadoTotal) {
@@ -4145,10 +4240,20 @@
     
     // Actualizar preguntasPorSeccion con las nuevas preguntas
     preguntasPorSeccion['simulador'] = nuevasPreguntas.map(item => item.pregunta);
-    
+
+    // Reinicializar puntajes con null (no [] vacío — ese deja pasar el guard en generarCuestionario
+    // y el array viejo con valores del simulacro anterior se usa en el primer _simpleWidgetUpdate)
+    if (!window.puntajesPorSeccion) window.puntajesPorSeccion = {};
+    window.puntajesPorSeccion['simulador'] = Array(preguntasPorSeccion['simulador'].length).fill(null);
+
     // Regenerar el cuestionario
     generarCuestionario('simulador');
     
+    // Actualizar label de progreso inmediatamente (no esperar los 400ms del _simpleWidgetInit)
+    if (typeof window._ubActualizarLabelProgreso === 'function') {
+      window._ubActualizarLabelProgreso(0, (preguntasPorSeccion['simulador'] || []).length);
+    }
+
     // Scroll al inicio
     window.scrollTo(0, 0);
   }
@@ -4177,12 +4282,11 @@
     delete state['simulador'];
     saveJSON(STORAGE_KEY, state);
     
-    // Limpiar puntajes
-    if (window.puntajesPorSeccion && window.puntajesPorSeccion['simulador']) {
-      window.puntajesPorSeccion['simulador'] = Array(
-        preguntasPorSeccion['simulador'].length
-      ).fill(null);
-    }
+    // Limpiar puntajes — siempre reinicializar (no solo si ya existía la key)
+    if (!window.puntajesPorSeccion) window.puntajesPorSeccion = {};
+    window.puntajesPorSeccion['simulador'] = Array(
+      (preguntasPorSeccion['simulador'] || []).length
+    ).fill(null);
     
     // Limpiar resultado visual
     const resultadoTotal = document.getElementById('resultado-total-simulador');
@@ -4191,6 +4295,11 @@
       resultadoTotal.className = "resultado-final";
     }
     
+    // Actualizar label de progreso inmediatamente
+    if (typeof window._ubActualizarLabelProgreso === 'function') {
+      window._ubActualizarLabelProgreso(0, (preguntasPorSeccion['simulador'] || []).length);
+    }
+
     // Regenerar el cuestionario (esto aleatorizará las opciones nuevamente)
     generarCuestionario('simulador');
     
