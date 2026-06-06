@@ -1018,10 +1018,10 @@
       (window.generarCuestionario || generarCuestionario)(seccionId);
 
       if (seccionId === 'simulador') {
-        const timerState = loadJSON(TIMER_STORAGE_KEY, null);
-        if (timerState && timerState.startTime) {
-          iniciarTemporizador();
-        }
+        // Fix: siempre iniciar el timer al entrar al simulacro.
+        // reiniciarTemporizador() (llamado al crear nuevo simulacro) ya limpió el estado
+        // anterior, por lo que iniciarTemporizador() creará uno nuevo desde cero.
+        iniciarTemporizador();
       }
 
       // Inicializar widget flotante simple para Simulacro / Único / UBA
@@ -1764,6 +1764,13 @@
     };
 
     window._simpleWidgetUpdate = function(seccionId) {
+      // Auto-inicializar _sfwSeccion si aún no se seteó (race condition con el delay de 400ms)
+      if (_sfwSeccion === null && seccionId) {
+        _sfwSeccion = seccionId;
+        _sfwInit(); // crear el widget si no existe todavía
+        const wd = document.getElementById(WIDGET_ID);
+        if (wd) wd.style.display = 'block';
+      }
       if (seccionId !== _sfwSeccion) return;
       const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
       const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
@@ -2936,6 +2943,8 @@
         border: 1px solid transparent;
         transition: opacity 0.15s ease;
         user-select: none;
+        max-width: 260px;        /* evita que pills largas se salgan del card */
+        overflow: hidden;
       }
       .etiqueta-pill:hover { opacity: 0.82; }
 
@@ -2946,6 +2955,12 @@
       }
       .etiqueta-pill-texto {
         line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      @media (max-width: 500px) {
+        .etiqueta-pill { max-width: 180px; }
       }
 
       /* Variante: archivo (violeta) */
@@ -3377,8 +3392,11 @@
 
     // Actualizar la posición del separador "Continuá desde aquí"
     // Para secciones dinámicas (especialidades) ya se actualizó y movió el div arriba.
-    // Para compilados/únicos/UBA (orden fijo) actualizamos aquí el separador sin mover divs.
+    // Para compilados/únicos/UBA/simulacro (orden fijo) actualizamos aquí el separador sin mover divs.
     if (!esSimulacro && (esCompilado(seccionId) || esExamenUnico(seccionId) || esExamenUBA(seccionId))) {
+      actualizarSeparador(seccionId);
+    }
+    if (esSimulacro) {
       actualizarSeparador(seccionId);
     }
     // Nota: para especialidades el separador ya fue actualizado dentro del bloque de movimiento.
@@ -3398,13 +3416,19 @@
       if (typeof window._simpleWidgetUpdate === 'function') {
         window._simpleWidgetUpdate(seccionId);
       }
+
     }
 
     // ===== Verificar si se respondió la ÚLTIMA pregunta y mostrar puntuación automáticamente =====
-    const todasRespondidas = preguntas.every((_, idx) => 
-      window.puntajesPorSeccion[seccionId]?.[idx] !== null && 
-      window.puntajesPorSeccion[seccionId]?.[idx] !== undefined
-    );
+    // Fix: también considerar undefined como "no respondida" para evitar falsos positivos
+    const totalPregs = preguntas.length;
+    const puntajes   = window.puntajesPorSeccion[seccionId] || [];
+    let respondidas  = 0;
+    for (let _i = 0; _i < totalPregs; _i++) {
+      const v = puntajes[_i];
+      if (v !== null && v !== undefined) respondidas++;
+    }
+    const todasRespondidas = respondidas === totalPregs;
     if (todasRespondidas && !state[seccionId]?.totalShown) {
       // Pequeño delay para que el DOM se actualice primero
       setTimeout(() => mostrarResultadoFinal(seccionId), 300);
@@ -4400,7 +4424,7 @@
     botonesDiv.style.cssText = `display:flex;flex-direction:column;gap:10px;`;
     
     const btns = [
-      { texto: '🔄 Crear nuevo simulacro', color: 'linear-gradient(135deg,#6366f1,#4f46e5)', sombra: 'rgba(99,102,241,0.28)', accion: () => { document.body.removeChild(overlay); ejecutarCrearNuevoSimulacro(); volverAlMenu(); } },
+      { texto: '🔄 Crear nuevo simulacro', color: 'linear-gradient(135deg,#6366f1,#4f46e5)', sombra: 'rgba(99,102,241,0.28)', accion: () => { document.body.removeChild(overlay); ejecutarCrearNuevoSimulacro(); } },
       { texto: '🔁 Repetir simulacro', color: 'linear-gradient(135deg,#0891b2,#0e7490)', sombra: 'rgba(8,145,178,0.28)', accion: () => { document.body.removeChild(overlay); ejecutarRepetirSimulacro(); } },
       { texto: '🏠 Volver al menú principal', color: '#f1f5f9', colorTexto: '#475569', sombra: 'none', accion: () => { document.body.removeChild(overlay); volverAlMenu(); } }
     ];
@@ -7374,23 +7398,36 @@
         position:fixed; bottom:0; left:0; right:0; z-index:9990;
         background:rgba(10,22,40,0.95); backdrop-filter:blur(12px);
         border-top:1px solid rgba(255,255,255,0.07);
-        padding:8px 20px; display:flex; align-items:center;
-        justify-content:space-between; font-size:0.82rem;
-        font-family:'Segoe UI',system-ui,sans-serif;
+        padding:6px 12px; display:flex; align-items:center;
+        justify-content:space-between; gap:8px;
+        font-size:0.82rem; font-family:'Segoe UI',system-ui,sans-serif;
+        min-width:0;
       }
-      #fb-user-bar .ub-info { color:#64748b; }
-      #fb-user-bar .ub-email { color:#94a3b8; font-weight:500; }
+      #fb-user-bar .ub-info {
+        color:#64748b; min-width:0; flex:1 1 0;
+        overflow:hidden;
+      }
+      #fb-user-bar .ub-email {
+        color:#94a3b8; font-weight:500;
+        display:block; overflow:hidden;
+        text-overflow:ellipsis; white-space:nowrap;
+      }
+      #fb-user-bar .ub-actions {
+        display:flex; gap:6px; align-items:center;
+        flex-shrink:0;
+      }
       #fb-user-bar .ub-logout {
-        color:#ef4444; cursor:pointer; font-size:0.8rem;
+        color:#ef4444; cursor:pointer; font-size:0.78rem;
         background:none; border:none; padding:4px 8px;
         border-radius:6px; transition:background 0.15s;
+        white-space:nowrap; flex-shrink:0;
       }
       #fb-user-bar .ub-logout:hover { background:rgba(239,68,68,0.12); }
       #fb-user-bar .ub-ver-progreso {
-        color:#34d399; cursor:pointer; font-size:0.8rem;
+        color:#34d399; cursor:pointer; font-size:0.78rem;
         background:none; border:1px solid rgba(52,211,153,0.3);
-        padding:4px 10px; border-radius:6px; transition:all 0.15s;
-        font-weight:500;
+        padding:4px 8px; border-radius:6px; transition:all 0.15s;
+        font-weight:500; white-space:nowrap; flex-shrink:0;
       }
       #fb-user-bar .ub-ver-progreso:hover { background:rgba(52,211,153,0.1); border-color:rgba(52,211,153,0.6); }
     `;
@@ -7720,11 +7757,9 @@
     const isAdmin = _currentUserData.role === 'admin';
     bar.innerHTML = `
       <span class="ub-info">
-        ${isAdmin ? '👑 ' : ''}
-        <span class="ub-email">${_currentUserData.email}</span>
-        ${isAdmin ? ' <span style="color:#0891b2;font-size:0.75rem;">(Admin)</span>' : ''}
+        <span class="ub-email">${isAdmin ? '👑 ' : ''}${_currentUserData.email}</span>
       </span>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div class="ub-actions">
         <button class="ub-ver-progreso" id="fb-bar-ver-progreso">📊 Ver mi progreso</button>
         <button class="ub-logout" id="fb-bar-logout">Cerrar sesión</button>
       </div>`;
@@ -7745,7 +7780,7 @@
     if (respondidas === null || respondidas === undefined) {
       btn.textContent = '📊 Ver mi progreso';
     } else {
-      btn.textContent = `📊 ${respondidas}/${total} respondidas`;
+      btn.textContent = `📊 ${respondidas}/${total}`;
     }
   };
 
