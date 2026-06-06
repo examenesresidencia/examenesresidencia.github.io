@@ -1026,13 +1026,13 @@
 
       // Inicializar widget flotante simple para Simulacro / Único / UBA
       if (seccionId === 'simulador' || esExamenUnico(seccionId) || esExamenUBA(seccionId)) {
-        // FIX: reducido el delay de 400ms a 80ms para que el widget esté listo
-        // antes de que el usuario pueda responder la primera pregunta
+        // FIX: reducido de 400ms a 50ms para que el widget esté listo
+        // antes de que el usuario responda la primera pregunta
         setTimeout(() => {
           if (typeof window._simpleWidgetInit === 'function') {
             window._simpleWidgetInit(seccionId);
           }
-        }, 80);
+        }, 50);
       } else {
         // Ocultar widget simple si se va a otra sección
         if (typeof window._simpleWidgetOcultar === 'function') {
@@ -1769,16 +1769,13 @@
     };
 
     window._simpleWidgetUpdate = function(seccionId) {
-      // FIX: Auto-inicializar _sfwSeccion si aún no se seteó (race condition con el delay de 400ms)
-      // También aceptar actualización si la sección coincide con la guardada o si el widget
-      // ya existe en el DOM (caso de F5 donde _sfwSeccion puede haberse perdido).
+      // Auto-inicializar _sfwSeccion si aún no se seteó (race condition con el delay de 400ms)
       if (_sfwSeccion === null && seccionId) {
         _sfwSeccion = seccionId;
         _sfwInit(); // crear el widget si no existe todavía
         const wd = document.getElementById(WIDGET_ID);
         if (wd) wd.style.display = 'block';
       }
-      // Si la sección no coincide, ignorar (a menos que el DOM del widget sea del mismo seccionId)
       if (seccionId !== _sfwSeccion) return;
       const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
       const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
@@ -7886,21 +7883,24 @@
       const btn = document.getElementById('btn-ver-progreso');
       if (btn) btn.click();
     };
-    // FIX: reaplica el último label conocido si había un cuestionario activo
-    // (evita que el botón quede como "📊 Ver mi progreso" tras F5 o recreación del DOM)
-    const _ubUlt = window._ubLabelProgreso_ultimo;
-    if (_ubUlt && _ubUlt.respondidas !== null && _ubUlt.respondidas !== undefined) {
-      const _ubBtn = document.getElementById('fb-bar-ver-progreso');
-      if (_ubBtn) _ubBtn.textContent = `📊 ${_ubUlt.respondidas}/${_ubUlt.total}`;
+    // FIX: reaplica el último label conocido si hay un cuestionario activo
+    // (evita que el botón quede como "📊 Ver mi progreso" cuando fbShowUserBar
+    // recrea el DOM de la barra durante una sesión activa o tras F5)
+    const _ubU = window._ubLabelProgreso_ultimo;
+    if (_ubU && _ubU.respondidas !== null && _ubU.respondidas !== undefined) {
+      const _ubB = document.getElementById('fb-bar-ver-progreso');
+      if (_ubB) _ubB.textContent = `📊 ${_ubU.respondidas}/${_ubU.total}`;
     }
   }
 
   // ── Actualiza el label del botón "Ver mi progreso" según el contexto ──
   // En el menú: "📊 Ver mi progreso"
   // Resolviendo cuestionario paginado: "📊 N/total"
-  // FIX: guarda el último valor para reaplicarlo si fbShowUserBar recrea el botón
+  // FIX: guarda el último valor para reaplicarlo si fbShowUserBar recrea el botón,
+  // y reintenta automáticamente si el botón aún no existe en el DOM.
   window._ubLabelProgreso_ultimo = { respondidas: null, total: null };
   window._ubActualizarLabelProgreso = function(respondidas, total) {
+    // Guardar estado para que fbShowUserBar lo pueda replicar al recrear el botón
     window._ubLabelProgreso_ultimo = { respondidas, total };
     function _aplicar() {
       const btn = document.getElementById('fb-bar-ver-progreso');
@@ -7912,8 +7912,7 @@
       }
       return true;
     }
-    // FIX: si el botón aún no existe (F5 / recreación del DOM), reintentamos
-    // hasta 2 segundos para garantizar que el label se aplique correctamente
+    // Si el botón no existe todavía (F5, recreación del DOM), reintentar hasta 2s
     if (!_aplicar()) {
       let intentos = 0;
       const iv = setInterval(() => {
