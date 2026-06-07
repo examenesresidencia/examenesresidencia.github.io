@@ -2146,47 +2146,67 @@
             window._simpleWidgetUpdate(seccionId);
         }
 
-        // Registrar seccionId como sección no paginada activa para que el hook
-        // global de fbShowUserBar pueda re-aplicar el label correcto.
+        // Registrar seccionId como sección no paginada activa.
+        // Usado por el MutationObserver global para corregir el label tras fbShowUserBar.
         window._pag2SeccionNoPageActiva = seccionId;
 
-        // FIX F5 + Firebase: fbShowUserBar() se llama DESPUÉS de showSection() y
-        // recrea el botón «📊 Ver mi progreso», borrando el label correcto.
-        // Hook GLOBAL instalado una sola vez: re-aplica el label si hay sección activa.
-        if (!window._fbShowUserBarNoPageHooked) {
-          window._fbShowUserBarNoPageHooked = true;
-          (function _intentarHookBarGlobal() {
-            if (typeof window.fbShowUserBar !== 'function') {
-              setTimeout(_intentarHookBarGlobal, 50); return;
+        // FIX F5 + Firebase: fbShowUserBar() es una función LOCAL del closure de
+        // script.js (no está en window), por lo que no se puede hookear desde afuera.
+        // Solución: MutationObserver sobre #fb-user-bar — cada vez que el botón
+        // «📊 Ver mi progreso» aparece en el DOM mientras hay sección activa,
+        // lo corregimos inmediatamente con el conteo real.
+        if (!window._pag2BarObserverInstalled) {
+          window._pag2BarObserverInstalled = true;
+          // Observar document.body directamente para capturar tanto la creación
+          // del #fb-user-bar como los cambios internos (innerHTML recrea el botón).
+          // Esto funciona incluso si fb-user-bar no existe aún cuando se instala el observer.
+          function _corregirLabelSiActivo() {
+            const sid2 = window._pag2SeccionNoPageActiva;
+            if (!sid2) return;
+            const btn = document.getElementById('fb-bar-ver-progreso');
+            if (!btn || !btn.textContent.includes('Ver mi progreso')) return;
+            const total2 = ((window.preguntasPorSeccion || {})[sid2] || []).length;
+            if (!total2) return;
+            _prePoblarPuntajes(sid2, total2);
+            const pts2 = (window.puntajesPorSeccion || {})[sid2] || [];
+            let ok2 = 0, err2 = 0;
+            for (let i2 = 0; i2 < total2; i2++) {
+              const v2 = pts2[i2];
+              if (v2 === 1) ok2++; else if (v2 === 0) err2++;
             }
-            const _origBar2 = window.fbShowUserBar;
-            window.fbShowUserBar = function() {
-              const res = _origBar2.apply(this, arguments);
-              const sid2 = window._pag2SeccionNoPageActiva;
-              if (!sid2) return res;
-              // Re-aplicar el label en el siguiente tick (el botón acaba de ser creado)
-              setTimeout(function() {
-                const total2 = ((window.preguntasPorSeccion || {})[sid2] || []).length;
-                if (!total2) return;
-                _prePoblarPuntajes(sid2, total2);
-                const pts2 = (window.puntajesPorSeccion || {})[sid2] || [];
-                let ok2 = 0, err2 = 0;
-                for (let i2 = 0; i2 < total2; i2++) {
-                  const v2 = pts2[i2];
-                  if (v2 === 1) ok2++; else if (v2 === 0) err2++;
-                }
-                if (typeof window._ubActualizarLabelProgreso === 'function')
-                  window._ubActualizarLabelProgreso(ok2 + err2, total2);
-                const cOk2  = document.getElementById('sfw-col-ok');
-                const cErr2 = document.getElementById('sfw-col-err');
-                if (cOk2)  cOk2.textContent  = ok2 + '✓';
-                if (cErr2) cErr2.textContent = err2 + '✗';
-                if (typeof window._simpleWidgetUpdate === 'function')
-                  window._simpleWidgetUpdate(sid2);
-              }, 0);
-              return res;
-            };
-          })();
+            if (typeof window._ubActualizarLabelProgreso === 'function')
+              window._ubActualizarLabelProgreso(ok2 + err2, total2);
+            const cOk2  = document.getElementById('sfw-col-ok');
+            const cErr2 = document.getElementById('sfw-col-err');
+            if (cOk2)  cOk2.textContent  = ok2 + '✓';
+            if (cErr2) cErr2.textContent = err2 + '✗';
+            if (typeof window._simpleWidgetUpdate === 'function')
+              window._simpleWidgetUpdate(sid2);
+          }
+
+          // Estrategia de dos niveles para máxima confiabilidad y mínimo overhead:
+          // 1. Observar body (solo childList, sin subtree) para detectar cuando #fb-user-bar se agrega
+          // 2. Una vez que fb-user-bar existe, redirigir el observer a él (childList+subtree=false es suficiente
+          //    porque fbShowUserBar usa innerHTML que dispara childList del bar)
+          const obsBody = new MutationObserver(function() {
+            const bar = document.getElementById('fb-user-bar');
+            if (!bar) return;
+            // fb-user-bar ya existe: corregir ahora y redirigir observer
+            _corregirLabelSiActivo();
+            obsBody.disconnect();
+            const obsBar = new MutationObserver(_corregirLabelSiActivo);
+            obsBar.observe(bar, { childList: true, subtree: true });
+          });
+          const _barInicial = document.getElementById('fb-user-bar');
+          if (_barInicial) {
+            // Ya existe: observar directamente
+            const obsBar = new MutationObserver(_corregirLabelSiActivo);
+            obsBar.observe(_barInicial, { childList: true, subtree: true });
+          } else {
+            // No existe aún: esperar a que aparezca
+            obsBody.observe(document.body, { childList: true });
+          }
+          console.log('[PAGINADOR] ✓ Observer de label de progreso instalado');
         }
 
         setTimeout(_sincronizarWidgetNoPage, 150);
