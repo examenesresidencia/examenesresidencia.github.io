@@ -2117,18 +2117,34 @@
       if (!_debePaginar(seccionId)) {
         // Sección no paginada (simulacro, únicos, UBA): actualizar label después del render
         const ret = _orig.call(this, seccionId);
-        // Dar tiempo a que script.js renderice y popule puntajesPorSeccion
-        setTimeout(() => {
+
+        // FIX F5: restoreSelectionsAndGrades() popula puntajesPorSeccion DESPUÉS de que
+        // _simpleWidgetInit() ya leyó los valores (que en ese momento eran null).
+        // Re-sincronizar el widget sfw Y el label en dos momentos (150ms y 500ms).
+        function _sincronizarWidgetNoPage() {
           const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
           if (!total) return;
-          // Pre-poblar desde localStorage por si no fue renderizado aún
           _prePoblarPuntajes(seccionId, total);
           const pts = (window.puntajesPorSeccion || {})[seccionId] || [];
-          let resp = 0;
-          for (let i = 0; i < total; i++) { const v = pts[i]; if (v === 1 || v === 0) resp++; }
+          let ok = 0, err = 0;
+          for (let i = 0; i < total; i++) {
+            const v = pts[i];
+            if (v === 1) ok++; else if (v === 0) err++;
+          }
+          const resp = ok + err;
           if (typeof window._ubActualizarLabelProgreso === 'function')
             window._ubActualizarLabelProgreso(resp, total);
-        }, 150);
+          // Actualizar widget sfw (Pag 1/1 | N✓ M✗) — el que se perdía con F5
+          const colOk  = document.getElementById('sfw-col-ok');
+          const colErr = document.getElementById('sfw-col-err');
+          if (colOk)  colOk.textContent  = ok + '✓';
+          if (colErr) colErr.textContent = err + '✗';
+          // Delegar en _simpleWidgetUpdate para la vista expandida
+          if (typeof window._simpleWidgetUpdate === 'function')
+            window._simpleWidgetUpdate(seccionId);
+        }
+        setTimeout(_sincronizarWidgetNoPage, 150);
+        setTimeout(_sincronizarWidgetNoPage, 500);
         return ret;
       }
       const n = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
