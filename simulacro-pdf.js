@@ -1,4 +1,4 @@
-// simulacro-pdf.js v4
+// simulacro-pdf.js v3
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
