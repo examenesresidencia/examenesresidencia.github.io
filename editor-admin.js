@@ -1,41 +1,12 @@
 // ════════════════════════════════════════════════════════════════
 // editor-admin.js  — V28
 // ────────────────────────────────────────────────────────────────
-// V28: 4 correcciones al flujo de edición admin:
-//   1. Parche IDB + localStorage en el save handler del admin:
-//      Ahora se parchea TAMBIÉN localStorage como fallback al IDB,
-//      garantizando que el F5 del admin muestre los datos recién editados
-//      y no los anteriores.
-//   2. Recalificación inmediata en el DOM del admin: si la pregunta
-//      estaba respondida y cambió la correcta, se llama
-//      window._recalificarPregunta() para repintar el color verde/rojo
-//      en el mismo instante del guardado (sin esperar al snapshot).
-// V24: Corregido el update quirúrgico del DOM al guardar una edición.
-//      Los selectores anteriores (.pregunta-texto, .opcion-label, etc.)
-//      no coincidían con el HTML real generado por script.js.
-//      Ahora se usan los selectores correctos:
-//        - enunciado → h3 (preservando el prefijo numérico "N. ")
-//        - opciones  → label.opcion → nodo de texto suelto tras el input
-//                      respetando el shuffleMap (data-original-index)
-//        - explicación → div interno del contenedor, sin tocar el <strong>
-//                        ni el dataset.tieneContenido ni el botón
-//      Resultado: el admin ve la pregunta actualizada al instante, sin
-//      necesidad de recargar la página. También se agrega destello verde.
-// V18: se agrega _eaCanDelete() para que soloquimicayaruqui@gmail.com
-//      también pueda ver el botón 🗑 y eliminar preguntas repetidas,
-//      igual que admin. El botón ✏️ Editar sigue siendo solo admin.
-// V20: se agrega gestión dinámica de opciones en el modal de edición.
-//      Admin puede agregar opciones (botón ＋, máx. 6) y eliminar
-//      opciones individuales (botón ✕, mín. 2). Los cambios se
-//      guardan en Firestore y se propagan al caché local y a los
-//      usuarios igual que cualquier otra edición.
-
 
 (function () {
   'use strict';
 
   // ── Email con permiso de eliminación (sin ser admin completo) ─
-  const EMAIL_PUEDE_ELIMINAR = 'soloquimicayaruqui@gmail.com';
+  const EMAIL_PUEDE_ELIMINAR = 'admin.14r@gmail.com';
 
   // ── Helpers ───────────────────────────────────────────────────
   function _eaIsAdmin()   { return typeof window.fbIsAdmin === 'function' && window.fbIsAdmin(); }
@@ -1524,7 +1495,7 @@
   // fbInjectEditButtonIfAdmin
   // ════════════════════════════════════════════════════════════════
   // Botón ✏️ Editar    → solo admin
-  // Botón 🗑 Eliminar → admin + soloquimicayaruqui@gmail.com
+  // Botón 🗑 Eliminar → admin + admin.14r@gmail.com
   // ════════════════════════════════════════════════════════════════
   function fbInjectEditButtonIfAdmin(seccionId, qIndex, botonesDiv) {
     const puedeEliminar = _eaCanDelete();
