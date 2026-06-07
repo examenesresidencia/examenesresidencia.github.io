@@ -1022,6 +1022,10 @@
         // reiniciarTemporizador() (llamado al crear nuevo simulacro) ya limpió el estado
         // anterior, por lo que iniciarTemporizador() creará uno nuevo desde cero.
         iniciarTemporizador();
+        // Inyectar botón PDF (solo admin)
+        if (typeof window.inyectarBotonPDFSimulacro === 'function') {
+          setTimeout(function() { window.inyectarBotonPDFSimulacro(); }, 300);
+        }
       }
 
       // Inicializar widget flotante simple para Simulacro / Único / UBA
