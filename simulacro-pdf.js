@@ -1,4 +1,4 @@
-// simulacro-pdf.js v6
+// simulacro-pdf.js v10
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -734,119 +734,82 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // FUNCIÓN PRINCIPAL — descarga las 2 grillas en PDF
+  // FUNCIÓN PRINCIPAL — descarga Word (preguntas) + PDF (grillas)
   // ══════════════════════════════════════════════════════════════════════
-  function descargarGrillasPDF() {
+  function descargarTodo() {
     if (!esAdmin()) {
-      console.warn('[PDF] Acceso denegado: función exclusiva para administradores.');
+      console.warn('[Export] Acceso denegado: función exclusiva para administradores.');
       return;
     }
     var preguntas = obtenerDatosSimulacro();
     if (!preguntas) return;
 
-    var btn = document.getElementById('btn-pdf-simulacro');
+    var btn = document.getElementById('btn-export-simulacro');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
 
-    cargarJsPDF(function () {
-      try {
-        generarGrillaCorrectas(preguntas);
-        setTimeout(function () {
-          generarGrillaBlanca(preguntas);
-          if (btn) { btn.disabled = false; btn.innerHTML = '📥 PDF'; }
-        }, 600);
-      } catch (err) {
-        console.error('Error generando PDFs:', err);
-        alert('Ocurrió un error al generar los PDFs: ' + err.message);
-        if (btn) { btn.disabled = false; btn.innerHTML = '📥 PDF'; }
-      }
-    });
-  }
-
-  // ══════════════════════════════════════════════════════════════════════
-  // FUNCIÓN WORD — descarga el cuadernillo en .docx
-  // ══════════════════════════════════════════════════════════════════════
-  function descargarWord() {
-    if (!esAdmin()) {
-      console.warn('[Word] Acceso denegado: función exclusiva para administradores.');
-      return;
+    function terminar() {
+      if (btn) { btn.disabled = false; btn.innerHTML = '📥 Preguntas &amp; Grillas'; }
     }
-    var preguntas = obtenerDatosSimulacro();
-    if (!preguntas) return;
 
-    var btn = document.getElementById('btn-word-simulacro');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
-
+    // 1. Word (preguntas)
     cargarDocx(function () {
-      try {
-        generarCuadernilloWord(preguntas);
-      } catch (err) {
-        console.error('Error generando Word:', err);
-        alert('Ocurrió un error al generar el Word: ' + err.message);
+      try { generarCuadernilloWord(preguntas); } catch (e) {
+        console.error('Error Word:', e);
+        alert('Error al generar el Word: ' + e.message);
       }
-      if (btn) { btn.disabled = false; btn.innerHTML = '📄 Word'; }
+      // 2. PDF grillas (con pequeño delay para que el browser no bloquee)
+      cargarJsPDF(function () {
+        setTimeout(function () {
+          try { generarGrillaCorrectas(preguntas); } catch (e) {
+            console.error('Error PDF correctas:', e); }
+          setTimeout(function () {
+            try { generarGrillaBlanca(preguntas); } catch (e) {
+              console.error('Error PDF blanco:', e); }
+            terminar();
+          }, 600);
+        }, 600);
+      });
     });
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // INYECTAR BOTONES en la barra de "Terminar Simulacro"
+  // INYECTAR BOTÓN en la barra de "Terminar Simulacro"
   // ══════════════════════════════════════════════════════════════════════
   function inyectarBotonPDF() {
     if (!esAdmin()) return;
     var btnTerminar = document.getElementById('btn-terminar-simulacro');
     if (!btnTerminar) return;
-    if (document.getElementById('btn-pdf-simulacro')) return; // ya existen
+    if (document.getElementById('btn-export-simulacro')) return;
 
-    // Estilos compartidos
     if (!document.getElementById('simulacro-pdf-styles')) {
       var st = document.createElement('style');
       st.id = 'simulacro-pdf-styles';
       st.textContent = [
-        '.btn-simulacro-export {',
+        '#btn-export-simulacro {',
         '  display: inline-flex; align-items: center; gap: 7px;',
+        '  background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);',
         '  color: #fff; border: none; padding: 12px 22px; border-radius: 10px;',
         '  cursor: pointer; font-size: 0.92rem; font-weight: 600;',
-        '  transition: all 0.2s ease; letter-spacing: 0.02em;',
-        '  white-space: nowrap; font-family: inherit;',
-        '}',
-        '#btn-pdf-simulacro {',
-        '  background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);',
+        '  transition: all 0.2s ease;',
         '  box-shadow: 0 4px 12px rgba(8,145,178,0.28);',
+        '  letter-spacing: 0.02em; white-space: nowrap; font-family: inherit;',
         '}',
-        '#btn-pdf-simulacro:hover:not(:disabled) {',
+        '#btn-export-simulacro:hover:not(:disabled) {',
         '  background: linear-gradient(135deg, #0e7490 0%, #155e75 100%);',
         '  box-shadow: 0 6px 18px rgba(8,145,178,0.40); transform: translateY(-1px);',
         '}',
-        '#btn-word-simulacro {',
-        '  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);',
-        '  box-shadow: 0 4px 12px rgba(37,99,235,0.28);',
-        '}',
-        '#btn-word-simulacro:hover:not(:disabled) {',
-        '  background: linear-gradient(135deg, #1d4ed8 0%, #1e3a8a 100%);',
-        '  box-shadow: 0 6px 18px rgba(37,99,235,0.40); transform: translateY(-1px);',
-        '}',
-        '.btn-simulacro-export:active { transform: translateY(0); }',
-        '.btn-simulacro-export:disabled { opacity: 0.65; cursor: not-allowed; }'
+        '#btn-export-simulacro:active { transform: translateY(0); }',
+        '#btn-export-simulacro:disabled { opacity: 0.65; cursor: not-allowed; }'
       ].join('\n');
       document.head.appendChild(st);
     }
 
-    // Botón PDF (grillas)
-    var btnPDF = document.createElement('button');
-    btnPDF.id        = 'btn-pdf-simulacro';
-    btnPDF.className = 'btn-simulacro-export';
-    btnPDF.innerHTML = '📥 PDF';
-    btnPDF.title     = 'Descargar grillas en PDF (respuestas correctas + grilla en blanco)';
-    btnPDF.addEventListener('click', descargarGrillasPDF);
-    btnTerminar.parentNode.insertBefore(btnPDF, btnTerminar);
-
-    // Botón Word (cuadernillo)
-    var btnWord = document.createElement('button');
-    btnWord.id        = 'btn-word-simulacro';
-    btnWord.className = 'btn-simulacro-export';
-    btnWord.innerHTML = '📄 Word';
-    btnWord.title     = 'Descargar cuadernillo de preguntas en Word (.docx)';
-    btnWord.addEventListener('click', descargarWord);
-    btnTerminar.parentNode.insertBefore(btnWord, btnTerminar);
+    var btn = document.createElement('button');
+    btn.id       = 'btn-export-simulacro';
+    btn.innerHTML = '📥 Preguntas &amp; Grillas';
+    btn.title    = 'Descarga el cuadernillo de preguntas en Word (.docx) y las grillas en PDF';
+    btn.addEventListener('click', descargarTodo);
+    btnTerminar.parentNode.insertBefore(btn, btnTerminar);
   }
 
   // Exponer función para que se pueda llamar desde script.js al iniciar simulacro
@@ -864,7 +827,7 @@
   // Observer para detectar cuando el simulacro se vuelve visible (por si carga tarde)
   var _pdfObserver = new MutationObserver(function () {
     if (document.getElementById('btn-terminar-simulacro') &&
-        !document.getElementById('btn-pdf-simulacro')) {
+        !document.getElementById('btn-export-simulacro')) {
       inyectarBotonPDF();
     }
   });
