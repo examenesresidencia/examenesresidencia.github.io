@@ -1,4 +1,4 @@
-// simulacro-pdf.js v5
+// simulacro-pdf.js v6
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -154,8 +154,9 @@
         currentPage++;
         currentCol = 0;
         headerDrawn = false;
+        y = 0;                 // resetear antes de que dibujarBandaPagina haga max(y,28)
         dibujarBandaPagina();  // pone y = 28
-        colStartY = y;         // fijar inicio de columnas para esta nueva página
+        colStartY = y;         // fijar inicio de columnas DESPUÉS de que y ya vale 28
       }
     }
 
@@ -186,9 +187,7 @@
     doc.text('Cuadernillo de Preguntas — ' + preguntas.length + ' preguntas', W / 2, 40, { align: 'center' });
 
     // ── Instrucciones en columna IZQUIERDA, debajo del título ──
-    // colStartY fija el arranque de la col DERECHA (misma altura que instrucciones)
     var instruccionesY = titleH + 6;
-    colStartY = instruccionesY;   // col derecha arranca aquí
     headerDrawn = true;
 
     var instruccionesH = 68;
@@ -227,7 +226,8 @@
 
     // Col izquierda empieza las preguntas DESPUÉS del bloque de instrucciones
     y = pieInstrY + 9 + 2 * 8 + 8;  // aprox 2 líneas de pie + padding
-    // currentCol=0: preguntas en y calculado; currentCol=1 arrancará en colStartY
+    // Col derecha arranca al mismo nivel que la izquierda (las preguntas, no las instrucciones)
+    colStartY = y;
 
     // ── Renderizar preguntas en 2 columnas ──
     preguntas.forEach(function (item) {
