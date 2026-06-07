@@ -1,4 +1,4 @@
-// simulacro-pdf.js v10
+// simulacro-pdf.js v35
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -734,7 +734,11 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // FUNCIÓN PRINCIPAL — descarga Word (preguntas) + PDF (grillas)
+  // FUNCIÓN PRINCIPAL — descarga 4 archivos:
+  //   1. Word  — cuadernillo de preguntas (1 columna)
+  //   2. PDF   — cuadernillo de preguntas (2 columnas, para imprimir)
+  //   3. PDF   — grilla con respuestas correctas
+  //   4. PDF   — grilla en blanco
   // ══════════════════════════════════════════════════════════════════════
   function descargarTodo() {
     if (!esAdmin()) {
@@ -751,21 +755,26 @@
       if (btn) { btn.disabled = false; btn.innerHTML = '📥 Preguntas &amp; Grillas'; }
     }
 
-    // 1. Word (preguntas)
+    // 1. Word (preguntas 1 columna)
     cargarDocx(function () {
       try { generarCuadernilloWord(preguntas); } catch (e) {
         console.error('Error Word:', e);
         alert('Error al generar el Word: ' + e.message);
       }
-      // 2. PDF grillas (con pequeño delay para que el browser no bloquee)
+
+      // 2. PDF preguntas 2 columnas + 3. grilla correctas + 4. grilla blanca
       cargarJsPDF(function () {
         setTimeout(function () {
-          try { generarGrillaCorrectas(preguntas); } catch (e) {
-            console.error('Error PDF correctas:', e); }
+          try { generarCuadernillo(preguntas); } catch (e) {
+            console.error('Error PDF cuadernillo:', e); }
           setTimeout(function () {
-            try { generarGrillaBlanca(preguntas); } catch (e) {
-              console.error('Error PDF blanco:', e); }
-            terminar();
+            try { generarGrillaCorrectas(preguntas); } catch (e) {
+              console.error('Error PDF correctas:', e); }
+            setTimeout(function () {
+              try { generarGrillaBlanca(preguntas); } catch (e) {
+                console.error('Error PDF blanco:', e); }
+              terminar();
+            }, 600);
           }, 600);
         }, 600);
       });
