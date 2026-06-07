@@ -54,6 +54,55 @@
     return true;
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // FIX V29+: Definir _pag2UpdateStats de fallback al inicio para
+  // secciones NO paginadas (simulador, unicos, uba, compilados).
+  // El problema: _pag2UpdateStats solo se define dentro de renderPagina(),
+  // que nunca se llama para el simulacro → script.js llama a
+  // window._pag2UpdateStats(seccionId) y la función no existe todavía.
+  // Solución: crear una versión fallback que delega en _simpleWidgetUpdate
+  // y en _ubActualizarLabelProgreso para secciones no paginadas.
+  // Cuando _paginar() ejecuta renderPagina() para una sección paginada,
+  // sobreescribe window._pag2UpdateStats con la versión completa (que
+  // tiene el guard `if (sid !== seccionId) return;`), por lo que el
+  // fallback solo queda activo para secciones no paginadas.
+  // ════════════════════════════════════════════════════════════════
+  (function _instalarFallbackUpdateStats() {
+    // Si ya existe una versión real, no sobreescribir
+    if (typeof window._pag2UpdateStats === 'function') return;
+
+    window._pag2UpdateStats = function _pag2UpdateStatsFallback(seccionId) {
+      // Solo actuar en secciones no paginadas; las paginadas tienen su propia versión
+      if (_debePaginar(seccionId)) return;
+
+      // Actualizar widget sfw (Pág 1/1 | N✓ M✗)
+      if (typeof window._simpleWidgetUpdate === 'function') {
+        window._simpleWidgetUpdate(seccionId);
+      } else {
+        // _simpleWidgetUpdate puede no estar listo aún: actualizar elementos directamente
+        const puntajes = (window.puntajesPorSeccion || {})[seccionId] || [];
+        const total    = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
+        let ok = 0, err = 0;
+        for (let i = 0; i < total; i++) {
+          const v = puntajes[i];
+          if (v === 1) ok++; else if (v === 0) err++;
+        }
+        const colOk  = document.getElementById('sfw-col-ok');
+        const colErr = document.getElementById('sfw-col-err');
+        if (colOk)  colOk.textContent  = `${ok}✓`;
+        if (colErr) colErr.textContent = `${err}✗`;
+
+        // Actualizar label 📊 N/total en barra inferior
+        if (typeof window._ubActualizarLabelProgreso === 'function') {
+          window._ubActualizarLabelProgreso(ok + err, total);
+        }
+      }
+    };
+    // Marcar como fallback para que pueda ser sobreescrita por la versión completa
+    window._pag2UpdateStats._esFallback = true;
+    console.log('[PAGINADOR] ✓ _pag2UpdateStats fallback instalado para secciones no paginadas');
+  })();
+
   // ── Persistir página activa ───────────────────────────────────
   function _getPagina(seccionId) {
     try {
