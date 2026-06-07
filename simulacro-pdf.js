@@ -1,4 +1,4 @@
-// simulacro-pdf.js v6
+// simulacro-pdf.js v7
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -34,6 +34,18 @@
     script.onload = function () { callback(); };
     script.onerror = function () {
       alert('No se pudo cargar la librería de PDF. Verificá tu conexión a internet.');
+    };
+    document.head.appendChild(script);
+  }
+
+  // ── Cargar docx.js dinámicamente ───────────────────────────────────────
+  function cargarDocx(callback) {
+    if (window.docx) { callback(); return; }
+    var script = document.createElement('script');
+    script.src = 'https://unpkg.com/docx@8.5.0/build/index.js';
+    script.onload = function () { callback(); };
+    script.onerror = function () {
+      alert('No se pudo cargar la librería de Word. Verificá tu conexión a internet.');
     };
     document.head.appendChild(script);
   }
@@ -97,7 +109,6 @@
 
     var marginLeft   = 36;
     var marginRight  = 36;
-    var marginTop    = 36;
     var marginBottom = 36;
     var contentW     = W - marginLeft - marginRight;
 
@@ -107,29 +118,106 @@
     var COLOR_NUM_BG    = [8, 145, 178];
     var COLOR_GRIS      = [120, 120, 120];
 
-    // Columnas: 2 columnas por página
-    var COL_COUNT = 2;
-    var COL_GAP   = 12;
-    var colW      = (contentW - COL_GAP) / 2;
+    // Columnas
+    var COL_GAP = 12;
+    var colW    = (contentW - COL_GAP) / 2;
 
     // Fuentes
     var FSnum      = 7;
     var FSpregunta = 8.5;
     var FSopcion   = 8;
     var lineH      = 11.5;
-    var indentOpc  = 10;   // indent de opciones respecto al margen de columna
-
-    // Estado de columna actual
-    var currentPage = 1;
-    var currentCol  = 0;   // 0 = izquierda, 1 = derecha
-    var y           = marginTop;
-    var headerDrawn = false;
-    var colStartY   = marginTop; // y de inicio compartido por ambas columnas en la página actual
+    var indentOpc  = 10;
 
     function colX(col) {
       return marginLeft + col * (colW + COL_GAP);
     }
 
+    // ── PASO 1: calcular la altura de cada pregunta ──────────────────────
+    // (el ancho es el mismo para ambas columnas, así que calculamos una vez)
+    function calcularAltura(item) {
+      var numStr = String(item.numero);
+      var circR  = numStr.length <= 2 ? 6.5 : 8;
+      var xPreg  = circR * 2 + 4;        // offset dentro de la columna
+      var pw     = colW - xPreg - 2;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(FSpregunta);
+      var lineasPreg = doc.splitTextToSize(item.pregunta, pw);
+
+      var alturaCirc  = circR * 2 + 4;
+      var alturaPreg  = lineasPreg.length * lineH;
+      var h = Math.max(alturaCirc, alturaPreg) + 2;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(FSopcion);
+      item.opciones.forEach(function (opc, oi) {
+        var lns = doc.splitTextToSize(letraOpcion(oi) + ') ' + opc, colW - indentOpc - circR * 2 - 4);
+        h += lns.length * lineH + 1;
+      });
+      h += 8; // separador inferior
+      return h;
+    }
+
+    var alturas = preguntas.map(calcularAltura);
+
+    // ── PASO 2: distribuir preguntas en columnas por página ───────────────
+    // Capacidad disponible por columna (varía según la página)
+    // Pág 1: instrucciones ocupan espacio fijo en col izq, igual en col der
+    // Páginas 2+: banda teal 22pt + 6pt gap = 28pt de margen superior
+
+    var BAND_H       = 22;    // altura banda teal páginas 2+
+    var PAGE2_TOP    = BAND_H + 6;  // 28
+
+    // Calculamos el Y de inicio de preguntas en pág 1 (col izq y der son iguales)
+    var titleH       = 52;
+    var instrH       = 68;
+    var instruccionesY = titleH + 6;
+    var pieInstrY    = instruccionesY + instrH + 5;
+    var PAGE1_TOP    = pieInstrY + 9 + 2 * 8 + 8; // ≈ 153 pt
+
+    var CAP_PAGE1    = H - marginBottom - PAGE1_TOP;
+    var CAP_PAGE2    = H - marginBottom - PAGE2_TOP;
+
+    // Agrupamos preguntas en slots [página, columna]
+    // Estrategia: llenar columnas en orden (izq→der→nueva pág) pero
+    // BALANCEAR la última columna de cada página: si una pregunta "derramaría"
+    // a la col siguiente pero cabe bien, se deja. Siempre se respeta el orden.
+    var slots = [];  // [{pageIdx, col, pregs:[item,...]}]
+    var pageIdx = 0;
+    var col     = 0;
+    var usedY   = 0;
+
+    function capActual() {
+      return pageIdx === 0 ? CAP_PAGE1 : CAP_PAGE2;
+    }
+
+    slots.push({ pageIdx: 0, col: 0, pregs: [] });
+
+    preguntas.forEach(function (item, i) {
+      var h = alturas[i];
+      var cap = capActual();
+
+      if (usedY + h <= cap) {
+        // cabe en la columna actual
+        slots[slots.length - 1].pregs.push(item);
+        usedY += h;
+      } else {
+        // no cabe → avanzar columna (o página)
+        if (col === 0) {
+          col = 1;
+        } else {
+          pageIdx++;
+          col = 0;
+        }
+        usedY = 0;
+        slots.push({ pageIdx: pageIdx, col: col, pregs: [] });
+        slots[slots.length - 1].pregs.push(item);
+        usedY += h;
+      }
+    });
+
+    // ── PASO 3: renderizar ────────────────────────────────────────────────
     function numerarPaginas() {
       var totalPages = doc.internal.getNumberOfPages();
       for (var i = 1; i <= totalPages; i++) {
@@ -141,136 +229,25 @@
       }
     }
 
-    // Avanzar a la columna o página siguiente
-    function avanzarColumna() {
-      if (currentCol === 0) {
-        // Pasar a columna derecha de la MISMA página:
-        // colStartY ya fue fijado cuando empezó esta página, no lo modificamos
-        currentCol = 1;
-        y = colStartY;
-      } else {
-        // Nueva página, columna izquierda
-        doc.addPage();
-        currentPage++;
-        currentCol = 0;
-        headerDrawn = false;
-        y = 0;                 // resetear antes de que dibujarBandaPagina haga max(y,28)
-        dibujarBandaPagina();  // pone y = 28
-        colStartY = y;         // fijar inicio de columnas DESPUÉS de que y ya vale 28
-      }
-    }
-
     function dibujarBandaPagina() {
-      if (headerDrawn) return;
-      // Franja superior delgada
       doc.setFillColor(COLOR_TEAL[0], COLOR_TEAL[1], COLOR_TEAL[2]);
-      doc.rect(0, 0, W, 22, 'F');
+      doc.rect(0, 0, W, BAND_H, 'F');
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
       doc.setTextColor(COLOR_TEAL_TEXT[0], COLOR_TEAL_TEXT[1], COLOR_TEAL_TEXT[2]);
-      doc.text('SIMULACRO EXAMEN DE RESIDENCIA — Cuadernillo de Preguntas', W / 2, 15, { align: 'center' });
-      y = Math.max(y, 28);
-      headerDrawn = true;
+      doc.text('SIMULACRO EXAMEN DE RESIDENCIA \u2014 Cuadernillo de Preguntas', W / 2, 15, { align: 'center' });
     }
 
-    // ── Página 1: Encabezado + Instrucciones (ancho completo) ──
-    // Franja teal grande de título
-    var titleH = 52;
-    doc.setFillColor(COLOR_TEAL[0], COLOR_TEAL[1], COLOR_TEAL[2]);
-    doc.rect(0, 0, W, titleH, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.setTextColor(255, 255, 255);
-    doc.text('SIMULACRO DE EXAMEN DE RESIDENCIA', W / 2, 22, { align: 'center' });
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Cuadernillo de Preguntas — ' + preguntas.length + ' preguntas', W / 2, 40, { align: 'center' });
-
-    // ── Instrucciones en columna IZQUIERDA, debajo del título ──
-    var instruccionesY = titleH + 6;
-    headerDrawn = true;
-
-    var instruccionesH = 68;
-    doc.setFillColor(240, 249, 255);
-    doc.roundedRect(colX(0), instruccionesY, colW, instruccionesH, 5, 5, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(10, 61, 100);
-    doc.text('INSTRUCCIONES', colX(0) + 8, instruccionesY + 13);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(60, 60, 60);
-    var instrucciones = [
-      '\u2022 Tiempo disponible: 2 horas 30 minutos.',
-      '\u2022 Cada pregunta tiene una sola respuesta correcta (a, b, c o d).',
-      '\u2022 Us\u00e1 la grilla de respuestas en blanco para registrar tus respuestas.',
-      '\u2022 Al terminar, compar\u00e1las con la grilla de respuestas correctas.'
-    ];
-    instrucciones.forEach(function (linea, li) {
-      doc.text(linea, colX(0) + 8, instruccionesY + 26 + li * 10.5);
-    });
-
-    // Pie de instrucciones (dentro de la col izquierda)
-    var pieInstrY = instruccionesY + instruccionesH + 5;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(80, 80, 80);
-    doc.text('USE SOLAMENTE TINTA NEGRA', colX(0), pieInstrY);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    var pieTexto = 'IMPORTANTE: LA COMPRENSI\u00d3N DEL SISTEMA Y EL CONTENIDO DEL EXAMEN FORMAN PARTE DEL MISMO.';
-    var pieLineas = doc.splitTextToSize(pieTexto, colW);
-    pieLineas.forEach(function(ln, li) {
-      doc.text(ln, colX(0), pieInstrY + 9 + li * 8);
-    });
-
-    // Col izquierda empieza las preguntas DESPUÉS del bloque de instrucciones
-    y = pieInstrY + 9 + 2 * 8 + 8;  // aprox 2 líneas de pie + padding
-    // Col derecha arranca al mismo nivel que la izquierda (las preguntas, no las instrucciones)
-    colStartY = y;
-
-    // ── Renderizar preguntas en 2 columnas ──
-    preguntas.forEach(function (item) {
+    // Renderizar una pregunta en la posición (cx, yStart)
+    function renderizarPregunta(item, cx, yStart) {
       var numStr = String(item.numero);
       var circR  = numStr.length <= 2 ? 6.5 : 8;
+      var xPreg  = cx + circR * 2 + 4;
+      var pw     = cx + colW - xPreg - 2;
 
-      // Posición x de inicio del texto del enunciado
-      var xPreg    = colX(currentCol) + circR * 2 + 4;
-      var pregWidth = colX(currentCol) + colW - xPreg - 2;
-
-      // Calcular altura necesaria para este bloque
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(FSpregunta);
-      var lineasPreg = doc.splitTextToSize(item.pregunta, pregWidth);
-
-      var alturaCirc = circR * 2 + 4;
-      var alturaPreg = lineasPreg.length * lineH;
-      var alturaBloque = Math.max(alturaCirc, alturaPreg) + 2;
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(FSopcion);
-      item.opciones.forEach(function (opc, oi) {
-        var ln = doc.splitTextToSize(letraOpcion(oi) + ') ' + opc, colW - indentOpc - circR * 2 - 4);
-        alturaBloque += ln.length * lineH + 1;
-      });
-      alturaBloque += 8; // separador inferior
-
-      // ¿Cabe en la columna actual?
-      if (y + alturaBloque > H - marginBottom) {
-        avanzarColumna();
-        // Recalcular x con la nueva columna
-        xPreg    = colX(currentCol) + circR * 2 + 4;
-        pregWidth = colX(currentCol) + colW - xPreg - 2;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(FSpregunta);
-        lineasPreg = doc.splitTextToSize(item.pregunta, pregWidth);
-      }
-
-      var cx = colX(currentCol);
-
-      // Círculo con número
+      // Círculo número
       var circCX = cx + circR;
-      var circCY = y + circR + 1;
+      var circCY = yStart + circR + 1;
       doc.setFillColor(COLOR_NUM_BG[0], COLOR_NUM_BG[1], COLOR_NUM_BG[2]);
       doc.circle(circCX, circCY, circR, 'F');
       doc.setFont('helvetica', 'bold');
@@ -282,37 +259,98 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(FSpregunta);
       doc.setTextColor(30, 30, 30);
-      var yPregStart = y + lineH;
-      xPreg = cx + circR * 2 + 4;
-      pregWidth = cx + colW - xPreg - 2;
-      doc.setFont('helvetica', 'bold');
-      lineasPreg = doc.splitTextToSize(item.pregunta, pregWidth);
+      var lineasPreg = doc.splitTextToSize(item.pregunta, pw);
+      var alturaCirc = circR * 2 + 4;
       lineasPreg.forEach(function (linea, li) {
-        doc.text(linea, xPreg, yPregStart + li * lineH);
+        doc.text(linea, xPreg, yStart + lineH + li * lineH);
       });
 
-      y += Math.max(alturaCirc, lineasPreg.length * lineH) + 1;
+      var yOpc = yStart + Math.max(alturaCirc, lineasPreg.length * lineH) + 1;
 
       // Opciones
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(FSopcion);
       doc.setTextColor(50, 50, 50);
       item.opciones.forEach(function (opc, oi) {
-        var letra = letraOpcion(oi);
-        var texto = letra + ') ' + opc;
-        var lns = doc.splitTextToSize(texto, colW - indentOpc - circR * 2 - 4);
+        var texto = letraOpcion(oi) + ') ' + opc;
+        var lns   = doc.splitTextToSize(texto, colW - indentOpc - circR * 2 - 4);
         lns.forEach(function (linea, li) {
-          doc.text(linea, cx + indentOpc + circR * 2, y + li * lineH + lineH);
+          doc.text(linea, cx + indentOpc + circR * 2, yOpc + li * lineH + lineH);
         });
-        y += lns.length * lineH + 1;
+        yOpc += lns.length * lineH + 1;
       });
 
       // Línea separadora
-      y += 3;
+      yOpc += 3;
       doc.setDrawColor(220, 220, 220);
       doc.setLineWidth(0.3);
-      doc.line(cx, y, cx + colW, y);
-      y += 5;
+      doc.line(cx, yOpc, cx + colW, yOpc);
+
+      return yOpc + 5; // nuevo y tras el separador
+    }
+
+    // ── Página 1: encabezado grande + instrucciones ──
+    doc.setFillColor(COLOR_TEAL[0], COLOR_TEAL[1], COLOR_TEAL[2]);
+    doc.rect(0, 0, W, titleH, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SIMULACRO DE EXAMEN DE RESIDENCIA', W / 2, 22, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Cuadernillo de Preguntas \u2014 ' + preguntas.length + ' preguntas', W / 2, 40, { align: 'center' });
+
+    // Instrucciones (col izquierda, debajo del título)
+    doc.setFillColor(240, 249, 255);
+    doc.roundedRect(colX(0), instruccionesY, colW, instrH, 5, 5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(10, 61, 100);
+    doc.text('INSTRUCCIONES', colX(0) + 8, instruccionesY + 13);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(60, 60, 60);
+    [
+      '\u2022 Tiempo disponible: 2 horas 30 minutos.',
+      '\u2022 Cada pregunta tiene una sola respuesta correcta (a, b, c o d).',
+      '\u2022 Us\u00e1 la grilla de respuestas en blanco para registrar tus respuestas.',
+      '\u2022 Al terminar, compar\u00e1las con la grilla de respuestas correctas.'
+    ].forEach(function (ln, li) {
+      doc.text(ln, colX(0) + 8, instruccionesY + 26 + li * 10.5);
+    });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(80, 80, 80);
+    doc.text('USE SOLAMENTE TINTA NEGRA', colX(0), pieInstrY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    var pieTexto  = 'IMPORTANTE: LA COMPRENSI\u00d3N DEL SISTEMA Y EL CONTENIDO DEL EXAMEN FORMAN PARTE DEL MISMO.';
+    var pieLineas = doc.splitTextToSize(pieTexto, colW);
+    pieLineas.forEach(function (ln, li) {
+      doc.text(ln, colX(0), pieInstrY + 9 + li * 8);
+    });
+
+    // ── Renderizar slots ──
+    var lastPageIdx = -1;
+    slots.forEach(function (slot) {
+      // Cambiar de página si hace falta
+      if (slot.pageIdx !== lastPageIdx) {
+        if (slot.pageIdx > 0) {
+          doc.addPage();
+          dibujarBandaPagina();
+        }
+        lastPageIdx = slot.pageIdx;
+      }
+
+      // Y de inicio de esta columna en esta página
+      var startY = slot.pageIdx === 0 ? PAGE1_TOP : PAGE2_TOP;
+      var cx     = colX(slot.col);
+      var yy     = startY;
+
+      slot.pregs.forEach(function (item) {
+        yy = renderizarPregunta(item, cx, yy);
+      });
     });
 
     numerarPaginas();
@@ -532,6 +570,168 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
+  // WORD — CUADERNILLO DE PREGUNTAS (.docx)
+  // ══════════════════════════════════════════════════════════════════════
+  function generarCuadernilloWord(preguntas) {
+    var D = window.docx;
+
+    var TEAL      = '0891B2';
+    var TEAL_DARK = '0E7490';
+    var BLANCO    = 'FFFFFF';
+    var GRIS      = '3C3C3C';
+
+    function parrafoVacio(after) {
+      return new D.Paragraph({ text: '', spacing: { after: after || 0 } });
+    }
+
+    function run(texto, opts) {
+      return new D.TextRun(Object.assign({ text: String(texto || '') }, opts || {}));
+    }
+
+    var parrafos = [];
+
+    // Título
+    parrafos.push(new D.Paragraph({
+      children: [ run('SIMULACRO DE EXAMEN DE RESIDENCIA',
+        { bold: true, size: 32, color: BLANCO }) ],
+      shading: { type: D.ShadingType.SOLID, color: TEAL },
+      alignment: D.AlignmentType.CENTER,
+      spacing: { before: 0, after: 0 }
+    }));
+    parrafos.push(new D.Paragraph({
+      children: [ run('Cuadernillo de Preguntas \u2014 ' + preguntas.length + ' preguntas',
+        { size: 20, color: BLANCO }) ],
+      shading: { type: D.ShadingType.SOLID, color: TEAL_DARK },
+      alignment: D.AlignmentType.CENTER,
+      spacing: { before: 0, after: 120 }
+    }));
+
+    // Instrucciones
+    parrafos.push(new D.Paragraph({
+      children: [ run('INSTRUCCIONES', { bold: true, size: 18, color: TEAL }) ],
+      spacing: { before: 60, after: 60 }
+    }));
+    [
+      'Tiempo disponible: 2 horas 30 minutos.',
+      'Cada pregunta tiene una sola respuesta correcta (a, b, c o d).',
+      'Us\u00e1 la grilla de respuestas en blanco para registrar tus respuestas.',
+      'Al terminar, compar\u00e1las con la grilla de respuestas correctas.'
+    ].forEach(function (txt) {
+      parrafos.push(new D.Paragraph({
+        children: [ run('\u2022 ' + txt, { size: 16, color: GRIS }) ],
+        spacing: { before: 20, after: 20 },
+        indent: { left: 360 }
+      }));
+    });
+    parrafos.push(new D.Paragraph({
+      children: [ run('USE SOLAMENTE TINTA NEGRA', { bold: true, size: 16, color: TEAL }) ],
+      spacing: { before: 80, after: 40 }
+    }));
+    parrafos.push(new D.Paragraph({
+      children: [ run(
+        'IMPORTANTE: LA COMPRENSI\u00d3N DEL SISTEMA Y EL CONTENIDO DEL EXAMEN FORMAN PARTE DEL MISMO.',
+        { size: 14, color: '666666', italics: true }
+      )],
+      spacing: { before: 0, after: 180 }
+    }));
+
+    // Tabla de 2 columnas con las preguntas
+    function hacerCelda(item) {
+      if (!item) {
+        return new D.TableCell({
+          children: [ parrafoVacio(0) ],
+          borders: {
+            top: { style: D.BorderStyle.NONE }, bottom: { style: D.BorderStyle.NONE },
+            left: { style: D.BorderStyle.NONE }, right: { style: D.BorderStyle.NONE }
+          },
+          margins: { top: 80, bottom: 80, left: 140, right: 140 }
+        });
+      }
+
+      var ps = [];
+
+      // Número + enunciado
+      ps.push(new D.Paragraph({
+        children: [
+          run(String(item.numero) + '\u2003', { bold: true, size: 17, color: TEAL }),
+          run(item.pregunta, { bold: true, size: 17, color: '1A1A1A' })
+        ],
+        spacing: { before: 60, after: 60 }
+      }));
+
+      // Opciones
+      item.opciones.forEach(function (opc, oi) {
+        ps.push(new D.Paragraph({
+          children: [
+            run(letraOpcion(oi) + ') ', { bold: true, size: 16, color: TEAL_DARK }),
+            run(opc, { size: 16, color: GRIS })
+          ],
+          spacing: { before: 18, after: 18 },
+          indent: { left: 220 }
+        }));
+      });
+
+      ps.push(parrafoVacio(60));
+
+      return new D.TableCell({
+        children: ps,
+        borders: {
+          top:    { style: D.BorderStyle.NONE },
+          bottom: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' },
+          left:   { style: D.BorderStyle.NONE },
+          right:  { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' }
+        },
+        margins: { top: 80, bottom: 80, left: 140, right: 140 },
+        verticalAlign: D.VerticalAlign.TOP
+      });
+    }
+
+    var filas = [];
+    for (var i = 0; i < preguntas.length; i += 2) {
+      filas.push(new D.TableRow({
+        children: [ hacerCelda(preguntas[i]), hacerCelda(preguntas[i + 1] || null) ]
+      }));
+    }
+
+    parrafos.push(new D.Table({
+      rows: filas,
+      width: { size: 100, type: D.WidthType.PERCENTAGE },
+      borders: {
+        insideH: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' },
+        insideV: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' },
+        top: { style: D.BorderStyle.NONE }, bottom: { style: D.BorderStyle.NONE },
+        left: { style: D.BorderStyle.NONE }, right: { style: D.BorderStyle.NONE }
+      }
+    }));
+
+    // Construir y descargar
+    var documento = new D.Document({
+      sections: [{
+        properties: {
+          page: {
+            size: { width: 11906, height: 16838 },        // A4 en twips
+            margin: { top: 720, bottom: 720, left: 720, right: 720 }
+          }
+        },
+        children: parrafos
+      }]
+    });
+
+    D.Packer.toBlob(documento).then(function (blob) {
+      var url = URL.createObjectURL(blob);
+      var a   = document.createElement('a');
+      a.href     = url;
+      a.download = 'simulacro_preguntas.docx';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+    }).catch(function (err) {
+      console.error('Error generando Word:', err);
+      alert('Error al generar el archivo Word: ' + err.message);
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
   // PDF 2 — GRILLA CON RESPUESTAS CORRECTAS
   // ══════════════════════════════════════════════════════════════════════
   function generarGrillaCorrectas(preguntas) {
@@ -564,9 +764,9 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // FUNCIÓN PRINCIPAL — descarga los 3 PDFs
+  // FUNCIÓN PRINCIPAL — descarga las 2 grillas en PDF
   // ══════════════════════════════════════════════════════════════════════
-  function descargarTodosPDFs() {
+  function descargarGrillasPDF() {
     if (!esAdmin()) {
       console.warn('[PDF] Acceso denegado: función exclusiva para administradores.');
       return;
@@ -575,24 +775,14 @@
     if (!preguntas) return;
 
     var btn = document.getElementById('btn-pdf-simulacro');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = '⏳ Generando…';
-    }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
 
     cargarJsPDF(function () {
       try {
-        // Pequeño delay entre descargas para evitar que el browser bloquee
-        generarCuadernillo(preguntas);
+        generarGrillaCorrectas(preguntas);
         setTimeout(function () {
-          generarGrillaCorrectas(preguntas);
-          setTimeout(function () {
-            generarGrillaBlanca(preguntas);
-            if (btn) {
-              btn.disabled = false;
-              btn.innerHTML = '📥 PDF';
-            }
-          }, 600);
+          generarGrillaBlanca(preguntas);
+          if (btn) { btn.disabled = false; btn.innerHTML = '📥 PDF'; }
         }, 600);
       } catch (err) {
         console.error('Error generando PDFs:', err);
@@ -603,59 +793,90 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // INYECTAR BOTÓN en la barra de "Terminar Simulacro"
+  // FUNCIÓN WORD — descarga el cuadernillo en .docx
+  // ══════════════════════════════════════════════════════════════════════
+  function descargarWord() {
+    if (!esAdmin()) {
+      console.warn('[Word] Acceso denegado: función exclusiva para administradores.');
+      return;
+    }
+    var preguntas = obtenerDatosSimulacro();
+    if (!preguntas) return;
+
+    var btn = document.getElementById('btn-word-simulacro');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
+
+    cargarDocx(function () {
+      try {
+        generarCuadernilloWord(preguntas);
+      } catch (err) {
+        console.error('Error generando Word:', err);
+        alert('Ocurrió un error al generar el Word: ' + err.message);
+      }
+      if (btn) { btn.disabled = false; btn.innerHTML = '📄 Word'; }
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // INYECTAR BOTONES en la barra de "Terminar Simulacro"
   // ══════════════════════════════════════════════════════════════════════
   function inyectarBotonPDF() {
-    // Solo para admin — no mostrar a usuarios normales
     if (!esAdmin()) return;
-    // El botón se inyecta dentro del mismo div flex que #btn-terminar-simulacro
     var btnTerminar = document.getElementById('btn-terminar-simulacro');
     if (!btnTerminar) return;
-    if (document.getElementById('btn-pdf-simulacro')) return; // ya existe
+    if (document.getElementById('btn-pdf-simulacro')) return; // ya existen
 
-    // Insertar estilos del botón
+    // Estilos compartidos
     if (!document.getElementById('simulacro-pdf-styles')) {
       var st = document.createElement('style');
       st.id = 'simulacro-pdf-styles';
       st.textContent = [
+        '.btn-simulacro-export {',
+        '  display: inline-flex; align-items: center; gap: 7px;',
+        '  color: #fff; border: none; padding: 12px 22px; border-radius: 10px;',
+        '  cursor: pointer; font-size: 0.92rem; font-weight: 600;',
+        '  transition: all 0.2s ease; letter-spacing: 0.02em;',
+        '  white-space: nowrap; font-family: inherit;',
+        '}',
         '#btn-pdf-simulacro {',
-        '  display: inline-flex;',
-        '  align-items: center;',
-        '  gap: 7px;',
         '  background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);',
-        '  color: #fff;',
-        '  border: none;',
-        '  padding: 12px 22px;',
-        '  border-radius: 10px;',
-        '  cursor: pointer;',
-        '  font-size: 0.92rem;',
-        '  font-weight: 600;',
-        '  transition: all 0.2s ease;',
         '  box-shadow: 0 4px 12px rgba(8,145,178,0.28);',
-        '  letter-spacing: 0.02em;',
-        '  white-space: nowrap;',
-        '  font-family: inherit;',
         '}',
         '#btn-pdf-simulacro:hover:not(:disabled) {',
         '  background: linear-gradient(135deg, #0e7490 0%, #155e75 100%);',
-        '  box-shadow: 0 6px 18px rgba(8,145,178,0.40);',
-        '  transform: translateY(-1px);',
+        '  box-shadow: 0 6px 18px rgba(8,145,178,0.40); transform: translateY(-1px);',
         '}',
-        '#btn-pdf-simulacro:active { transform: translateY(0); }',
-        '#btn-pdf-simulacro:disabled { opacity: 0.65; cursor: not-allowed; }'
+        '#btn-word-simulacro {',
+        '  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);',
+        '  box-shadow: 0 4px 12px rgba(37,99,235,0.28);',
+        '}',
+        '#btn-word-simulacro:hover:not(:disabled) {',
+        '  background: linear-gradient(135deg, #1d4ed8 0%, #1e3a8a 100%);',
+        '  box-shadow: 0 6px 18px rgba(37,99,235,0.40); transform: translateY(-1px);',
+        '}',
+        '.btn-simulacro-export:active { transform: translateY(0); }',
+        '.btn-simulacro-export:disabled { opacity: 0.65; cursor: not-allowed; }'
       ].join('\n');
       document.head.appendChild(st);
     }
 
-    // Crear botón
-    var btn = document.createElement('button');
-    btn.id = 'btn-pdf-simulacro';
-    btn.innerHTML = '📥 PDF';
-    btn.title = 'Descargar: cuadernillo de preguntas, grilla con respuestas correctas y grilla en blanco';
-    btn.addEventListener('click', descargarTodosPDFs);
+    // Botón PDF (grillas)
+    var btnPDF = document.createElement('button');
+    btnPDF.id        = 'btn-pdf-simulacro';
+    btnPDF.className = 'btn-simulacro-export';
+    btnPDF.innerHTML = '📥 PDF';
+    btnPDF.title     = 'Descargar grillas en PDF (respuestas correctas + grilla en blanco)';
+    btnPDF.addEventListener('click', descargarGrillasPDF);
+    btnTerminar.parentNode.insertBefore(btnPDF, btnTerminar);
 
-    // Insertarlo al lado de #btn-terminar-simulacro (dentro del mismo flex container)
-    btnTerminar.parentNode.insertBefore(btn, btnTerminar);
+    // Botón Word (cuadernillo)
+    var btnWord = document.createElement('button');
+    btnWord.id        = 'btn-word-simulacro';
+    btnWord.className = 'btn-simulacro-export';
+    btnWord.innerHTML = '📄 Word';
+    btnWord.title     = 'Descargar cuadernillo de preguntas en Word (.docx)';
+    btnWord.addEventListener('click', descargarWord);
+    btnTerminar.parentNode.insertBefore(btnWord, btnTerminar);
   }
 
   // Exponer función para que se pueda llamar desde script.js al iniciar simulacro
