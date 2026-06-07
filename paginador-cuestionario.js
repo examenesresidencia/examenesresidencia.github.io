@@ -2121,6 +2121,7 @@
         // FIX F5: restoreSelectionsAndGrades() popula puntajesPorSeccion DESPUÉS de que
         // _simpleWidgetInit() ya leyó los valores (que en ese momento eran null).
         // Re-sincronizar el widget sfw Y el label en dos momentos (150ms y 500ms).
+        // Función central: lee puntajesPorSeccion y actualiza AMBOS widgets + label
         function _sincronizarWidgetNoPage() {
           const total = ((window.preguntasPorSeccion || {})[seccionId] || []).length;
           if (!total) return;
@@ -2132,17 +2133,62 @@
             if (v === 1) ok++; else if (v === 0) err++;
           }
           const resp = ok + err;
+          // 1. Label 📊 N/total en barra inferior
           if (typeof window._ubActualizarLabelProgreso === 'function')
             window._ubActualizarLabelProgreso(resp, total);
-          // Actualizar widget sfw (Pag 1/1 | N✓ M✗) — el que se perdía con F5
+          // 2. Widget sfw (Pag 1/1 | N✓ M✗)
           const colOk  = document.getElementById('sfw-col-ok');
           const colErr = document.getElementById('sfw-col-err');
           if (colOk)  colOk.textContent  = ok + '✓';
           if (colErr) colErr.textContent = err + '✗';
-          // Delegar en _simpleWidgetUpdate para la vista expandida
+          // 3. Vista expandida del widget
           if (typeof window._simpleWidgetUpdate === 'function')
             window._simpleWidgetUpdate(seccionId);
         }
+
+        // Registrar seccionId como sección no paginada activa para que el hook
+        // global de fbShowUserBar pueda re-aplicar el label correcto.
+        window._pag2SeccionNoPageActiva = seccionId;
+
+        // FIX F5 + Firebase: fbShowUserBar() se llama DESPUÉS de showSection() y
+        // recrea el botón «📊 Ver mi progreso», borrando el label correcto.
+        // Hook GLOBAL instalado una sola vez: re-aplica el label si hay sección activa.
+        if (!window._fbShowUserBarNoPageHooked) {
+          window._fbShowUserBarNoPageHooked = true;
+          (function _intentarHookBarGlobal() {
+            if (typeof window.fbShowUserBar !== 'function') {
+              setTimeout(_intentarHookBarGlobal, 50); return;
+            }
+            const _origBar2 = window.fbShowUserBar;
+            window.fbShowUserBar = function() {
+              const res = _origBar2.apply(this, arguments);
+              const sid2 = window._pag2SeccionNoPageActiva;
+              if (!sid2) return res;
+              // Re-aplicar el label en el siguiente tick (el botón acaba de ser creado)
+              setTimeout(function() {
+                const total2 = ((window.preguntasPorSeccion || {})[sid2] || []).length;
+                if (!total2) return;
+                _prePoblarPuntajes(sid2, total2);
+                const pts2 = (window.puntajesPorSeccion || {})[sid2] || [];
+                let ok2 = 0, err2 = 0;
+                for (let i2 = 0; i2 < total2; i2++) {
+                  const v2 = pts2[i2];
+                  if (v2 === 1) ok2++; else if (v2 === 0) err2++;
+                }
+                if (typeof window._ubActualizarLabelProgreso === 'function')
+                  window._ubActualizarLabelProgreso(ok2 + err2, total2);
+                const cOk2  = document.getElementById('sfw-col-ok');
+                const cErr2 = document.getElementById('sfw-col-err');
+                if (cOk2)  cOk2.textContent  = ok2 + '✓';
+                if (cErr2) cErr2.textContent = err2 + '✗';
+                if (typeof window._simpleWidgetUpdate === 'function')
+                  window._simpleWidgetUpdate(sid2);
+              }, 0);
+              return res;
+            };
+          })();
+        }
+
         setTimeout(_sincronizarWidgetNoPage, 150);
         setTimeout(_sincronizarWidgetNoPage, 500);
         return ret;
@@ -2177,6 +2223,8 @@
       window[nombre] = function(...args) {
         if (window._timerInterval) { clearInterval(window._timerInterval); window._timerInterval = null; }
         _timerWidgetOcultar();
+        // Limpiar sección no paginada activa al salir al menú
+        window._pag2SeccionNoPageActiva = null;
         return _origFn.apply(this, args);
       };
       window[nombre]._timerExitHooked = true;
