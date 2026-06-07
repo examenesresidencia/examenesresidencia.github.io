@@ -1,4 +1,4 @@
-// simulacro-pdf.js v4
+// simulacro-pdf.js v5
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -185,42 +185,49 @@
     doc.setFont('helvetica', 'normal');
     doc.text('Cuadernillo de Preguntas — ' + preguntas.length + ' preguntas', W / 2, 40, { align: 'center' });
 
-    // Bloque de instrucciones (ancho completo, debajo del título)
+    // ── Instrucciones en columna IZQUIERDA, debajo del título ──
+    // colStartY fija el arranque de la col DERECHA (misma altura que instrucciones)
     var instruccionesY = titleH + 6;
+    colStartY = instruccionesY;   // col derecha arranca aquí
+    headerDrawn = true;
+
+    var instruccionesH = 68;
     doc.setFillColor(240, 249, 255);
-    var instruccionesH = 62;
-    doc.roundedRect(marginLeft, instruccionesY, contentW, instruccionesH, 5, 5, 'F');
+    doc.roundedRect(colX(0), instruccionesY, colW, instruccionesH, 5, 5, 'F');
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(10, 61, 100);
-    doc.text('INSTRUCCIONES', marginLeft + 10, instruccionesY + 13);
+    doc.text('INSTRUCCIONES', colX(0) + 8, instruccionesY + 13);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(60, 60, 60);
     var instrucciones = [
-      '• Tiempo disponible: 2 horas 30 minutos.',
-      '• Cada pregunta tiene una sola respuesta correcta (a, b, c o d).',
-      '• Usá la grilla de respuestas en blanco para registrar tus respuestas.',
-      '• Al terminar, comparalas con la grilla de respuestas correctas.'
+      '\u2022 Tiempo disponible: 2 horas 30 minutos.',
+      '\u2022 Cada pregunta tiene una sola respuesta correcta (a, b, c o d).',
+      '\u2022 Us\u00e1 la grilla de respuestas en blanco para registrar tus respuestas.',
+      '\u2022 Al terminar, compar\u00e1las con la grilla de respuestas correctas.'
     ];
     instrucciones.forEach(function (linea, li) {
-      doc.text(linea, marginLeft + 10, instruccionesY + 26 + li * 10);
+      doc.text(linea, colX(0) + 8, instruccionesY + 26 + li * 10.5);
     });
 
-    // Pie de instrucciones
-    var pieInstrY = instruccionesY + instruccionesH + 7;
+    // Pie de instrucciones (dentro de la col izquierda)
+    var pieInstrY = instruccionesY + instruccionesH + 5;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(80, 80, 80);
-    doc.text('USE SOLAMENTE TINTA NEGRA', marginLeft, pieInstrY);
+    doc.text('USE SOLAMENTE TINTA NEGRA', colX(0), pieInstrY);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    doc.text('IMPORTANTE: LA COMPRENSIÓN DEL SISTEMA Y EL CONTENIDO DEL EXAMEN FORMAN PARTE DEL MISMO.', marginLeft, pieInstrY + 10);
+    doc.setFontSize(6.5);
+    var pieTexto = 'IMPORTANTE: LA COMPRENSI\u00d3N DEL SISTEMA Y EL CONTENIDO DEL EXAMEN FORMAN PARTE DEL MISMO.';
+    var pieLineas = doc.splitTextToSize(pieTexto, colW);
+    pieLineas.forEach(function(ln, li) {
+      doc.text(ln, colX(0), pieInstrY + 9 + li * 8);
+    });
 
-    // Las preguntas arrancan inmediatamente debajo, en 2 columnas
-    y = pieInstrY + 18;
-    colStartY = y;         // la columna derecha también empieza aquí en pág 1
-    headerDrawn = true;   // la pág 1 ya tiene su propio header
+    // Col izquierda empieza las preguntas DESPUÉS del bloque de instrucciones
+    y = pieInstrY + 9 + 2 * 8 + 8;  // aprox 2 líneas de pie + padding
+    // currentCol=0: preguntas en y calculado; currentCol=1 arrancará en colStartY
 
     // ── Renderizar preguntas en 2 columnas ──
     preguntas.forEach(function (item) {
