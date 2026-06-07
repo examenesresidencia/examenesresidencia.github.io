@@ -1,4 +1,4 @@
-// simulacro-pdf.js v2
+// simulacro-pdf.js v3
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -182,46 +182,56 @@
     dibujarEncabezadoPagina();
 
     preguntas.forEach(function (item) {
-      var FSnum     = 9;
-      var FSpregunta= 9.5;
-      var FSopcion  = 9;
-      var lineH     = 14;
-      var circR     = 5;     // radio del círculo del número
-      var indentOpc = 22;
+      var FSnum     = 7.5;
+      var FSpregunta= 9;
+      var FSopcion  = 8.5;
+      var lineH     = 12;
+      var indentOpc = 26;
+
+      // Radio del círculo adaptado a cantidad de dígitos
+      var numStr = String(item.numero);
+      var circR = numStr.length <= 1 ? 7 : numStr.length === 2 ? 8 : 10;
+
+      // Ancho disponible para el enunciado (deja espacio al círculo + margen)
+      var xPreg    = marginLeft + circR * 2 + 5;
+      var pregWidth = W - marginRight - xPreg - 2;
 
       // Estimar altura necesaria
-      var lineasPreg = splitTexto(doc, item.pregunta, contentW - 24);
-      var alturaTotal = 6 + lineasPreg.length * lineH;
+      var lineasPreg = splitTexto(doc, item.pregunta, pregWidth);
+      var alturaCirc = circR * 2 + 4;
+      var alturaPreg = lineasPreg.length * lineH;
+      var alturaBloque = Math.max(alturaCirc, alturaPreg) + 4;
       item.opciones.forEach(function (opc) {
         var lns = splitTexto(doc, letraOpcion(item.opciones.indexOf(opc)) + ') ' + opc, contentW - indentOpc - 4);
-        alturaTotal += lns.length * lineH + 2;
+        alturaBloque += lns.length * lineH + 1;
       });
-      alturaTotal += 18; // padding inferior
+      alturaBloque += 12; // padding inferior
 
       // Nueva página si no cabe
-      if (y + alturaTotal > H - marginBottom) {
+      if (y + alturaBloque > H - marginBottom) {
         nuevaPagina();
       }
 
       // Círculo con número de pregunta
+      var circCX = marginLeft + circR;
+      var circCY = y + circR + 2;
       doc.setFillColor(COLOR_NUM_BG[0], COLOR_NUM_BG[1], COLOR_NUM_BG[2]);
-      doc.circle(marginLeft + circR, y + circR + 1, circR + 1, 'F');
+      doc.circle(circCX, circCY, circR, 'F');
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(FSnum);
       doc.setTextColor(255, 255, 255);
-      var numStr = String(item.numero);
-      doc.text(numStr, marginLeft + circR + 1, y + circR + 4, { align: 'center' });
+      doc.text(numStr, circCX, circCY + FSnum * 0.35, { align: 'center' });
 
-      // Enunciado de la pregunta
+      // Enunciado de la pregunta (alineado al top del círculo)
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(FSpregunta);
       doc.setTextColor(30, 30, 30);
-      var xPreg = marginLeft + 16;
+      var yPregStart = y + lineH;
       lineasPreg.forEach(function (linea, li) {
-        doc.text(linea, xPreg, y + (li + 1) * lineH);
+        doc.text(linea, xPreg, yPregStart + li * lineH);
       });
 
-      y += lineasPreg.length * lineH + 6;
+      y += Math.max(alturaCirc, lineasPreg.length * lineH) + 2;
 
       // Opciones
       item.opciones.forEach(function (opc, oi) {
@@ -236,15 +246,15 @@
         lns.forEach(function (linea, li) {
           doc.text(linea, marginLeft + indentOpc, y + li * lineH + lineH);
         });
-        y += lns.length * lineH + 2;
+        y += lns.length * lineH + 1;
       });
 
       // Línea separadora
-      y += 6;
+      y += 4;
       doc.setDrawColor(COLOR_LINEA[0], COLOR_LINEA[1], COLOR_LINEA[2]);
       doc.setLineWidth(0.4);
       doc.line(marginLeft, y, W - marginRight, y);
-      y += 10;
+      y += 7;
     });
 
     numerarPaginas();
@@ -321,9 +331,11 @@
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(6.5);
       doc.setTextColor(80, 80, 80);
+      // Centrar verticalmente: baseline = cabeceraY + cabeceraH/2 + fontSize*0.35
+      var cabeceraTextY = cabeceraY + cabeceraH / 2 + 6.5 * 0.35;
       for (var oi = 0; oi < OPCIONES; oi++) {
         var bx = colX + numW + oi * bubSep + bubSep / 2;
-        doc.text(letraOpcion(oi), bx, cabeceraY + 9, { align: 'center' });
+        doc.text(letraOpcion(oi), bx, cabeceraTextY, { align: 'center' });
       }
     }
 
