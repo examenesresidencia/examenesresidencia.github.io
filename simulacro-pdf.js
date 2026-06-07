@@ -1,4 +1,4 @@
-// simulacro-pdf.js v3
+// simulacro-pdf.js v4
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -123,15 +123,11 @@
     var currentPage = 1;
     var currentCol  = 0;   // 0 = izquierda, 1 = derecha
     var y           = marginTop;
-    var headerDrawn = false;  // ¿ya dibujamos el encabezado de esta página?
+    var headerDrawn = false;
+    var colStartY   = marginTop; // y de inicio compartido por ambas columnas en la página actual
 
     function colX(col) {
       return marginLeft + col * (colW + COL_GAP);
-    }
-
-    // Altura disponible en la columna actual
-    function availH() {
-      return H - marginBottom - y;
     }
 
     function numerarPaginas() {
@@ -148,20 +144,18 @@
     // Avanzar a la columna o página siguiente
     function avanzarColumna() {
       if (currentCol === 0) {
-        // Pasar a columna derecha, misma página
+        // Pasar a columna derecha de la MISMA página:
+        // colStartY ya fue fijado cuando empezó esta página, no lo modificamos
         currentCol = 1;
-        y = marginTop;
-        // Si hay encabezado en esta página, y debe empezar después de él
-        // El encabezado ya fue dibujado; la col derecha empieza en marginTop
-        // (el encabezado ocupa todo el ancho, la col derecha empieza igual)
+        y = colStartY;
       } else {
         // Nueva página, columna izquierda
         doc.addPage();
         currentPage++;
         currentCol = 0;
-        y = marginTop;
         headerDrawn = false;
-        dibujarBandaPagina();
+        dibujarBandaPagina();  // pone y = 28
+        colStartY = y;         // fijar inicio de columnas para esta nueva página
       }
     }
 
@@ -225,6 +219,7 @@
 
     // Las preguntas arrancan inmediatamente debajo, en 2 columnas
     y = pieInstrY + 18;
+    colStartY = y;         // la columna derecha también empieza aquí en pág 1
     headerDrawn = true;   // la pág 1 ya tiene su propio header
 
     // ── Renderizar preguntas en 2 columnas ──
