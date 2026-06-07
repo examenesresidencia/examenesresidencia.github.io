@@ -1,4 +1,4 @@
-// simulacro-pdf.js v7
+// simulacro-pdf.js v6
 // Genera 3 PDFs del simulacro en curso:
 // ACCESO RESTRINGIDO: solo disponible para el administrador.
 //   1. Cuadernillo de preguntas (con opciones a/b/c/d)
@@ -41,13 +41,27 @@
   // ── Cargar docx.js dinámicamente ───────────────────────────────────────
   function cargarDocx(callback) {
     if (window.docx) { callback(); return; }
-    var script = document.createElement('script');
-    script.src = 'https://unpkg.com/docx@8.5.0/build/index.js';
-    script.onload = function () { callback(); };
-    script.onerror = function () {
-      alert('No se pudo cargar la librería de Word. Verificá tu conexión a internet.');
-    };
-    document.head.appendChild(script);
+    var cdns = [
+      'https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js',
+      'https://unpkg.com/docx@8.5.0/build/index.umd.js',
+      'https://cdn.jsdelivr.net/npm/docx@7.6.0/build/index.umd.js',
+      'https://unpkg.com/docx@7.6.0/build/index.umd.js'
+    ];
+    function intentar(i) {
+      if (i >= cdns.length) {
+        alert('No se pudo cargar la librería de Word. Verificá tu conexión a internet.');
+        return;
+      }
+      var script = document.createElement('script');
+      script.src = cdns[i];
+      script.onload = function () {
+        if (window.docx) { callback(); }
+        else { intentar(i + 1); }
+      };
+      script.onerror = function () { intentar(i + 1); };
+      document.head.appendChild(script);
+    }
+    intentar(0);
   }
 
   // ── Utilidades ──────────────────────────────────────────────────────────
