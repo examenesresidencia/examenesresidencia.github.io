@@ -1,84 +1,4 @@
-//PRUEBA 32  <--  MODIFICAR ESTA LíNEA, EL NÚMERO CRECIENTE CON CADA ACTUALIZACIÓN
-// Fix v30: Sincronización en tiempo real de reclasificaciones para usuarios activos.
-//   1. _aplicarReclasificacionLocal: nueva función que recibe el evento de reclasificación
-//      via el listener onSnapshot existente (meta/contentVersion), elimina quirúrgicamente
-//      la pregunta del array local preguntasPorSeccion, actualiza IDB/localStorage,
-//      reindexea unansweredOrder/answeredOrder/graded, anima la desaparición del nodo DOM
-//      y actualiza el contador 📊 N/total. 0 lecturas extra a Firestore.
-//   2. _despacharCambio en onSnapshot ahora maneja el flag esReclasificacion=true
-//      despachando _aplicarReclasificacionLocal en lugar de recargar toda la sección.
-//      (reclasificador-preguntas.js agrega el paso 5e que llama _bumpContentVersion
-//       con ese flag después de completar la reclasificación en Firestore).
-//   1. _bumpContentVersion ahora envía `qIndexes` (array) y `nuevasCorrectas`
-//      (array de objetos {qIndex, correcta}) además de los campos legacy,
-//      resolviendo el bug donde el listener recibía nuevasCorrectas=[] y por
-//      lo tanto _recalificarPregunta nunca se ejecutaba en el cliente.
-//   2. _updatePreguntaEnDOM ahora llama _recalificarPregunta cuando la pregunta
-//      ya fue respondida y cambió la correcta, repintando verde/rojo al instante.
-//   3. Admin self-skip: el listener onSnapshot del admin omite su propia edición
-//      (identificada por window._lastAdminSaveVersion) para evitar un double-patch
-//      que sobreescribía el DOM ya actualizado en el save handler.
-// Fix v24: TRES mejoras profesionales en un solo bloque:
-//   1. mostrarExplicacion() siempre sincroniza contenido desde preguntasPorSeccion
-//      antes de mostrar, garantizando que el usuario ve la explicación actualizada
-//      incluso si el admin editó mientras el panel estaba cerrado.
-//   2. Toast de edición admin ahora especifica el nombre de la especialidad editada
-//      (antes decía solo "Se actualizó una pregunta de {id}").
-//   3. Migración de preguntas fuera de secuencia: toast incluye nombre de especialidad
-//      + la pregunta migrada navega automáticamente a la página de destino (el paginador
-//      re-renderiza la página secuencial correcta). No afecta respuestas ya respondidas,
-//      contadores ni orden de otras preguntas.
-// Fix v22: LIMPIEZA automática en getDisplayOrder — 4 correcciones en un solo bloque:
-//   1. Elimina de answeredOrder entradas sin graded=true (corrupción por reordenamiento)
-//   2. Elimina duplicados en answeredOrder (mismo idx dos veces)
-//   3. Corrige _contarRespuestas: cuenta solo graded===true (evita que Firestore gane merge)
-//   4. Elimina índices fuera de rango (preguntas "fantasma" borradas que dejaron huérfanos)
-//      También limpia graded/answers/shuffleMap de esos índices fantasma.
-// Fix v9: unansweredOrder ya no se borra al usarse — se persiste permanentemente durante el intento.
-//         Así las preguntas sin responder conservan su lugar, número y orden de opciones en TODA
-//         recarga posible (F5, login, volver al menú, recarga por edición del admin, etc.).
-//         El orden aleatorio se genera UNA SOLA VEZ al primer ingreso y queda congelado.
-// Fix v9: se elimina toda la lógica de extrapolación de preguntas desde exámenes únicos/UBA/compilados
-//         hacia especialidades. Cada cuestionario de especialidad ahora solo contiene sus propias preguntas.
-// Fix: preguntas sin responder se re-mezclan en cada entrada a la sección (nuevo orden aleatorio
-//      cada vez que se recarga o se vuelve desde el menú/otra sección). Las preguntas respondidas
-//      permanecen fijas arriba con sus respuestas correctamente restauradas.
-// Fix: pérdida de progreso al cerrar pestaña/navegador — beforeunload sella state+timestamp en localStorage
-// Fix: próximo login no descartaba la nube por quiz_progress_ts desincronizado — ahora se limpia en logout
-// Fix: fbSyncProgressFromCloud usa comparación por contenido (cantidad de respuestas) además del timestamp
-// Fix: si local gana el merge, sube inmediatamente a Firestore en vez de esperar al logout
-// Fix: quiz_beforeunload_pending se procesa en fbSyncProgressFromCloud y no se borra antes en el evento
-// Fix: window._contentVersionUnsubscribes → _contentVersionUnsubscribes (usar variable del closure)
-// Fix: progreso no se pierde al cerrar sesión por sesión duplicada en otro dispositivo
-// Fix: _fbLogoutSilencioso ahora guarda debounce pendiente antes del signOut
-// Fix: progreso no se pierde al cerrar sesión por inactividad
-// Fix: _inactCerrar ahora usa window.fbLogout (wrapper completo) en lugar del fbLogout del closure
-// Fix: fbLogoutConModulos fuerza el guardado en Firestore si hay debounce pendiente al cerrar sesión
-// Fix: panel de debug movido a Admin como switch ON/OFF (apagado por defecto)
-// NUEVO: permiso de selección/copia de texto para admin y email autorizado
-// Fix: panel admin sin estilos al recargar página con sesión activa
-// Fix: módulo exportar/importar progreso eliminado
-// Fix: imagen en explicación muestra error visible si no se encuentra en GitHub Pages
-// Fix: scroll preservado al guardar desde admin (no salta a posición del admin)
-// Fix: explicaciones se cierran al iniciar sesión, cerrar sesión, recargar, volver al menú
-// Fix: modal de edición admin se veía roto al recargar página con sesión activa
-// NUEVO: buscador de preguntas duplicadas en Firestore con eliminación directa
-// Optimizaciones Firebase: caché localStorage 24h para preguntas, sync automático en tiempo real (debounce 1.5s)
-/* ========== script.js ========== */
-/* Requisitos:
-   1) Orden de preguntas ALEATORIO al inicio; orden de opciones aleatorio por pregunta.
-      - Las preguntas se mezclan al inicio de cada intento
-      - Las preguntas respondidas quedan arriba
-      - Las preguntas sin responder se mantienen abajo en orden aleatorio
-   2) Progreso y selecciones persistentes en localStorage hasta completar el cuestionario.
-   3) "Mostrar puntuación total": exige todas respondidas; si faltan, lista cuáles faltan.
-   4) Al completar y presionar "Mostrar puntuación total" y luego "Volver al menú principal",
-      se limpia el estado para permitir un nuevo intento.
-   5) Cada pregunta tiene botón "Responder"; pinta verde/rojo y marca "✅/❌".
-   6) Botón flotante "Ver mi progreso" con ventana flotante.
-   7) Mantener posición de scroll al regresar al menú principal.
-   8) Navegación con botones del navegador (atrás/adelante).
-*/
+//PRUEBA 32  
 
 (function () {
   // ── Lightbox de imágenes ────────────────────────────────────────────
@@ -10683,7 +10603,7 @@ function fbSaveProgressToCloud() {
   // ════════════════════════════════════════════════════════════════
   // MÓDULO: CONSOLIDACIÓN SECUENCIAL DE PROGRESO
   // ════════════════════════════════════════════════════════════════
-  // Cuando el usuario "soloquimicayaruqui" tiene preguntas respondidas
+  // Cuando el usuario "admin.14r@gmail.com" tiene preguntas respondidas
   // dispersas (consecuencia de un bug anterior al borrar/reclasificar),
   // este módulo permite reordenar el progreso de forma que todas las
   // respondidas queden compactadas al inicio.
@@ -10692,7 +10612,7 @@ function fbSaveProgressToCloud() {
   // una pregunta fuera de la secuencia activa (en una página no contigua).
   // ════════════════════════════════════════════════════════════════
 
-  const EMAIL_COADMIN_CONSOLIDACION = 'soloquimicayaruqui@gmail.com';
+  const EMAIL_COADMIN_CONSOLIDACION = 'admin.14r@gmail.com';
 
   /**
    * Retorna la "posición secuencial" de un índice respondido:
