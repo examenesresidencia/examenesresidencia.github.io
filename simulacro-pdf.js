@@ -649,74 +649,30 @@
       spacing: { before: 0, after: 180 }
     }));
 
-    // Tabla de 2 columnas con las preguntas
-    function hacerCelda(item) {
-      if (!item) {
-        return new D.TableCell({
-          children: [ parrafoVacio(0) ],
-          borders: {
-            top: { style: D.BorderStyle.NONE }, bottom: { style: D.BorderStyle.NONE },
-            left: { style: D.BorderStyle.NONE }, right: { style: D.BorderStyle.NONE }
-          },
-          margins: { top: 80, bottom: 80, left: 140, right: 140 }
-        });
-      }
-
-      var ps = [];
-
+    // Preguntas en columna única
+    preguntas.forEach(function (item) {
       // Número + enunciado
-      ps.push(new D.Paragraph({
+      parrafos.push(new D.Paragraph({
         children: [
           run(String(item.numero) + '\u2003', { bold: true, size: 17, color: TEAL }),
           run(item.pregunta, { bold: true, size: 17, color: '1A1A1A' })
         ],
-        spacing: { before: 60, after: 60 }
+        spacing: { before: 80, after: 60 },
+        border: { top: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' } }
       }));
 
       // Opciones
       item.opciones.forEach(function (opc, oi) {
-        ps.push(new D.Paragraph({
+        parrafos.push(new D.Paragraph({
           children: [
             run(letraOpcion(oi) + ') ', { bold: true, size: 16, color: TEAL_DARK }),
             run(opc, { size: 16, color: GRIS })
           ],
           spacing: { before: 18, after: 18 },
-          indent: { left: 220 }
+          indent: { left: 300 }
         }));
       });
-
-      ps.push(parrafoVacio(60));
-
-      return new D.TableCell({
-        children: ps,
-        borders: {
-          top:    { style: D.BorderStyle.NONE },
-          bottom: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' },
-          left:   { style: D.BorderStyle.NONE },
-          right:  { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' }
-        },
-        margins: { top: 80, bottom: 80, left: 140, right: 140 },
-        verticalAlign: D.VerticalAlign.TOP
-      });
-    }
-
-    var filas = [];
-    for (var i = 0; i < preguntas.length; i += 2) {
-      filas.push(new D.TableRow({
-        children: [ hacerCelda(preguntas[i]), hacerCelda(preguntas[i + 1] || null) ]
-      }));
-    }
-
-    parrafos.push(new D.Table({
-      rows: filas,
-      width: { size: 100, type: D.WidthType.PERCENTAGE },
-      borders: {
-        insideH: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' },
-        insideV: { style: D.BorderStyle.SINGLE, size: 4, color: 'DDDDDD' },
-        top: { style: D.BorderStyle.NONE }, bottom: { style: D.BorderStyle.NONE },
-        left: { style: D.BorderStyle.NONE }, right: { style: D.BorderStyle.NONE }
-      }
-    }));
+    });
 
     // Construir y descargar
     var documento = new D.Document({
