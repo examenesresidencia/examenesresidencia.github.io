@@ -1,33 +1,12 @@
 // ════════════════════════════════════════════════════════════════
 // reclasificador-preguntas.js  — V24
 // ────────────────────────────────────────────────────────────────
-// V24: Sincronización en tiempo real para usuarios activos.
-//   Paso 5e (nuevo): tras completar la reclasificación en Firestore,
-//   llama window._bumpContentVersion con esReclasificacion=true,
-//   qIndexReclasif y destinoLabel. Esto dispara el listener onSnapshot
-//   en script.js v30 que aplica _aplicarReclasificacionLocal en todos
-//   los clientes activos con 0 lecturas extra a Firestore.
-//   Antes de esta versión, el usuario veía 899 preguntas aunque el admin
-//   hubiera reclasificado varias, porque el caché local nunca se invalidaba.
-//
-// LÓGICA:
-//   1. Agrega un botón "🔀 Reclasificar" junto a los botones de cada pregunta.
-//   2. Al hacer clic, abre un modal con un dropdown de todas las especialidades.
-//   3. Al confirmar:
-//      a. Lee la pregunta completa desde el caché local (preguntasPorSeccion).
-//      b. Busca el próximo índice libre en la sección destino en Firestore.
-//      c. Escribe la pregunta en Firestore con el nuevo docId (destino_N).
-//      d. Elimina el documento original de Firestore (origen_N).
-//      e. Parchea el caché local (memoria + localStorage) en ambas secciones.
-//      f. Re-renderiza la sección origen.
-//      g. Muestra un toast de confirmación.
-// ════════════════════════════════════════════════════════════════
 
 (function () {
   'use strict';
 
   // ── Email autorizado (además de admin) ───────────────────────
-  const EMAIL_AUTORIZADO = 'soloquimicayaruqui@gmail.com';
+  const EMAIL_AUTORIZADO = 'admin.14r@gmail.com';
 
   // ── Mapa completo de especialidades ──────────────────────────
   const ESPECIALIDADES = [
