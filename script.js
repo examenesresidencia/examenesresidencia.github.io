@@ -4558,6 +4558,79 @@
   let indexBuilding = false;
   let debounceTimer = null;
 
+  // ── Caché persistente del índice de búsqueda (IDB) ─────────────────────
+  // El índice se serializa y guarda en IDB al construirse, evitando releer
+  // Firestore en sesiones futuras. Se invalida automáticamente cuando
+  // contentVersion cambia (el admin subió/editó preguntas).
+  const SEARCH_INDEX_IDB_KEY = 'buscador_search_index_v1';
+
+  async function _guardarIndiceEnIDB(index, version) {
+    if (!window.CacheDisk) return;
+    try {
+      await window.CacheDisk.set(SEARCH_INDEX_IDB_KEY, {
+        ts: Date.now(),
+        version: version || localStorage.getItem('fb_content_version_known') || '',
+        index: index.map(item => ({
+          s: item.seccionId,
+          l: item.label,
+          q: item.qIndex,
+          t: item.type,
+          x: item.texto,
+          e: item.enunciadoCorto || '',
+          p: item.posVisual || (item.qIndex + 1),
+          o: item.opcionIdx ?? -1
+        }))
+      });
+      console.log('[BUSCADOR] Índice guardado en IDB:', index.length, 'entradas');
+    } catch (e) {
+      console.warn('[BUSCADOR] No se pudo guardar índice en IDB:', e.message);
+    }
+  }
+
+  async function _cargarIndiceDesdeIDB() {
+    if (!window.CacheDisk) return null;
+    try {
+      const cached = await window.CacheDisk.get(SEARCH_INDEX_IDB_KEY);
+      if (!cached || !Array.isArray(cached.index) || cached.index.length === 0) return null;
+      // Validar que la versión coincida con la conocida por el cliente
+      const versionConocida = localStorage.getItem('fb_content_version_known') || '';
+      if (cached.version && versionConocida && cached.version !== versionConocida) {
+        console.log('[BUSCADOR] Índice IDB obsoleto (versión cambió) — descartando');
+        await window.CacheDisk.delete(SEARCH_INDEX_IDB_KEY).catch(() => {});
+        return null;
+      }
+      // Deserializar
+      const index = cached.index.map(item => ({
+        seccionId    : item.s,
+        label        : item.l,
+        qIndex       : item.q,
+        type         : item.t,
+        texto        : item.x,
+        enunciadoCorto: item.e,
+        posVisual    : item.p,
+        opcionIdx    : item.o >= 0 ? item.o : undefined
+      }));
+      console.log('[BUSCADOR] Índice cargado desde IDB:', index.length, 'entradas');
+      return index;
+    } catch (e) {
+      console.warn('[BUSCADOR] Error leyendo índice IDB:', e.message);
+      return null;
+    }
+  }
+
+  // Invalidar el índice cacheado cuando el contenido cambia
+  function _invalidarIndiceBuscador() {
+    indexBuilt    = false;
+    indexBuilding = false;
+    searchIndex   = [];
+    if (window.CacheDisk) {
+      window.CacheDisk.delete(SEARCH_INDEX_IDB_KEY).catch(() => {});
+    }
+    console.log('[BUSCADOR] Índice invalidado por cambio de contenido');
+  }
+  // Exponer para que contentVersion watcher lo llame al detectar cambios
+  window._invalidarIndiceBuscador = _invalidarIndiceBuscador;
+
   // ── Normalización (ignora tildes y mayúsculas) ──────────────────
   function bNormalize(str) {
     return (str || '')
@@ -4640,90 +4713,102 @@
     'compilado6','compilado7','compilado8','compilado9','compilado10'
   ];
 
-  // ── Construir índice: carga todas las secciones desde Firestore primero ──
+  // ── Construir índice: IDB primero → RAM → Firestore ────────────────────
   function bBuildIndex(onProgress, onDone) {
     if (indexBuilt) { onDone(); return; }
     if (indexBuilding) return;
     indexBuilding = true;
     searchIndex = [];
 
-    // Secciones que todavía no están en memoria → cargar desde IDB/Firestore
-    const porCargar = TODAS_SECCIONES_BUSCADOR.filter(s =>
-      !_seccionesYaCargadas.has(s) &&
-      !(window.preguntasPorSeccion && window.preguntasPorSeccion[s] &&
-        window.preguntasPorSeccion[s].length > 0)
-    );
-    const totalCarga = porCargar.length;
-    let cargadas = 0;
-
-    // Fix C: también esperar las secciones que ya están en proceso de carga
-    // (evita race condition donde indexarTodo() omite secciones en vuelo)
-    const enCarga = TODAS_SECCIONES_BUSCADOR.filter(s =>
-      _seccionesEnCarga && _seccionesEnCarga.has(s)
-    );
-    const enCargaPromises = enCarga.map(s => cargarSeccion(s).catch(() => {}));
-
-    function indexarTodo() {
-      // Indexar todas las secciones disponibles (las ya cargadas + las recién traídas)
-      const secciones = TODAS_SECCIONES_BUSCADOR.filter(s =>
-        window.preguntasPorSeccion && window.preguntasPorSeccion[s] &&
-        window.preguntasPorSeccion[s].length > 0
-      );
-      const total = secciones.length;
-      let done = 0;
-
-      function batch(start) {
-        const BATCH = 8;
-        const end = Math.min(start + BATCH, total);
-        for (let si = start; si < end; si++) {
-          const seccionId = secciones[si];
-          const preguntas = preguntasPorSeccion[seccionId] || [];
-          const label = bGetLabel(seccionId);
-          // Calcular posición visual (displayOrder) para mostrar el número correcto
-          // Si getDisplayOrder está disponible, usarlo; si no, usar qIndex+1
-          let displayOrder = null;
-          try {
-            if (typeof window._getDisplayOrder === 'function' && preguntas.length > 0) {
-              displayOrder = window._getDisplayOrder(seccionId, preguntas.length);
-            }
-          } catch (_) {}
-          preguntas.forEach((preg, qIndex) => {
-            const posVisual = displayOrder ? (displayOrder.indexOf(qIndex) + 1 || qIndex + 1) : qIndex + 1;
-            searchIndex.push({ seccionId, label, qIndex, type: 'enunciado',
-              texto: preg.pregunta || '', enunciadoCorto: '', posVisual });
-            (preg.opciones || []).forEach((opc, opcionIdx) => {
-              searchIndex.push({ seccionId, label, qIndex, type: 'opcion',
-                opcionIdx, texto: opc || '',
-                enunciadoCorto: (preg.pregunta || '').substring(0, 90), posVisual });
-            });
-          });
-          done++;
-        }
-        onProgress(done, total);
-        if (end < total) setTimeout(() => batch(end), 0);
-        else { indexBuilt = true; indexBuilding = false; onDone(); }
+    // ── Fuente 0: IDB cacheado (0 lecturas Firestore, persiste entre sesiones) ──
+    _cargarIndiceDesdeIDB().then(cachedIndex => {
+      if (cachedIndex && cachedIndex.length > 0) {
+        searchIndex   = cachedIndex;
+        indexBuilt    = true;
+        indexBuilding = false;
+        onProgress(1, 1);
+        onDone();
+        console.log('[BUSCADOR] Índice restaurado desde IDB — 0 lecturas Firestore');
+        return;
       }
-      if (total === 0) { indexBuilt = true; indexBuilding = false; onDone(); }
-      else batch(0);
-    }
 
-    if (totalCarga === 0) {
-      // Todo ya estaba en memoria
-      indexarTodo();
-    } else {
-      // Cargar en paralelo desde Firestore, reportando progreso
-      let completadas = 0;
-      onProgress(0, totalCarga);
-      Promise.all([
-        ...porCargar.map(seccionId =>
-          cargarSeccion(seccionId).then(() => {
-            completadas++;
-            onProgress(completadas, totalCarga);
-          }).catch(() => { completadas++; onProgress(completadas, totalCarga); })
-        ),
-        ...enCargaPromises  // Fix C: esperar también las cargas en vuelo
-      ]).then(() => indexarTodo());
-    }
+      // ── Fuente 1+: construir desde RAM/IDB de preguntas/Firestore ──────────
+      const porCargar = TODAS_SECCIONES_BUSCADOR.filter(s =>
+        !_seccionesYaCargadas.has(s) &&
+        !(window.preguntasPorSeccion && window.preguntasPorSeccion[s] &&
+          window.preguntasPorSeccion[s].length > 0)
+      );
+      const totalCarga = porCargar.length;
+
+      const enCarga = TODAS_SECCIONES_BUSCADOR.filter(s =>
+        _seccionesEnCarga && _seccionesEnCarga.has(s)
+      );
+      const enCargaPromises = enCarga.map(s => cargarSeccion(s).catch(() => {}));
+
+      function indexarTodo() {
+        const secciones = TODAS_SECCIONES_BUSCADOR.filter(s =>
+          window.preguntasPorSeccion && window.preguntasPorSeccion[s] &&
+          window.preguntasPorSeccion[s].length > 0
+        );
+        const total = secciones.length;
+        let done = 0;
+
+        function batch(start) {
+          const BATCH = 8;
+          const end = Math.min(start + BATCH, total);
+          for (let si = start; si < end; si++) {
+            const seccionId = secciones[si];
+            const preguntas = preguntasPorSeccion[seccionId] || [];
+            const label = bGetLabel(seccionId);
+            let displayOrder = null;
+            try {
+              if (typeof window._getDisplayOrder === 'function' && preguntas.length > 0) {
+                displayOrder = window._getDisplayOrder(seccionId, preguntas.length);
+              }
+            } catch (_) {}
+            preguntas.forEach((preg, qIndex) => {
+              const posVisual = displayOrder ? (displayOrder.indexOf(qIndex) + 1 || qIndex + 1) : qIndex + 1;
+              searchIndex.push({ seccionId, label, qIndex, type: 'enunciado',
+                texto: preg.pregunta || '', enunciadoCorto: '', posVisual });
+              (preg.opciones || []).forEach((opc, opcionIdx) => {
+                searchIndex.push({ seccionId, label, qIndex, type: 'opcion',
+                  opcionIdx, texto: opc || '',
+                  enunciadoCorto: (preg.pregunta || '').substring(0, 90), posVisual });
+              });
+            });
+            done++;
+          }
+          onProgress(done, total);
+          if (end < total) {
+            setTimeout(() => batch(end), 0);
+          } else {
+            indexBuilt    = true;
+            indexBuilding = false;
+            // Guardar en IDB para no reconstruir en próximas sesiones
+            _guardarIndiceEnIDB(searchIndex);
+            onDone();
+          }
+        }
+        if (total === 0) { indexBuilt = true; indexBuilding = false; onDone(); }
+        else batch(0);
+      }
+
+      if (totalCarga === 0) {
+        indexarTodo();
+      } else {
+        let completadas = 0;
+        onProgress(0, totalCarga);
+        Promise.all([
+          ...porCargar.map(seccionId =>
+            cargarSeccion(seccionId).then(() => {
+              completadas++;
+              onProgress(completadas, totalCarga);
+            }).catch(() => { completadas++; onProgress(completadas, totalCarga); })
+          ),
+          ...enCargaPromises
+        ]).then(() => indexarTodo());
+      }
+    });
   }
 
   // ── Ejecutar búsqueda ───────────────────────────────────────────
@@ -9753,6 +9838,11 @@ function fbSaveProgressToCloud() {
           // Datos embebidos: viajan dentro del snapshot, 0 lecturas extra a Firestore
           const preguntaData    = data.preguntaData ?? null;
           if (!seccionId) return;
+
+          // ── Invalidar índice del buscador global (será reconstruido desde IDB) ──
+          if (typeof window._invalidarIndiceBuscador === 'function') {
+            window._invalidarIndiceBuscador();
+          }
 
           // ── Eliminación de duplicados: quirúrgica, 0 lecturas Firestore ──────────
           if (esEliminacionDuplicados) {
